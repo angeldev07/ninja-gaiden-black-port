@@ -15,8 +15,7 @@ actualiza al cerrar cada sesión, y el detalle de cada cierre queda en [[log]].
 | **H1** Mapa del disco y del binario | Reporte del XBE (versión del XDK, librerías, imports del kernel, secciones) e inventario de los `.afs` | [[xbe-default]] y [[afs]] con datos `VERIFIED`; herramientas con tests en verde | **hecho** (2026-10-20, tag `milestone/h1`) |
 | **H2** Primera textura | Una textura del juego exportada a PNG, por ejemplo la de Ryu | Formato de textura documentado en `formats/`; exportador con test | **hecho** (2026-10-20): 19 texturas de Ryu, menú y fuentes ([[kmd]], [[xpr0]]) |
 | **H3** Primer modelo | Modelo de Ryu exportado a glTF/OBJ y visible en un visor | Formato de modelo documentado; exportador | **hecho** (2026-10-20): Ryu, Ayane, Murai y armas de Doku en glTF ([[kmd]]) |
-| **H4** Primer sonido | Una pista de `bgm.afs` reproducida como WAV | Formato de audio documentado | **hecho** (2026-10-20): música (bgm), voces (sse), efectos (.wva) y XWB en WAV ([[adx]], [[wva]]). Falta `movie
-inja.aix` (AIX multipista) |
+| **H4** Primer sonido | Una pista de `bgm.afs` reproducida como WAV | Formato de audio documentado | **hecho** (2026-10-20): música (bgm), voces (sse), efectos (.wva) y XWB en WAV ([[adx]], [[wva]]). Falta `movie/ninja.aix` (AIX multipista) |
 | **H5** Proyecto Ghidra y firmas del SDK | Proyecto Ghidra persistente; librerías del XDK identificadas por firmas; % de funciones con nombre | Métrica de cobertura en [[xbe-default]] | pendiente |
 | **H6** Arranque nativo | `default.xbe` corriendo en un proceso Win32 de 32 bits hasta la primera llamada al kernel sin implementar, con log de las llamadas | Log reproducible; kernel HLE mínimo | pendiente |
 | **H7** Primer frame | Un frame del juego (logo o pantalla de carga) en una ventana de PC | D3D8 mínimo sobre GL/Vulkan | pendiente |
