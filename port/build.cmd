@@ -15,7 +15,7 @@ set "CFLAGS=/nologo /W4 /WX /O2 /Zi /MT /GS /utf-8 /D_CRT_SECURE_NO_WARNINGS /I"
 
 rem 1) ngb-core.dll: el loader, el kernel emulado y los stubs generados.
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\core.pdb" /c ^
-  "%SRC%\main.c" "%SRC%\symbols.c" "%SRC%\xbe.c" "%SRC%\memory.c" "%SRC%\log.c" "%SRC%\thread.c" "%SRC%\crash.c" ^
+  "%SRC%\main.c" "%SRC%\symbols.c" "%SRC%\xbe.c" "%SRC%\memory.c" "%SRC%\log.c" "%SRC%\watch.c" "%SRC%\thread.c" "%SRC%\crash.c" ^
   "%SRC%\kernel\stubs.c" "%SRC%\kernel\dispatch.c" "%SRC%\kernel\data.c" ^
   "%SRC%\kernel\impl_mm.c" "%SRC%\kernel\impl_rtl.c" "%SRC%\kernel\impl_ke.c" ^
   "%SRC%\kernel\impl_ps.c" "%SRC%\kernel\impl_io.c" "%SRC%\kernel\impl_misc.c" "%SRC%\kernel\hostpath.c" ^
@@ -25,14 +25,14 @@ cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\core.pdb" /c ^
   "%SRC%\gfx\present.c" || exit /b 1
 link /nologo /DLL /DEBUG /OUT:"%OUT%\ngb-core.dll" /PDB:"%OUT%\ngb-core.pdb" ^
   /BASE:0x60000000 /LARGEADDRESSAWARE ^
-  "%OUT%\obj\main.obj" "%OUT%\obj\symbols.obj" "%OUT%\obj\xbe.obj" "%OUT%\obj\memory.obj" "%OUT%\obj\log.obj" ^
+  "%OUT%\obj\main.obj" "%OUT%\obj\symbols.obj" "%OUT%\obj\xbe.obj" "%OUT%\obj\memory.obj" "%OUT%\obj\log.obj" "%OUT%\obj\watch.obj" ^
   "%OUT%\obj\thread.obj" "%OUT%\obj\crash.obj" "%OUT%\obj\stubs.obj" "%OUT%\obj\dispatch.obj" ^
   "%OUT%\obj\data.obj" "%OUT%\obj\impl_mm.obj" "%OUT%\obj\impl_rtl.obj" "%OUT%\obj\impl_ke.obj" ^
   "%OUT%\obj\impl_ps.obj" "%OUT%\obj\impl_io.obj" "%OUT%\obj\impl_misc.obj" "%OUT%\obj\hostpath.obj" ^
   "%OUT%\obj\sha1.obj" "%OUT%\obj\vp.obj" "%OUT%\obj\nv2a.obj" "%OUT%\obj\pgraph.obj" "%OUT%\obj\pushbuf.obj" "%OUT%\obj\png.obj" ^
   "%OUT%\obj\nv097_names.obj" "%OUT%\obj\raster.obj" ^
   "%OUT%\obj\input.obj" "%OUT%\obj\xapi_hle.obj" ^
-  "%OUT%\obj\present.obj" kernel32.lib shell32.lib user32.lib gdi32.lib || exit /b 1
+  "%OUT%\obj\present.obj" kernel32.lib shell32.lib user32.lib gdi32.lib winmm.lib || exit /b 1
 
 rem 2) ngb-loader.exe: base fija 0x10000 + BSS que reserva la imagen del XBE. Sin CRT.
 cl /nologo /W4 /WX /O1 /GS- /Zi /utf-8 /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\stub.pdb" /c "%SRC%\loader_stub.c" || exit /b 1

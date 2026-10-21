@@ -504,6 +504,7 @@ static void __stdcall dpc_thread(uint32_t unused) {
             run_dpc(fire[i]);
         vblank_tick(now, &next);
         ngb_apu_tick();
+        ngb_watch_tick();
         if (next > now + 16)
             next = now + 16;
         WaitForSingleObject(g_dpc_wake, (DWORD)(next > now ? next - now : 0));

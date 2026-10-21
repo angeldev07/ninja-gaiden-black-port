@@ -53,6 +53,7 @@ void ngb_kernel_init(void);
 size_t ngb_kernel_impl_count(void);
 int ngb_kernel_is_implemented(uint32_t ordinal);
 void ngb_kernel_summary(void); /* llamadas por función, al log */
+unsigned long ngb_kernel_call_seq(void); /* llamadas al kernel hasta ahora */
 
 /* data.c: almacenamiento de las variables exportadas */
 void *ngb_kdata_address(uint32_t ordinal);

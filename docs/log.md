@@ -191,3 +191,10 @@ voces de la APU), y Sofdec sincroniza el vídeo con ella. Un VP mínimo (`port/s
 métodos PIO y avanza las voces activas con el tiempo real basta para que el vídeo avance y, al terminar, el juego
 siga solo. Todavía sin sonido. El líder hizo este trabajo en paralelo al agente de render GL. Detalle en
 [[audio-apu]].
+
+## [2026-10-22] ingest | Los avisos "en bucle" son el juego a cámara lenta
+Con `--watch` (vigilancia nueva de variables del juego) se ve que no hay ninguna espera bloqueada: la caché
+termina en 1,5 s y los avisos se desplazan 0,3 px por frame, unos 38 s a 60 fps. Como el juego va a 42 fps o
+menos con el rasterizador por software, duran de 1 a 3 minutos. Se corrige con el render por GPU (H7c). Además,
+el loader pide al sistema un reloj de 1 ms (`timeBeginPeriod`). Lección: medir con `--watch` antes de suponer
+una espera. Detalle en [[gpu-nv2a]].

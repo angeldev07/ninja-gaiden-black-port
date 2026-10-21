@@ -79,6 +79,10 @@ uint64_t ngb_kcall(uint32_t ordinal, uint32_t *args, uint32_t caller) {
     return ret;
 }
 
+unsigned long ngb_kernel_call_seq(void) {
+    return (unsigned long)g_seq;
+}
+
 static uint64_t kcall(uint32_t ordinal, uint32_t *args, uint32_t caller) {
     const ngb_kexport_t *e = ngb_kexport(ordinal);
     ngb_thread_t *t = ngb_thread_current();

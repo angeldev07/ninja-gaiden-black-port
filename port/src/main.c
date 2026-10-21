@@ -12,6 +12,7 @@
 #include "ngb.h"
 
 #include <shellapi.h>
+#include <timeapi.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,6 +46,8 @@ static void usage(void) {
             "  --pgraph-frames N  frames con todos los métodos en el log de PGRAPH (3)\n"
             "  --log-cap N  líneas de log por función del kernel; luego solo se cuentan (2000)\n"
             "  --symbols CSV  nombres de funciones (CSV de Ghidra) en el log y los crashes\n"
+            "  --watch LISTA  vigila direcciones del juego (0xADDR[:1|2|4],...) y registra los "
+            "cambios\n"
             "  --input-script  pulsaciones del mando, p. ej. \"t=3s:START,t=5s:A@500ms\"\n"
             "  --no-host-input ni mando de PC ni teclado: solo el guion\n");
 }
@@ -133,6 +136,11 @@ static int parse_args(void) {
             g_ngb_opts.input_script = _strdup(argv[++i]);
         else if (!strcmp(a, "--no-host-input"))
             g_ngb_opts.no_host_input = 1;
+        else if (!strcmp(a, "--watch") && more) {
+            if (ngb_watch_parse(argv[++i]))
+                return -1;
+            g_ngb_opts.watch = argv[i];
+        }
         else if (!strcmp(a, "--log-cap") && more)
             g_ngb_opts.log_cap = strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--window"))
@@ -193,6 +201,12 @@ __declspec(dllexport) int __cdecl ngb_main(void) {
         ExitProcess(NGB_EXIT_USAGE);
     }
     fprintf(stderr, "ngb-loader: log en %s\n", g_ngb_opts.log_path);
+    /* Resolución del reloj del sistema a 1 ms. Por defecto Windows redondea cada Sleep y cada
+     * espera con timeout a 15,6 ms, y el código de la Xbox da por hechas esperas de 1 ms: el
+     * hilo de ficheros de CRI (KeDelayExecutionThread en bucle) cargaba cada bloque 15 veces
+     * más lento y la carga de la caché agotaba su timeout de 10 s una y otra vez (el bucle de
+     * los avisos). Se restaura sola al salir del proceso. */
+    timeBeginPeriod(1);
     if (xbe_load_file(g_ngb_opts.xbe_path, &g_ngb_xbe, err, sizeof err))
         ngb_stop(NGB_EXIT_USAGE, "XBE inválido: %s", err);
     log_header(&g_ngb_xbe);

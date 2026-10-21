@@ -124,10 +124,21 @@ desplazándose y fundiéndose. Es el código del juego ejecutándose de forma na
    ahora están implementadas (SHA-1 y HMAC propios en `port/src/kernel/sha1.c`, con los vectores de FIPS 180 y
    RFC 2202).
 
-**Rarezas abiertas:**
-- Los avisos se repiten con fundidos durante unos 2 minutos antes del vídeo. El vídeo arranca siempre hacia los
-  3,4 M de llamadas al kernel, no a un tiempo fijo. `INFERRED`: el juego espera algo (posiblemente el audio)
-  con un número máximo de reintentos.
+**Los avisos "en bucle" van a cámara lenta (`VERIFIED` con `--watch`):**
+- La tarea de los avisos (`0x168030`) hace, por orden:
+  1. espera a T8;
+  2. ejecuta 5 fases (tabla `0x443B1C`);
+  3. espera a la caché de `z:\demo.afs` (`FUN_00304f10`, flag `0xD7DCF9`), que termina en 1,5 s;
+  4. dibuja los avisos (`FUN_001f73b0`, estado en `0x906180`).
+- En PAL (región 4), los avisos esperan 3·60 frames (`0xE130DA = 60`) y luego desplazan el texto 0,3 px por frame
+  (`0x43018C`) hasta recorrer 640 px: unos 2 300 frames, **38 s a 60 fps**. START o A los saltan.
+- **No hay ningún bucle:** el juego corre a 42 fps o menos, porque el rasterizador por software no llega a 60, y
+  los avisos se alargan a 1-3 minutos. Los fundidos que se ven son los del propio desplazamiento.
+- La solución es el render por GPU (H7c).
+- Por el camino:
+  - el loader pide al sistema resolución de reloj de 1 ms (`timeBeginPeriod(1)`), porque sin ella cada `Sleep`
+    corto de la Xbox duraba 15,6 ms;
+  - se añadió `--watch` para vigilar variables del juego.
 
 ## Siguiente
 

@@ -53,6 +53,7 @@ typedef struct ngb_options {
     int no_pacing;           /* 1: FLIP_STALL no espera al siguiente 1/60 s (H7b) */
     const char *input_script; /* pulsaciones automáticas (input/input.h), opcional */
     int no_host_input;        /* 1: ni mando de PC ni teclado, solo el guion */
+    const char *watch;        /* --watch: direcciones del juego a vigilar (watch.c) */
 } ngb_options_t;
 
 extern ngb_options_t g_ngb_opts;
@@ -68,6 +69,9 @@ void ngb_log_flush(void);
 __declspec(noreturn) void ngb_stop(int code, const char *fmt, ...);
 int ngb_stopping(void);
 double ngb_elapsed(void);
+/* watch.c: --watch ADDR[:1|2|4],... (los cambios van al log desde el hilo de DPC) */
+int ngb_watch_parse(const char *spec);
+void ngb_watch_tick(void);
 
 /* memory.c */
 int ngb_memory_init(void);
