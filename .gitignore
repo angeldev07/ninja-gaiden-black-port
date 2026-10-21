@@ -1,0 +1,25 @@
+# Datos del juego: nunca al repo (copyright). Viven fuera, en NGB_DATA (por defecto %USERPROFILE%\ngb-data).
+*.iso
+*.xiso
+*.xbe
+*.afs
+*.sfd
+*.xpr
+*.xwb
+*.xsb
+*.aix
+game/
+extracted/
+
+# Salidas generadas por las herramientas
+build/
+
+# Python
+__pycache__/
+*.pyc
+
+# Obsidian: estado volátil por máquina (la config compartible sí se versiona)
+docs/.obsidian/workspace.json
+docs/.obsidian/workspace-mobile.json
+docs/.obsidian/cache
+docs/.trash/
