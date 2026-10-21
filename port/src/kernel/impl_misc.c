@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "eeprom.h"
 #include "kernel.h"
 #include "sha1.h"
 
@@ -39,29 +40,40 @@ static uint64_t DbgBreakPoint(uint32_t *args) {
 /* 24 NTSTATUS ExQueryNonVolatileSetting(ULONG ValueIndex, PULONG Type, PVOID Value,
  *                                       ULONG ValueLength, PULONG ResultLength) */
 static uint64_t ExQueryNonVolatileSetting(uint32_t *args) {
-    uint32_t index = ARG(0), value = 0, type = REG_DWORD_, len = 4;
-    uint8_t blob[64];
+    uint32_t index = ARG(0), value = 0, type = REG_DWORD_, len = 4, sec_off, sec_len;
+    uint8_t blob[EEPROM_SIZE];
     const char *name = "?";
     memset(blob, 0, sizeof blob);
-    switch (index) {
-    case 0x0: name = "TIMEZONE_BIAS"; value = 0; break;
-    case 0x7: name = "LANGUAGE"; value = 1; break;            /* inglés */
-    case 0x8: name = "VIDEO_FLAGS"; value = 0; break;
-    case 0x9: name = "AUDIO_FLAGS"; value = 0; break;         /* estéreo */
-    case 0xA: name = "PARENTAL_CONTROL_GAMES"; value = 0; break;
-    case 0xB: name = "PARENTAL_CONTROL_PASSWORD"; value = 0; break;
-    case 0xC: name = "PARENTAL_CONTROL_MOVIES"; value = 0; break;
-    case 0x11: name = "MISC_FLAGS"; value = 0; break;
-    case 0x12: name = "DVD_REGION"; value = 2; break;
-    case 0x103: name = "FACTORY_AV_REGION"; value = 0x00800300u; break; /* PAL-I */
-    case 0x104: name = "FACTORY_GAME_REGION"; value = 4; break;        /* resto del mundo */
-    case 0x101: name = "FACTORY_ETHERNET_ADDR"; type = REG_BINARY_; len = 6; break;
-    case 0x100: name = "FACTORY_SERIAL_NUMBER"; type = REG_BINARY_; len = 12;
-        memcpy(blob, "000000000000", 12); break;
-    default:
-        if (index >= 1 && index <= 6) { name = "TIMEZONE_*"; type = REG_BINARY_; len = 16; }
-        else { ngb_log("    · ExQueryNonVolatileSetting: índice 0x%X desconocido", index); }
-        break;
+    if (!eeprom_section(index, &sec_off, &sec_len)) {
+        /* XC_MAX_OS/FACTORY/ALL: un bloque de la EEPROM. Debe ser determinista entero: XAPI
+         * firma los archivos del disco con 16 bytes de aquí cuando XboxHDKey es cero. */
+        uint8_t image[EEPROM_SIZE];
+        eeprom_image(image);
+        memcpy(blob, image + sec_off, sec_len);
+        name = index == 0xFFFFu ? "XC_MAX_ALL" : index == 0x1FFu ? "XC_MAX_FACTORY" : "XC_MAX_OS";
+        type = REG_BINARY_;
+        len = sec_len;
+    } else {
+        switch (index) {
+        case 0x0: name = "TIMEZONE_BIAS"; value = 0; break;
+        case 0x7: name = "LANGUAGE"; value = EEPROM_LANGUAGE; break;            /* inglés */
+        case 0x8: name = "VIDEO_FLAGS"; value = 0; break;
+        case 0x9: name = "AUDIO_FLAGS"; value = 0; break;         /* estéreo */
+        case 0xA: name = "PARENTAL_CONTROL_GAMES"; value = 0; break;
+        case 0xB: name = "PARENTAL_CONTROL_PASSWORD"; value = 0; break;
+        case 0xC: name = "PARENTAL_CONTROL_MOVIES"; value = 0; break;
+        case 0x11: name = "MISC_FLAGS"; value = 0; break;
+        case 0x12: name = "DVD_REGION"; value = EEPROM_DVD_REGION; break;
+        case 0x103: name = "FACTORY_AV_REGION"; value = EEPROM_AV_REGION; break; /* PAL-I */
+        case 0x104: name = "FACTORY_GAME_REGION"; value = EEPROM_GAME_REGION; break; /* resto del mundo */
+        case 0x101: name = "FACTORY_ETHERNET_ADDR"; type = REG_BINARY_; len = 6; break;
+        case 0x100: name = "FACTORY_SERIAL_NUMBER"; type = REG_BINARY_; len = 12;
+            memcpy(blob, EEPROM_SERIAL, 12); break;
+        default:
+            if (index >= 1 && index <= 6) { name = "TIMEZONE_*"; type = REG_BINARY_; len = 16; }
+            else { ngb_log("    · ExQueryNonVolatileSetting: índice 0x%X desconocido", index); }
+            break;
+        }
     }
     if (type == REG_DWORD_)
         memcpy(blob, &value, 4);

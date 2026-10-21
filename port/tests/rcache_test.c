@@ -201,7 +201,35 @@ static void test_quads(void) {
     CHECK(rc_quads_to_triangles(in, 3, out) == 0);
 }
 
+static void test_dirty(void) {
+    static rc_dirty d; /* 64 KB: fuera de la pila */
+    uint32_t w[3] = {0x1000u, 0x1FFFu, 0x03FFF000u};
+    memset(&d, 0, sizeof d);
+    CHECK(rc_dirty_last(&d, 0x1000u, 0x2000u) == 0);
+    rc_dirty_mark(&d, w, 2, 5); /* dos escrituras en la misma página */
+    rc_dirty_mark(&d, w + 2, 1, 7);
+    CHECK(rc_dirty_last(&d, 0x0u, 0x1000u) == 0);      /* página 0: limpia */
+    CHECK(rc_dirty_last(&d, 0x0u, 0x1001u) == 5);      /* toca la página 1 */
+    CHECK(rc_dirty_last(&d, 0x1800u, 4u) == 5);
+    CHECK(rc_dirty_last(&d, 0x2000u, 0x1000u) == 0);
+    CHECK(rc_dirty_last(&d, 0x0u, 0x04000000u) == 7);   /* toda la RAM: la más reciente */
+    CHECK(rc_dirty_last(&d, 0x03FFFFFFu, 2u) == UINT32_MAX); /* se sale de la RAM */
+    CHECK(rc_dirty_last(&d, 0x08000000u, 4u) == UINT32_MAX);
+    CHECK(rc_dirty_last(&d, 0x1000u, 0u) == UINT32_MAX);
+}
+
+static void test_compact(void) {
+    uint32_t idx[6] = {900, 5, 900, 70000, 5, 6}, uniq[6];
+    uint32_t m = rc_compact_indices(idx, 6, uniq);
+    CHECK(m == 4);
+    CHECK(uniq[0] == 5 && uniq[1] == 6 && uniq[2] == 900 && uniq[3] == 70000);
+    CHECK(idx[0] == 2 && idx[1] == 0 && idx[2] == 2 && idx[3] == 3 && idx[4] == 0 && idx[5] == 1);
+    CHECK(rc_compact_indices(idx, 0, uniq) == 0);
+}
+
 int main(void) {
+    test_dirty();
+    test_compact();
     test_surface_lifecycle();
     test_surface_overlap();
     test_surface_lru();

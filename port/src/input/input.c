@@ -112,8 +112,9 @@ static const button_name_t k_buttons[] = {
     {"LT", 0, XPAD_LEFT_TRIGGER},    {"RT", 0, XPAD_RIGHT_TRIGGER},
 };
 
-/* "<n>s" o "<n>ms" (n entero) a milisegundos. -1 si no es válido. */
-static long parse_ms(const char *text, size_t len) {
+/* "<n>s" o "<n>ms" (n entero) a milisegundos, o "<n>p" a lecturas (*polls = 1). -1 si no
+ * es válido. */
+static long parse_ms(const char *text, size_t len, int *polls) {
     char buf[24];
     char *end;
     long value;
@@ -122,8 +123,13 @@ static long parse_ms(const char *text, size_t len) {
     memcpy(buf, text, len);
     buf[len] = 0;
     value = strtol(buf, &end, 10);
+    *polls = 0;
     if (end == buf || value < 0 || value > 86400000L)
         return -1;
+    if (!strcmp(end, "p")) {
+        *polls = 1;
+        return value;
+    }
     if (!strcmp(end, "ms"))
         return value;
     if (!strcmp(end, "s") && value <= 86400L)
@@ -165,19 +171,27 @@ int input_script_parse(const char *text, input_script_t *out, char *err, size_t 
         const char *item_end = strchr(p, ','), *colon, *at;
         size_t item_len = item_end ? (size_t)(item_end - p) : strlen(p);
         input_event_t ev;
-        long when, hold = INPUT_SCRIPT_HOLD_MS;
+        long when, hold;
+        int when_polls = 0, hold_polls = 0;
         memset(&ev, 0, sizeof ev);
         colon = memchr(p, ':', item_len);
         if (item_len < 3 || _strnicmp(p, "t=", 2) || !colon) {
             snprintf(err, errlen, "entrada '%.*s': se esperaba t=<tiempo>:<BOTON>", (int)item_len, p);
             return -1;
         }
-        when = parse_ms(p + 2, (size_t)(colon - p - 2));
+        when = parse_ms(p + 2, (size_t)(colon - p - 2), &when_polls);
+        hold = when_polls ? (long)INPUT_SCRIPT_HOLD_POLLS : (long)INPUT_SCRIPT_HOLD_MS;
+        hold_polls = when_polls;
         at = memchr(colon, '@', item_len - (size_t)(colon - p));
         if (at)
-            hold = parse_ms(at + 1, item_len - (size_t)(at + 1 - p));
+            hold = parse_ms(at + 1, item_len - (size_t)(at + 1 - p), &hold_polls);
         if (when < 0 || hold <= 0) {
-            snprintf(err, errlen, "entrada '%.*s': tiempo inválido (usa 3s o 3500ms)", (int)item_len, p);
+            snprintf(err, errlen, "entrada '%.*s': tiempo inválido (usa 3s, 3500ms o 200p)", (int)item_len, p);
+            return -1;
+        }
+        if (hold_polls != when_polls) {
+            snprintf(err, errlen, "entrada '%.*s': el instante y la duración van en la misma unidad",
+                     (int)item_len, p);
             return -1;
         }
         if (parse_buttons(colon + 1, (size_t)((at ? at : p + item_len) - colon - 1), &ev)) {
@@ -190,6 +204,7 @@ int input_script_parse(const char *text, input_script_t *out, char *err, size_t 
         }
         ev.at_ms = (uint32_t)when;
         ev.hold_ms = (uint32_t)hold;
+        ev.polls = (uint8_t)when_polls;
         out->events[out->count++] = ev;
         p = item_end ? item_end + 1 : NULL;
         if (p && !*p) {
@@ -200,11 +215,13 @@ int input_script_parse(const char *text, input_script_t *out, char *err, size_t 
     return 0;
 }
 
-void input_script_apply(const input_script_t *script, uint32_t now_ms, xbox_gamepad_t *out) {
+void input_script_apply(const input_script_t *script, uint32_t now_ms, uint32_t now_polls,
+                        xbox_gamepad_t *out) {
     int i, k;
     for (i = 0; i < script->count; i++) {
         const input_event_t *ev = &script->events[i];
-        if (now_ms < ev->at_ms || now_ms - ev->at_ms >= ev->hold_ms)
+        uint32_t now = ev->polls ? now_polls : now_ms;
+        if (now < ev->at_ms || now - ev->at_ms >= ev->hold_ms)
             continue;
         out->buttons |= ev->buttons;
         for (k = 0; k < XPAD_ANALOG_COUNT; k++)

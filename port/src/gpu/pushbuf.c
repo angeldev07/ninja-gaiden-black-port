@@ -13,13 +13,21 @@ static void emit(const pb_callbacks_t *cb, void *user, int kind, uint32_t at, ui
 
 uint32_t pb_run(pb_state_t *st, const uint8_t *base, uint32_t limit, uint32_t get, uint32_t put,
                 uint32_t max_words, const pb_callbacks_t *cb, void *user) {
-    uint32_t done = 0;
+    uint32_t done = 0, ok_page = 0xFFFFFFFFu;
     while (get != put && done < max_words) {
         uint32_t word, at = get;
         if (get > limit || limit - get < 4 || (get & 3)) {
             st->errors++;
             emit(cb, user, PB_EVENT_ERROR, get, 0, limit);
             return get;
+        }
+        if (cb && cb->readable && get >> 12 != ok_page) {
+            if (!cb->readable(user, get)) {
+                st->errors++;
+                emit(cb, user, PB_EVENT_ERROR, get, 0, limit);
+                return get;
+            }
+            ok_page = get >> 12;
         }
         memcpy(&word, base + get, 4);
         get += 4;

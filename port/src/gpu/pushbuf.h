@@ -45,6 +45,9 @@ typedef struct pb_callbacks {
                    int non_increasing);
     /* Saltos, llamadas, retornos y errores (para el log); puede ser NULL. */
     void (*event)(void *user, int kind, uint32_t at, uint32_t word, uint32_t target);
+    /* Opcional: 0 si la página de 4 KB de `offset` no se puede leer (memoria sin reservar en
+     * el host). Se pregunta al entrar en cada página; si dice 0, error y parada. */
+    int (*readable)(void *user, uint32_t offset);
 } pb_callbacks_t;
 
 /*

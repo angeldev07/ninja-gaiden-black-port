@@ -212,3 +212,9 @@ tres piezas:
 - los volúmenes, que también llegan por PIO (`0x360-0x368`);
 - aceptar las direcciones "físicas" identidad que da nuestro `MmGetPhysicalAddress`.
 Las 4 voces internas que alimenta el DSP se silencian, porque sin DSP serían ruido. Detalle en [[audio-apu]].
+
+## [2026-10-22] milestone | Gameplay en 3D: la demo del título
+La demo de gameplay del título, que el juego reproduce con su propio motor, se ve en 3D a 35-60 fps y con sonido:
+Ryu pelea con la Dragon Sword. También se corrigió el aviso "Unable to load game settings": la EEPROM emulada
+devolvía basura de la pila, y la firma de `system.dat` cambiaba en cada ejecución. Pendientes el cielo (azul
+plano) y parte del suelo. Detalle en [[gpu-nv2a]].

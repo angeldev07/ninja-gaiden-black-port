@@ -176,6 +176,39 @@ desplazándose y fundiéndose. Es el código del juego ejecutándose de forma na
   - falta el formato `0x2E` (profundidad lineal como textura), bajar el coste por draw y elegir la superficie que
     se presenta.
 
+## H8b: gameplay en 3D (la demo del título)
+
+Si se deja la pantalla de título sin pulsar nada, el juego reproduce una **demo de gameplay con su propio motor**:
+- es una escena 3D determinista que no necesita input, así que es el mejor caso de prueba del render 3D;
+- el usuario avisó de ella, y llega sola: avisos (40 s), vídeo (~15 s), título y espera.
+
+**Resultado (`VERIFIED`):**
+- Ryu pelea contra demonios con la Dragon Sword y un Ninpo de fuego, con modelos, animaciones, texturas y efectos.
+  El líder revisó las capturas `demo1-pgraph-shot-05400.png` y `-06600.png`.
+- Va a 35-60 fps (antes, 6,6).
+- Suenan 46 voces, 38 de ellas efectos de una sola vez, sin cortes.
+
+**Qué se cambió:**
+- **Rendimiento:** estado GL incremental, menos hashing de texturas, constantes solo si están sucias y cachés nuevas
+  en `rcache.c`.
+- **EEPROM** (`kernel/eeprom.c`):
+  - XAPI pide la EEPROM entera (índice `0xFFFF`) para firmar los archivos del disco duro cuando `XboxHDKey` es
+    cero;
+  - antes solo se escribían 4 bytes y el resto era basura de la pila, así que la firma de `T:\system.dat` cambiaba
+    entre ejecuciones y el juego decía "Unable to load game settings";
+  - ahora hay una imagen completa de 256 bytes.
+- **Input determinista:** `--input-script` acepta la unidad `p` (lecturas del mando), por ejemplo
+  `t=2400p:START@10p`. Así no depende de lo que tarden las cargas.
+
+**Pendiente:**
+- el cielo y el fondo salen de un azul plano (skybox o niebla) y falta parte del suelo;
+- las caídas a ~30 fps en escenas cargadas;
+- el resto de los menores del issue #43.
+
+**Lección de proceso:** el agente gastó 1 h 30 min intentando llegar al nivel por New Game, cuyo vídeo inicial no se
+puede saltar sin partida guardada, y llenó `NGB_DATA` de capturas. La demo del título daba la misma escena 3D sin
+input. Los agentes tienen que limpiar sus capturas y buscar antes el caso de prueba más barato.
+
 ## Siguiente
 
 1. Pasar de la pantalla de título al menú principal, y averiguar qué esperan los avisos y el vídeo (audio).

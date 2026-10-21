@@ -108,6 +108,10 @@ static void perf_report(void) {
     double wall;
     if (!g_perf.t0 || !n) {
         g_perf.t0 = now;
+        if (g_gl) {
+            char gl[400];
+            pgl_perf_take(gl, sizeof gl, 1); /* descarta lo acumulado antes de la primera ventana */
+        }
     } else {
         wall = ticks_ms(now - g_perf.t0);
         snprintf(g_perf.last, sizeof g_perf.last,
@@ -121,6 +125,11 @@ static void perf_report(void) {
                  (double)(kc - g_perf.kcalls0) / n, (double)(mmio - g_perf.mmio0) / n,
                  (double)(g_kicks - g_perf.kicks0) / n, (double)(g_begin_end - g_perf.tris0) / n);
         ngb_log("    · %s", g_perf.last);
+        if (g_gl) {
+            char gl[400];
+            pgl_perf_take(gl, sizeof gl, n);
+            ngb_log("    · %s", gl);
+        }
     }
     g_perf.t0 = now;
     g_perf.log0 = log_now;
@@ -218,6 +227,12 @@ static void group_name(const char *name, char *out, size_t outlen) {
 
 static void record(uint32_t sub, uint32_t method, uint32_t param, int non_inc) {
     char name[64], group[64];
+    if (!logging()) {
+        /* Fuera de los frames del log no hay nada que agrupar: buscar el nombre del método y
+         * compararlo costaba ~1 µs por palabra, decenas de ms por frame en el 3D. */
+        g_run.active = 0;
+        return;
+    }
     if (g_class[sub & 7] && g_class[sub & 7] != 0x97)
         snprintf(name, sizeof name, "C%02X_M%04X", g_class[sub & 7], method);
     else
@@ -1043,7 +1058,20 @@ static void on_event(void *user, int kind, uint32_t at, uint32_t word, uint32_t 
                   at, word, target);
 }
 
-static const pb_callbacks_t k_cb = {on_method, on_event};
+/* Base en el host del objeto DMA del kick en curso (para on_readable). */
+static const uint8_t *g_kick_base;
+
+/* Un salto o una llamada del push buffer puede llevar a una página de la arena que el juego
+ * nunca reservó (en la Xbox sería RAM con basura): leerla aquí sería un fallo de página en el
+ * loader. Se comprueba al entrar en cada página. */
+static int on_readable(void *user, uint32_t offset) {
+    MEMORY_BASIC_INFORMATION m;
+    (void)user;
+    return g_kick_base && VirtualQuery(g_kick_base + offset, &m, sizeof m) && m.State == MEM_COMMIT &&
+           !(m.Protect & (PAGE_NOACCESS | PAGE_GUARD));
+}
+
+static const pb_callbacks_t k_cb = {on_method, on_event, on_readable};
 
 typedef struct kick_args {
     uint32_t dma_instance, get, put;
@@ -1066,6 +1094,9 @@ static void kick_body(void *arg) {
     if (logging())
         pg_printf("-- kick %u: GET 0x%08X -> PUT 0x%08X (objeto DMA 0x%05X: física 0x%08X)\n",
                   g_kicks, get, put, dma_instance << 4, phys);
+    g_kick_base = base;
+    if (g_gl)
+        pgl_kick_begin();
     end = base ? pb_run(&g_pb, base, limit + 1, get, put, 1u << 22, &k_cb, NULL) : put;
     flush_run();
     if (end != put)

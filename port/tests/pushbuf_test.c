@@ -166,7 +166,31 @@ static void test_max_words(void) {
     CHECK(get == 0 && st.words == 50);
 }
 
+/* Página 1 ilegible: un salto ahí para el decodificador sin leerla. */
+static int readable_page0(void *user, uint32_t offset) {
+    (void)user;
+    return offset < 0x1000u;
+}
+
+static void test_unreadable_page(void) {
+    static uint32_t buf[0x2000 / 4];
+    static const pb_callbacks_t cb = {on_method, on_event, readable_page0};
+    pb_state_t st;
+    sink_t s;
+    uint32_t get;
+    memset(&st, 0, sizeof st);
+    memset(&s, 0, sizeof s);
+    buf[0] = inc(0, 0x1D90, 1);
+    buf[1] = 0x11223344u;
+    buf[2] = 0x1000u | 1u; /* JUMP a la página 1 */
+    get = pb_run(&st, (const uint8_t *)buf, sizeof buf, 0, 0x1800u, 1000, &cb, &s);
+    CHECK(get == 0x1000u);
+    CHECK(s.n == 1 && st.errors == 1);
+    CHECK(s.nevents == 2 && s.events[0] == PB_EVENT_JUMP && s.events[1] == PB_EVENT_ERROR);
+}
+
 int main(void) {
+    test_unreadable_page();
     test_increasing_methods();
     test_non_increasing_and_subchannel();
     test_jump_call_return();
@@ -177,6 +201,6 @@ int main(void) {
         fprintf(stderr, "pushbuf_test: %d fallos\n", g_failures);
         return 1;
     }
-    printf("pushbuf_test: OK (6 pruebas)\n");
+    printf("pushbuf_test: OK (7 pruebas)\n");
     return 0;
 }

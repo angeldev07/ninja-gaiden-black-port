@@ -70,6 +70,7 @@ static CRITICAL_SECTION g_lock;
 static int g_ready, g_host_input;
 static input_script_t g_script;
 static DWORD g_t0;
+static volatile LONG g_polls; /* lecturas del puerto 0: el reloj de los guiones en "p" */
 static uint32_t g_packet = 1;
 static xbox_gamepad_t g_last;
 static volatile LONG g_calls[H_COUNT], g_state_logs, g_insertion_known, g_event_warned;
@@ -112,7 +113,7 @@ static void read_gamepad(xbox_gamepad_t *out) {
         xpad_from_keys(key_down, &part);
         xpad_merge(out, &part);
     }
-    input_script_apply(&g_script, GetTickCount() - g_t0, out);
+    input_script_apply(&g_script, GetTickCount() - g_t0, (uint32_t)InterlockedIncrement(&g_polls), out);
 }
 
 /* ---------------------------------------------------------------- funciones HLE ---- */
@@ -213,9 +214,9 @@ static DWORD __stdcall hle_XInputGetState(uint32_t handle, uint8_t *state) {
         g_packet++;
         g_last = s.gamepad;
         if (InterlockedIncrement(&g_state_logs) <= LOG_STATE_CHANGES)
-            ngb_log("    · input: paquete %lu a los %lu ms: botones 0x%04X, analógicos %02X %02X "
+            ngb_log("    · input: paquete %lu a los %lu ms (lectura %ld): botones 0x%04X, analógicos %02X %02X "
                     "%02X %02X %02X %02X %02X %02X, stick L (%d, %d) R (%d, %d)",
-                    (unsigned long)g_packet, (unsigned long)(GetTickCount() - g_t0),
+                    (unsigned long)g_packet, (unsigned long)(GetTickCount() - g_t0), (long)g_polls,
                     s.gamepad.buttons, s.gamepad.analog[0], s.gamepad.analog[1],
                     s.gamepad.analog[2], s.gamepad.analog[3], s.gamepad.analog[4],
                     s.gamepad.analog[5], s.gamepad.analog[6], s.gamepad.analog[7],

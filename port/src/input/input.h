@@ -100,12 +100,21 @@ void xpad_merge(xbox_gamepad_t *dst, const xbox_gamepad_t *src);
 int xpad_equal(const xbox_gamepad_t *a, const xbox_gamepad_t *b);
 
 /* Guion de pulsaciones: "t=3s:START,t=5s:A,t=6500ms:UP+A@1s" (hold por defecto 200 ms).
- * Botones: START BACK A B X Y BLACK WHITE LT RT UP DOWN LEFT RIGHT LTHUMB RTHUMB. */
+ * Botones: START BACK A B X Y BLACK WHITE LT RT UP DOWN LEFT RIGHT LTHUMB RTHUMB.
+ *
+ * Con la unidad "p" el tiempo se cuenta en lecturas del mando (XInputGetState del puerto 0)
+ * en vez de en milisegundos: "t=2400p:START@10p". El juego lee el mando una vez por frame
+ * de su bucle y no lo lee mientras carga, así que un guion en lecturas no depende de cuánto
+ * tarden la E/S o el render (con milisegundos, una carga más lenta hacía que la pulsación
+ * cayera en otra pantalla). Una entrada usa la misma unidad en el instante y en la duración
+ * (hold por defecto: 12 lecturas). */
 #define INPUT_SCRIPT_MAX 64
 #define INPUT_SCRIPT_HOLD_MS 200u
+#define INPUT_SCRIPT_HOLD_POLLS 12u
 
 typedef struct input_event {
-    uint32_t at_ms, hold_ms;
+    uint32_t at_ms, hold_ms; /* en lecturas si `polls` */
+    uint8_t polls;
     uint16_t buttons;
     uint8_t analog_mask; /* bit i -> analog[i] = 255 */
 } input_event_t;
@@ -117,8 +126,9 @@ typedef struct input_script {
 
 /* 0 si el texto es válido; si no, -1 y el motivo en `err`. */
 int input_script_parse(const char *text, input_script_t *out, char *err, size_t errlen);
-/* Añade a `out` las pulsaciones activas en `now_ms`. */
-void input_script_apply(const input_script_t *script, uint32_t now_ms, xbox_gamepad_t *out);
+/* Añade a `out` las pulsaciones activas en `now_ms` o en la lectura número `now_polls`. */
+void input_script_apply(const input_script_t *script, uint32_t now_ms, uint32_t now_polls,
+                        xbox_gamepad_t *out);
 
 /* xapi_hle.c (loader) --------------------------------------------------------------- */
 

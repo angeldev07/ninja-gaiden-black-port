@@ -7,6 +7,7 @@
  */
 #include "rcache.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #define RC_MAX_DIM 4096u
@@ -258,4 +259,52 @@ unsigned rc_surface_drop(rc_surface *s) {
     unsigned t = s->gl_tex;
     memset(s, 0, sizeof *s);
     return t;
+}
+
+void rc_dirty_mark(rc_dirty *d, const uint32_t *phys, size_t n, uint32_t frame) {
+    size_t i;
+    for (i = 0; i < n; i++) {
+        uint32_t p = phys[i] / RC_DIRTY_PAGE;
+        if (p < RC_DIRTY_PAGES)
+            d->page_frame[p] = frame;
+    }
+}
+
+uint32_t rc_dirty_last(const rc_dirty *d, uint32_t phys, uint32_t len) {
+    uint32_t p, last, best = 0;
+    if (!len || phys >= RC_DIRTY_PAGES * RC_DIRTY_PAGE || len > RC_DIRTY_PAGES * RC_DIRTY_PAGE - phys)
+        return UINT32_MAX;
+    last = (phys + len - 1) / RC_DIRTY_PAGE;
+    for (p = phys / RC_DIRTY_PAGE; p <= last; p++)
+        if (d->page_frame[p] > best)
+            best = d->page_frame[p];
+    return best;
+}
+
+static int cmp_u32(const void *a, const void *b) {
+    uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;
+    return x < y ? -1 : x > y;
+}
+
+uint32_t rc_compact_indices(uint32_t *idx, uint32_t n, uint32_t *unique) {
+    uint32_t i, m = 0;
+    if (!n)
+        return 0;
+    memcpy(unique, idx, (size_t)n * sizeof *idx);
+    qsort(unique, n, sizeof *unique, cmp_u32);
+    for (i = 0; i < n; i++)
+        if (!m || unique[m - 1] != unique[i])
+            unique[m++] = unique[i];
+    for (i = 0; i < n; i++) {
+        uint32_t lo = 0, hi = m - 1;
+        while (lo < hi) { /* búsqueda binaria: el índice siempre está */
+            uint32_t mid = (lo + hi) / 2;
+            if (unique[mid] < idx[i])
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        idx[i] = lo;
+    }
+    return m;
 }

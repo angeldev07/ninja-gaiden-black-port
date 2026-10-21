@@ -40,7 +40,7 @@ static void usage(void) {
             "  --idle       para si pasan S segundos sin llamadas al kernel (por defecto 10)\n"
             "  --lenient    una llamada sin implementar devuelve STATUS_SUCCESS y sigue\n"
             "  --echo       copia el log a stderr\n"
-            "  --window     abre la ventana del presentador de frames (H7; F12 = captura)\n"
+            "  --window     abre la ventana del presentador de frames (H7; F12 = captura); --window-hidden: la crea sin mostrarla (pruebas)\n"
             "  --no-pacing  FLIP_STALL no espera al siguiente 1/60 s (frames tan rápido como pueda)\n"
             "  --renderer   gl (OpenGL 4.x, por defecto si hay contexto) o soft (rasterizador)\n"
             "  --mmio-strict   para en el primer MMIO o E/S de puertos que no sea el NV2A modelado\n"
@@ -53,6 +53,7 @@ static void usage(void) {
             "  --watch LISTA  vigila direcciones del juego (0xADDR[:1|2|4],...) y registra los "
             "cambios\n"
             "  --input-script  pulsaciones del mando, p. ej. \"t=3s:START,t=5s:A@500ms\"\n"
+            "                  (\"t=2400p:A@10p\": en lecturas del mando, no en ms)\n"
             "  --no-host-input ni mando de PC ni teclado: solo el guion\n");
 }
 
@@ -149,6 +150,8 @@ static int parse_args(void) {
             g_ngb_opts.log_cap = strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--window"))
             g_ngb_opts.window = 1;
+        else if (!strcmp(a, "--window-hidden"))
+            g_ngb_opts.window = 2;
         else if (!strcmp(a, "--mute"))
             g_ngb_opts.mute = 1;
         else if (!strcmp(a, "--audio-wav"))
@@ -234,7 +237,15 @@ __declspec(dllexport) int __cdecl ngb_main(void) {
      * presenta el búfer de color de 720 de ancho que el juego limpió o dibujó (rasterizado
      * por software en gpu/raster.c) y se espera al siguiente 1/60 s (--no-pacing lo quita). */
     if (g_ngb_opts.window) {
-        if (gfx_init("Ninja Gaiden Black (ngb-loader)", 720, 480, 2))
+        gfx_config_t cfg;
+        memset(&cfg, 0, sizeof cfg);
+        cfg.title = "Ninja Gaiden Black (ngb-loader)";
+        cfg.width = 720;
+        cfg.height = 480;
+        cfg.scale = 2;
+        cfg.aspect = GFX_ASPECT_4_3;
+        cfg.hidden = g_ngb_opts.window == 2; /* render y capturas igual, sin ventana visible */
+        if (gfx_init_ex(&cfg))
             ngb_log("gfx: no se pudo abrir la ventana; se sigue sin ella");
         else
             ngb_log("gfx: ventana 720x480 x2 (4:3), F12 guarda captura en runs\\shots");

@@ -153,20 +153,20 @@ static void test_script(void) {
     CHECK(s.events[2].buttons == XPAD_DPAD_UP && s.events[2].analog_mask == (1u << XPAD_B));
 
     memset(&x, 0, sizeof x);
-    input_script_apply(&s, 2999, &x);
+    input_script_apply(&s, 2999, 0, &x);
     CHECK(x.buttons == 0);
-    input_script_apply(&s, 3000, &x);
+    input_script_apply(&s, 3000, 0, &x);
     CHECK(x.buttons == XPAD_START);
     memset(&x, 0, sizeof x);
-    input_script_apply(&s, 3000 + INPUT_SCRIPT_HOLD_MS, &x); /* ya soltado */
+    input_script_apply(&s, 3000 + INPUT_SCRIPT_HOLD_MS, 0, &x); /* ya soltado */
     CHECK(x.buttons == 0);
-    input_script_apply(&s, 5100, &x);
+    input_script_apply(&s, 5100, 0, &x);
     CHECK(x.analog[XPAD_A] == 255 && x.buttons == 0);
     memset(&x, 0, sizeof x);
-    input_script_apply(&s, 7499, &x);
+    input_script_apply(&s, 7499, 0, &x);
     CHECK(x.buttons == XPAD_DPAD_UP && x.analog[XPAD_B] == 255);
     memset(&x, 0, sizeof x);
-    input_script_apply(&s, 7500, &x);
+    input_script_apply(&s, 7500, 0, &x);
     CHECK(x.buttons == 0 && x.analog[XPAD_B] == 0);
 
     CHECK(input_script_parse("", &s, err, sizeof err) == 0 && s.count == 0);
@@ -174,6 +174,26 @@ static void test_script(void) {
     CHECK(s.events[0].analog_mask == ((1u << XPAD_LEFT_TRIGGER) | (1u << XPAD_RIGHT_TRIGGER) |
                                       (1u << XPAD_BLACK) | (1u << XPAD_WHITE)));
     CHECK(s.events[0].buttons == XPAD_LEFT_THUMB);
+
+    /* Unidad "p": lecturas del mando, con su propio hold por defecto; el reloj en ms no cuenta. */
+    CHECK(input_script_parse("t=100p:START,t=200p:A@3p,t=1s:B", &s, err, sizeof err) == 0);
+    CHECK(s.count == 3 && s.events[0].polls && s.events[0].at_ms == 100);
+    CHECK(s.events[0].hold_ms == INPUT_SCRIPT_HOLD_POLLS && s.events[1].hold_ms == 3 && !s.events[2].polls);
+    memset(&x, 0, sizeof x);
+    input_script_apply(&s, 999999, 99, &x);
+    CHECK(x.buttons == 0 && x.analog[XPAD_A] == 0);
+    input_script_apply(&s, 0, 100, &x);
+    CHECK(x.buttons == XPAD_START);
+    memset(&x, 0, sizeof x);
+    input_script_apply(&s, 0, 100 + INPUT_SCRIPT_HOLD_POLLS, &x);
+    CHECK(x.buttons == 0);
+    input_script_apply(&s, 0, 202, &x);
+    CHECK(x.analog[XPAD_A] == 255);
+    memset(&x, 0, sizeof x);
+    input_script_apply(&s, 0, 203, &x);
+    CHECK(x.analog[XPAD_A] == 0);
+    input_script_apply(&s, 1000, 0, &x);
+    CHECK(x.analog[XPAD_B] == 255);
 }
 
 static void test_script_errors(void) {
@@ -187,6 +207,9 @@ static void test_script_errors(void) {
         "t=3s:A@0ms",     /* pulsación de 0 ms */
         "t=3s:A,",        /* entrada vacía al final */
         "t=99999999s:A",  /* fuera de rango */
+        "t=10p:A@1s",     /* unidades mezcladas */
+        "t=10s:A@5p",
+        "t=10p:A@0p",     /* pulsación de 0 lecturas */
     };
     input_script_t s;
     char err[160];

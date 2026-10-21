@@ -52,6 +52,8 @@ int pgl_active(void);
 void pgl_call(void (*fn)(void *), void *arg);
 
 /* Desde el hilo de render (dentro de pgl_call). */
+/* Al empezar cada kick: recoge las páginas que la CPU escribió desde el anterior. */
+void pgl_kick_begin(void);
 void pgl_clear(const pgl_regs *r, uint32_t flags);
 void pgl_draw(const pgl_regs *r, const pgl_draw_t *d);
 /* Presenta el destino de color de 720 de ancho que hay al llegar FLIP_STALL (D3D cambia al
@@ -59,6 +61,9 @@ void pgl_draw(const pgl_regs *r, const pgl_draw_t *d);
  * `shot_path`, la guarda en PNG
  * leyendo la textura de la GPU. 0 si guardó la captura. */
 int pgl_flip(const pgl_regs *r, const char *shot_path);
+/* Desglose del tiempo de dibujo desde la última llamada (QPC), en ms por frame, y los
+ * contadores de trabajo por frame; pone los acumuladores a cero. Desde el hilo de render. */
+void pgl_perf_take(char *out, size_t outlen, uint32_t frames);
 /* Estadísticas al log (sin GL: se puede llamar desde cualquier hilo). */
 void pgl_summary(void);
 

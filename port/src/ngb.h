@@ -49,7 +49,7 @@ typedef struct ngb_options {
     unsigned pgraph_at;      /* además, 3 frames completos a partir de este (0 = no) */
     unsigned long log_cap;   /* líneas de log por función del kernel (0 = sin límite) */
     const char *symbols;     /* CSV de símbolos (opcional) */
-    int window;              /* 1: abre la ventana del presentador (gfx/present.c, H7) */
+    int window;              /* 1: abre la ventana del presentador (gfx/present.c, H7); 2: oculta */
     int no_pacing;           /* 1: FLIP_STALL no espera al siguiente 1/60 s (H7b) */
     int renderer;            /* NGB_RENDERER_*: --renderer gl|soft (H7c) */
     const char *input_script; /* pulsaciones automáticas (input/input.h), opcional */
@@ -95,6 +95,7 @@ void *ngb_contig_alloc(uint32_t size, uint32_t align, uint32_t lowest, uint32_t 
 int ngb_contig_free(void *p);
 uint32_t ngb_contig_size(const void *p);
 int ngb_contig_contains(const void *p);
+size_t ngb_contig_written(uint32_t *phys, size_t cap);
 
 /* thread.c: hilos Xbox sobre hilos Win32 (KPCR/KTHREAD falsos, pila propia, TLS) */
 #define NGB_KTHREAD_SIZE 0x200

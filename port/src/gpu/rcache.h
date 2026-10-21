@@ -32,6 +32,7 @@ typedef struct rc_surface {
     uint32_t last_use;      /* reloj de la caché, para el LRU */
     uint64_t mem_sig;       /* rc_sparse_hash de la RAM cuando se usó como destino: si la CPU
                              * escribe ahí otra cosa (una textura nueva), deja de coincidir */
+    uint32_t drawn_frame;   /* último frame en que fue destino (para el write watch) */
 } rc_surface;
 
 typedef struct rc_surfaces {
@@ -128,3 +129,26 @@ int rc_attr_layout(uint32_t array_format, rc_attr *out);
 /* QUADS -> TRIANGLES: (a b c d) -> (a b c, a c d). `out` necesita n / 4 * 6 entradas.
  * Devuelve el número de índices escritos. */
 uint32_t rc_quads_to_triangles(const uint32_t *in, uint32_t n, uint32_t *out);
+
+/* ---- páginas escritas por la CPU (write watch de la arena contigua) ---- */
+
+/* Frame de la última escritura de cada página de 4 KB de la RAM física (64 MB). El render lo
+ * llena una vez por frame con GetWriteWatch, y una textura solo se vuelve a hashear si alguna
+ * de sus páginas se escribió después de su última comprobación. */
+#define RC_DIRTY_PAGE 4096u
+#define RC_DIRTY_PAGES (0x04000000u / RC_DIRTY_PAGE)
+
+typedef struct rc_dirty {
+    uint32_t page_frame[RC_DIRTY_PAGES]; /* 0 = sin escrituras vistas */
+} rc_dirty;
+
+/* Marca con `frame` las páginas de las direcciones físicas `phys[0..n)`. */
+void rc_dirty_mark(rc_dirty *d, const uint32_t *phys, size_t n, uint32_t frame);
+/* Frame más reciente en que se escribió alguna página de [phys, phys + len). Fuera de la RAM
+ * física devuelve UINT32_MAX (sin información: hay que hashear). */
+uint32_t rc_dirty_last(const rc_dirty *d, uint32_t phys, uint32_t len);
+
+/* Compacta los índices de un draw cuyo rango [min, max] es mucho mayor que los vértices que
+ * usa (issue #43): deja en `unique` (capacidad n) los índices distintos ordenados y reescribe
+ * `idx` como posiciones en esa lista. Devuelve cuántos índices distintos hay. */
+uint32_t rc_compact_indices(uint32_t *idx, uint32_t n, uint32_t *unique);
