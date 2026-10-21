@@ -78,9 +78,9 @@ def boot_code() -> bytes:
     )
 
 
-def mmio_code() -> bytes:
-    """Lee un registro del NV2A: el loader debe parar con un crash clasificado como MMIO."""
-    return b"\xa1" + struct.pack("<I", 0xFD000000) + b"\xc3"
+def mmio_code(addr: int = 0xFD000000) -> bytes:
+    """Lee un registro MMIO (`mov eax, [addr]`) y retorna."""
+    return b"\xa1" + struct.pack("<I", addr) + b"\xc3"
 
 
 def unimplemented_code() -> bytes:
@@ -88,8 +88,72 @@ def unimplemented_code() -> bytes:
     return b"\x6a\x00\x6a\x00" + call_slot(0) + b"\xc3"
 
 
-def build_loader_xbe(code: bytes, imports: Sequence[int] = DEFAULT_IMPORTS) -> bytes:
-    """XBE retail con una sección .text: `code` en 0x11000 y el thunk de `imports`."""
+# --- H7a: prueba de la GPU (registros del NV2A y un push buffer) -----------------------
+NV2A = 0xFD000000
+PB_VA = TEXT_VA + 0xA00  # push buffer dentro de .text (escribible)
+GPU_FMT_VA = TEXT_VA + 0xA80  # "boot=%08x get=%08x\n"
+BOOT_VA = TEXT_VA + 0xAC0  # copia de PMC_BOOT_0
+DMA_INSTANCE = 0x100  # objeto DMA en RAMIN + 0x1000
+PHYS_XBE = 0x06000000  # ventana "física" de la imagen del XBE (port/src/ngb.h)
+PB_WORDS = (
+    (1 << 18) | 0x1D90,  # SET_COLOR_CLEAR_VALUE
+    0xFF336699,
+    (1 << 18) | 0x1D94,  # CLEAR_SURFACE
+    0x000000F0,
+    (1 << 18) | 0x0130,  # FLIP_STALL
+    0,
+)
+PB_GET = PB_VA - BASE  # offsets dentro del objeto DMA, que empieza en la base del XBE
+PB_PUT = PB_GET + 4 * len(PB_WORDS)
+
+
+def mov_mem_imm(addr: int, value: int) -> bytes:
+    """`mov dword ptr [addr], imm32` (C7 05)."""
+    return b"\xc7\x05" + struct.pack("<II", addr, value)
+
+
+def gpu_code() -> bytes:
+    """Lee PMC_BOOT_0, espera un flush de PFB, monta un objeto DMA y avanza DMA_PUT."""
+    wbc = NV2A + 0x100410
+    return b"".join(
+        (
+            b"\xa1" + struct.pack("<I", NV2A),  # mov eax, [PMC_BOOT_0]
+            b"\xa3" + struct.pack("<I", BOOT_VA),  # mov [BOOT_VA], eax
+            mov_mem_imm(wbc, 0x10000),  # PFB_WBC: pide el flush
+            b"\xf7\x05" + struct.pack("<II", wbc, 0x10000),  # test [PFB_WBC], bit 16
+            b"\x75\xf4",  # jnz: hasta que el modelo lo limpie
+            mov_mem_imm(NV2A + 0x701000, 0x0000003D),  # RAMIN: objeto DMA (clase 0x3D)
+            mov_mem_imm(NV2A + 0x701004, 0x00FFFFFF),  # límite
+            mov_mem_imm(NV2A + 0x701008, PHYS_XBE + BASE),  # base: la imagen del XBE
+            mov_mem_imm(NV2A + 0x00322C, DMA_INSTANCE),  # PFIFO_CACHE1_DMA_INSTANCE
+            mov_mem_imm(NV2A + 0x800044, PB_GET),  # USER DMA_GET
+            mov_mem_imm(NV2A + 0x800040, PB_PUT),  # USER DMA_PUT: decodifica el push buffer
+            b"\xa1" + struct.pack("<I", NV2A + 0x800044),  # mov eax, [DMA_GET]
+            b"\x50",  # push eax
+            b"\xff\x35" + struct.pack("<I", BOOT_VA),  # push [BOOT_VA]
+            push_imm32(GPU_FMT_VA),
+            call_slot(0),  # DbgPrint("boot=%08x get=%08x\n", boot, get)
+            b"\x83\xc4\x0c",  # add esp, 12
+            b"\xc3",  # ret
+        )
+    )
+
+
+def gpu_extra() -> dict[int, bytes]:
+    """Datos del XBE de prueba de la GPU: push buffer y cadena de formato."""
+    return {
+        PB_VA: b"".join(struct.pack("<I", w) for w in PB_WORDS),
+        GPU_FMT_VA: b"boot=%08x get=%08x\n\0",
+    }
+
+
+def build_loader_xbe(
+    code: bytes, imports: Sequence[int] = DEFAULT_IMPORTS, extra: dict[int, bytes] | None = None
+) -> bytes:
+    """XBE retail con una sección .text: `code` en 0x11000 y el thunk de `imports`.
+
+    `extra` escribe más datos en .text (VA -> bytes).
+    """
     if len(code) > THUNK_VA - TEXT_VA:
         raise ValueError("el código pisa el thunk")
     data = bytearray(TEXT_RAW + TEXT_SIZE)
@@ -128,4 +192,6 @@ def build_loader_xbe(code: bytes, imports: Sequence[int] = DEFAULT_IMPORTS) -> b
     put_text(FMT_VA, b"ngb synthetic %d\n\0")
     put_text(FMT2_VA, b"len=%u\n\0")
     put_text(HOLA_VA, b"hola\0")
+    for va, raw in (extra or {}).items():
+        put_text(va, raw)
     return bytes(data)

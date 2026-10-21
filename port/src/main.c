@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "gpu/nv2a.h"
 #include "kernel/kernel.h"
 
 ngb_options_t g_ngb_opts;
@@ -31,6 +32,25 @@ static void usage(void) {
             "  --idle       para si pasan S segundos sin llamadas al kernel (por defecto 10)\n"
             "  --lenient    una llamada sin implementar devuelve STATUS_SUCCESS y sigue\n"
             "  --echo       copia el log a stderr\n");
+}
+
+/* 1 si `path` (o alguna carpeta que lo contiene) está dentro de un repo git: algún ancestro
+   tiene un `.git` (carpeta, o archivo en un worktree). */
+static int inside_git_repo(const char *path) {
+    char full[MAX_PATH], probe[MAX_PATH];
+    char *cut;
+    DWORD n = GetFullPathNameA(path, sizeof full, full, NULL);
+    if (!n || n >= sizeof full)
+        return 0;
+    while ((cut = strrchr(full, '\\')) != NULL) {
+        *cut = 0;
+        if (!full[0])
+            break;
+        if ((size_t)snprintf(probe, sizeof probe, "%s\\.git", full) < sizeof probe &&
+            GetFileAttributesA(probe) != INVALID_FILE_ATTRIBUTES)
+            return 1;
+    }
+    return 0;
 }
 
 static void default_log_path(char *out, size_t outlen) {
@@ -65,6 +85,8 @@ static int parse_args(void) {
     g_ngb_opts.max_calls = 200000;
     g_ngb_opts.timeout_s = 60;
     g_ngb_opts.idle_s = 10;
+    g_ngb_opts.pgraph_frames = 3;
+    g_ngb_opts.log_cap = 2000;
     for (i = 1; i < argc; i++) {
         const char *a = argv[i];
         int more = i + 1 < argc;
@@ -84,6 +106,12 @@ static int parse_args(void) {
             g_ngb_opts.mmio_strict = 1;
         else if (!strcmp(a, "--mmio-gpu-ram"))
             g_ngb_opts.gpu_ram = 1;
+        else if (!strcmp(a, "--pgraph-frames") && more)
+            g_ngb_opts.pgraph_frames = (unsigned)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--symbols") && more)
+            g_ngb_opts.symbols = _strdup(argv[++i]);
+        else if (!strcmp(a, "--log-cap") && more)
+            g_ngb_opts.log_cap = strtoul(argv[++i], NULL, 0);
         else if (a[0] == '-' || g_ngb_opts.xbe_path)
             return -1;
         else
@@ -95,6 +123,12 @@ static int parse_args(void) {
         default_log_path(g_ngb_opts.log_path, MAX_PATH);
     if (!g_ngb_opts.log_path[0]) {
         fprintf(stderr, "ngb-loader: sin NGB_DATA ni USERPROFILE; indica el log con --log\n");
+        return -1;
+    }
+    if (inside_git_repo(g_ngb_opts.log_path)) {
+        /* Junto al log se vuelcan texturas y superficies del juego en PNG: nunca dentro de un repo. */
+        fprintf(stderr, "ngb-loader: el log (%s) está dentro de un repo git; los volcados del juego "
+                        "no pueden ir ahí. Usa una ruta bajo NGB_DATA.\n", g_ngb_opts.log_path);
         return -1;
     }
     LocalFree(wargv);
@@ -135,6 +169,8 @@ __declspec(dllexport) int __cdecl ngb_main(void) {
     if (xbe_load_file(g_ngb_opts.xbe_path, &g_ngb_xbe, err, sizeof err))
         ngb_stop(NGB_EXIT_USAGE, "XBE inválido: %s", err);
     log_header(&g_ngb_xbe);
+    if (g_ngb_opts.symbols && ngb_symbols_load(g_ngb_opts.symbols))
+        ngb_log("símbolos: no se pudo leer %s", g_ngb_opts.symbols);
 
     /* Xbox: un solo núcleo y sin NX. */
     SetProcessAffinityMask(GetCurrentProcess(), 1);
@@ -144,6 +180,18 @@ __declspec(dllexport) int __cdecl ngb_main(void) {
     ngb_kdata_init(g_ngb_opts.xbe_path);
     if (ngb_memory_init() || ngb_memory_map_xbe(&g_ngb_xbe))
         ngb_stop(NGB_EXIT_USAGE, "no se pudo preparar la memoria de la imagen");
+    {
+        /* Log de PGRAPH junto al principal: <log>-pgraph.log (y los PNG, <log>-pgraph-NNN.png). */
+        char pg[MAX_PATH];
+        char *dot;
+        snprintf(pg, sizeof pg, "%s", g_ngb_opts.log_path);
+        dot = strrchr(pg, '.');
+        if (dot)
+            *dot = 0;
+        strncat_s(pg, sizeof pg, "-pgraph.log", _TRUNCATE);
+        nv2a_init(pg);
+    }
+    ngb_memory_patch_irql(&g_ngb_xbe);
     if (ngb_memory_patch_thunk(&g_ngb_xbe))
         ngb_stop(NGB_EXIT_USAGE, "el thunk importa ordinales desconocidos");
     tls_total = ngb_tls_total_size(&g_ngb_xbe);

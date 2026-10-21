@@ -74,7 +74,7 @@ uint64_t ngb_kcall(uint32_t ordinal, uint32_t *args, uint32_t caller) {
     uint32_t prev_ord = 0, prev_caller = 0;
     LONG n = InterlockedIncrement(&g_seq);
     ngb_kimpl_fn fn = ordinal <= NGB_MAX_ORDINAL ? g_impls[ordinal] : NULL;
-    char argtext[512];
+    char argtext[512], sym[96];
     uint64_t ret = STATUS_SUCCESS;
 
     g_ngb_last_call_tick = GetTickCount();
@@ -103,12 +103,18 @@ uint64_t ngb_kcall(uint32_t ordinal, uint32_t *args, uint32_t caller) {
         t->inflight_ordinal = prev_ord;
         t->inflight_caller = prev_caller;
     }
-    if (ret >> 32)
-        ngb_log("[%ld] T%d @%08X %u %s(%s) -> 0x%08X%08X", n, t ? t->index : 0, caller, ordinal,
-                e->name, argtext, (uint32_t)(ret >> 32), (uint32_t)ret);
+    if (g_ngb_opts.log_cap && ordinal <= NGB_MAX_ORDINAL &&
+        (unsigned long)g_counts[ordinal] > g_ngb_opts.log_cap) {
+        if ((unsigned long)g_counts[ordinal] == g_ngb_opts.log_cap + 1)
+            ngb_log("    · %s: más de %lu llamadas; a partir de aquí solo se cuentan", e->name,
+                    g_ngb_opts.log_cap);
+    } else if (ret >> 32)
+        ngb_log("[%ld] T%d @%08X %u %s(%s) -> 0x%08X%08X%s", n, t ? t->index : 0, caller, ordinal,
+                e->name, argtext, (uint32_t)(ret >> 32), (uint32_t)ret,
+                ngb_symbol(caller, sym, sizeof sym));
     else
-        ngb_log("[%ld] T%d @%08X %u %s(%s) -> 0x%08X", n, t ? t->index : 0, caller, ordinal,
-                e->name, argtext, (uint32_t)ret);
+        ngb_log("[%ld] T%d @%08X %u %s(%s) -> 0x%08X%s", n, t ? t->index : 0, caller, ordinal,
+                e->name, argtext, (uint32_t)ret, ngb_symbol(caller, sym, sizeof sym));
     if (g_ngb_opts.max_calls && (unsigned long)n >= g_ngb_opts.max_calls)
         ngb_stop(NGB_EXIT_MAX_CALLS, "--max-calls %lu alcanzado", g_ngb_opts.max_calls);
     return ret;

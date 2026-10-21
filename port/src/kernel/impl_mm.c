@@ -44,8 +44,13 @@ static uint64_t MmPersistContiguousMemory(uint32_t *args) {
 
 /* 173 ULONG_PTR MmGetPhysicalAddress(PVOID BaseAddress) */
 static uint64_t MmGetPhysicalAddress(uint32_t *args) {
+    /* "Física" simplificada (ver gpu/nv2a.c, nv2a_phys): la arena contigua es la RAM
+     * 0..64 MB; la imagen del XBE se ve en la ventana NGB_PHYS_XBE (96 MB + VA), para que la
+     * GPU lea texturas y búferes que el juego tiene en .data; el resto, identidad. */
     if (ngb_contig_contains(PTR(0)))
         return RET32(ARG(0) - NGB_CONTIG_BASE);
+    if (ARG(0) >= NGB_RESERVE_BASE && ARG(0) < NGB_RESERVE_END)
+        return RET32(NGB_PHYS_XBE + ARG(0));
     return RET32(ARG(0) & 0x7FFFFFFFu);
 }
 
@@ -157,8 +162,10 @@ static uint64_t MmClaimGpuInstanceMemory(uint32_t *args) {
     uint32_t size = (ARG(0) + 0xFFFu) & ~0xFFFu;
     if (PTR(1))
         *(uint32_t *)PTR(1) = padding;
-    if (size && !VirtualAlloc((void *)(uintptr_t)(top - size), size + padding, MEM_COMMIT,
-                              PAGE_READWRITE))
+    MEMORY_BASIC_INFORMATION m;
+    if (size &&
+        !(VirtualQuery((void *)(uintptr_t)(top - size), &m, sizeof m) && m.State == MEM_COMMIT) &&
+        !VirtualAlloc((void *)(uintptr_t)(top - size), size + padding, MEM_COMMIT, PAGE_READWRITE))
         ngb_log("    · MmClaimGpuInstanceMemory: no se pudo confirmar [0x%08X, 0x%08X)",
                 top - size, top + padding);
     return RET32(top);

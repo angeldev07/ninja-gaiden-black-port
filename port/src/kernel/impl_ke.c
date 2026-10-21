@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "../gpu/nv2a.h"
 #include "kernel.h"
 
 #define OBJ_SLOTS 8192
@@ -400,6 +401,28 @@ static INIT_ONCE g_dpc_once = INIT_ONCE_STATIC_INIT;
 
 typedef void(__stdcall *dpc_routine_fn)(uint32_t dpc, uint32_t ctx, uint32_t a1, uint32_t a2);
 
+static uint8_t *g_gpu_interrupt; /* KINTERRUPT conectado al nivel 3 (NV2A) */
+static ULONGLONG g_next_vblank;
+
+typedef uint8_t(__stdcall *isr_fn)(uint32_t interrupt, uint32_t context);
+
+/* Vblank sintético a ~60 Hz: marca la interrupción en el modelo y llama a la ISR de D3D. */
+static void vblank_tick(ULONGLONG now, ULONGLONG *next) {
+    if (!g_gpu_interrupt || !nv2a_vblank_enabled())
+        return;
+    if (now >= g_next_vblank) {
+        g_next_vblank = now + 16;
+        if (nv2a_vblank() && g_gpu_interrupt[0x10]) {
+            uint32_t old = raise_irql(*(uint32_t *)(g_gpu_interrupt + 0xC) & 0xFF);
+            ((isr_fn)(uintptr_t) * (uint32_t *)g_gpu_interrupt)(
+                (uint32_t)(uintptr_t)g_gpu_interrupt, *(uint32_t *)(g_gpu_interrupt + 4));
+            lower_irql(old);
+        }
+    }
+    if (g_next_vblank < *next)
+        *next = g_next_vblank;
+}
+
 static void run_dpc(uint32_t dpc) {
     uint8_t *d = (uint8_t *)(uintptr_t)dpc;
     uint32_t routine = *(uint32_t *)(d + 0x0C);
@@ -446,6 +469,10 @@ static void __stdcall dpc_thread(uint32_t unused) {
         LeaveCriticalSection(&g_timer_lock);
         for (i = 0; i < nfire; i++)
             run_dpc(fire[i]);
+        vblank_tick(now, &next);
+        ngb_apu_tick();
+        if (next > now + 16)
+            next = now + 16;
         WaitForSingleObject(g_dpc_wake, (DWORD)(next > now ? next - now : 0));
     }
 }
@@ -606,6 +633,10 @@ static uint64_t KeConnectInterrupt(uint32_t *args) {
     ngb_log("    · interrupción conectada: nivel %u, ISR 0x%08X (nunca se disparará)",
             *(uint32_t *)(k + 8), *(uint32_t *)k);
     k[0x10] = 1;
+    if (*(uint32_t *)(k + 8) == 3) { /* el NV2A: el vblank sintético llama a esta ISR */
+        g_gpu_interrupt = k;
+        dpc_init_once();
+    }
     return 1;
 }
 

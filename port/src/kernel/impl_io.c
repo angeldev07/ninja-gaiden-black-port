@@ -32,6 +32,8 @@ typedef struct link {
 typedef struct dir_handle {
     HANDLE h;
     char xpath[XPATH];
+    HANDLE find; /* enumeración de NtQueryDirectoryFile en curso */
+    int entries; /* entradas devueltas desde el último RestartScan */
 } dir_handle_t;
 
 static link_t g_links[MAX_LINKS];
@@ -107,8 +109,12 @@ static void dir_forget(HANDLE h) {
     int i;
     EnterCriticalSection(&g_io_lock);
     for (i = 0; i < MAX_DIRS; i++)
-        if (g_dirs[i].h == h)
+        if (g_dirs[i].h == h) {
+            if (g_dirs[i].find && g_dirs[i].find != INVALID_HANDLE_VALUE)
+                FindClose(g_dirs[i].find);
+            g_dirs[i].find = NULL;
             g_dirs[i].h = NULL;
+        }
     LeaveCriticalSection(&g_io_lock);
 }
 
@@ -532,6 +538,110 @@ static uint64_t NtSetInformationFile(uint32_t *args) {
     return RET32(fn((HANDLE)PTR(0), PTR(1), PTR(2), ARG(3), ARG(4)));
 }
 
+/* Máscara de NtQueryDirectoryFile: solo un nombre con comodines, sin separadores ni ':'. */
+static int mask_ok(const char *m) {
+    size_t i, n = strlen(m);
+    if (!n || n > 255 || !strcmp(m, ".."))
+        return 0;
+    for (i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)m[i];
+        if (c < 0x20 || c == '\\' || c == '/' || c == ':' || c == '"' || c == '<' || c == '>' ||
+            c == '|')
+            return 0;
+    }
+    return 1;
+}
+
+static dir_handle_t *dir_find(HANDLE h) {
+    int i;
+    for (i = 0; i < MAX_DIRS; i++)
+        if (g_dirs[i].h == h)
+            return &g_dirs[i];
+    return NULL;
+}
+
+static void put_time(uint8_t *p, FILETIME t) {
+    memcpy(p, &t.dwLowDateTime, 4);
+    memcpy(p + 4, &t.dwHighDateTime, 4);
+}
+
+/* 207 NTSTATUS NtQueryDirectoryFile(HANDLE, HANDLE Event, PIO_APC_ROUTINE, PVOID ApcContext,
+ *     PIO_STATUS_BLOCK, PVOID FileInformation, ULONG Length, FILE_INFORMATION_CLASS,
+ *     POBJECT_STRING FileName (máscara ANSI), BOOLEAN RestartScan)
+ * Solo FileDirectoryInformation (1), una entrada por llamada; nombre ANSI (OCHAR). */
+static uint64_t NtQueryDirectoryFile(uint32_t *args) {
+    uint32_t *iosb = (uint32_t *)PTR(4), status = STATUS_SUCCESS, info = 0;
+    uint8_t *out = (uint8_t *)PTR(5);
+    uint32_t len = ARG(6);
+    char mask[256] = "*", host[MAX_PATH], pattern[MAX_PATH + 260];
+    WIN32_FIND_DATAA fd;
+    dir_handle_t *d;
+    int ro, have = 0;
+    io_init_once();
+    if (PTR(8) && (!xstring(PTR(8), mask, sizeof mask) || !mask_ok(mask))) {
+        ngb_log("    · NtQueryDirectoryFile: máscara '%s' no permitida", mask);
+        status = STATUS_INVALID_PARAMETER;
+        goto done;
+    }
+    if (ARG(7) != 1 || len < 0x41) {
+        ngb_log("    · NtQueryDirectoryFile: clase %u / tamaño %u no soportados", ARG(7), len);
+        status = STATUS_INVALID_PARAMETER;
+        goto done;
+    }
+    EnterCriticalSection(&g_io_lock);
+    d = dir_find((HANDLE)PTR(0));
+    if (!d) {
+        LeaveCriticalSection(&g_io_lock);
+        status = STATUS_INVALID_HANDLE;
+        goto done;
+    }
+    if ((ARG(9) & 0xFF) || !d->find) {
+        if (d->find && d->find != INVALID_HANDLE_VALUE)
+            FindClose(d->find);
+        d->find = INVALID_HANDLE_VALUE;
+        d->entries = 0;
+        if (host_path(d->xpath, host, sizeof host, &ro) == 1) {
+            snprintf(pattern, sizeof pattern, "%s\\%s", host, mask);
+            d->find = FindFirstFileA(pattern, &fd);
+            have = d->find != INVALID_HANDLE_VALUE;
+        }
+    } else if (d->find != INVALID_HANDLE_VALUE) {
+        have = FindNextFileA(d->find, &fd) != 0;
+    }
+    while (have && (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..")))
+        have = FindNextFileA(d->find, &fd) != 0;
+    if (!have) {
+        status = d->entries ? STATUS_NO_MORE_FILES : STATUS_NO_SUCH_FILE;
+    } else {
+        uint32_t nlen = (uint32_t)strlen(fd.cFileName);
+        uint64_t size = ((uint64_t)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
+        uint64_t alloc = (size + 0x3FFFu) & ~0x3FFFull; /* clúster FATX de 16 KB */
+        if (nlen > len - 0x40)
+            nlen = len - 0x40;
+        memset(out, 0, 0x40);
+        put_time(out + 0x08, fd.ftCreationTime);
+        put_time(out + 0x10, fd.ftLastAccessTime);
+        put_time(out + 0x18, fd.ftLastWriteTime);
+        put_time(out + 0x20, fd.ftLastWriteTime);
+        memcpy(out + 0x28, &size, 8);
+        memcpy(out + 0x30, &alloc, 8);
+        memcpy(out + 0x38, &fd.dwFileAttributes, 4);
+        memcpy(out + 0x3C, &nlen, 4);
+        memcpy(out + 0x40, fd.cFileName, nlen);
+        info = 0x40 + nlen;
+        d->entries++;
+    }
+    LeaveCriticalSection(&g_io_lock);
+done:
+    if (iosb) {
+        iosb[0] = status;
+        iosb[1] = info;
+    }
+    if (ARG(1))
+        SetEvent((HANDLE)PTR(1));
+    return RET32(status);
+}
+
 /* 198 NTSTATUS NtFlushBuffersFile(HANDLE, PIO_STATUS_BLOCK) */
 static uint64_t NtFlushBuffersFile(uint32_t *args) {
     FlushFileBuffers((HANDLE)PTR(0));
@@ -679,6 +789,7 @@ static const ngb_kimpl_t k_impls[] = {
     {200, NtFsControlFile},
     {198, NtFlushBuffersFile},
     {202, NtOpenFile},
+    {207, NtQueryDirectoryFile},
     {203, NtOpenSymbolicLinkObject},
     {211, NtQueryInformationFile},
     {215, NtQuerySymbolicLinkObject},

@@ -18,7 +18,7 @@ actualiza al cerrar cada sesión, y el detalle de cada cierre queda en [[log]].
 | **H4** Primer sonido | Una pista de `bgm.afs` reproducida como WAV | Formato de audio documentado | **hecho** (2026-10-20): música (bgm), voces (sse), efectos (.wva) y XWB en WAV ([[adx]], [[wva]]). Falta `movie/ninja.aix` (AIX multipista) |
 | **H5** Proyecto Ghidra y firmas del SDK | Proyecto Ghidra persistente; librerías del XDK identificadas por firmas; % de funciones con nombre | Métrica de cobertura en [[xbe-default]] | **hecho** (2026-10-21): 548 de 9,118 funciones con nombre; D3D8 identificable ([[adr-06-render-hibrido]]) |
 | **H6** Arranque nativo | `default.xbe` corriendo en un proceso Win32 de 32 bits hasta la primera llamada al kernel sin implementar, con log de las llamadas | Log reproducible; kernel HLE mínimo | **hecho** (2026-10-21): 285 llamadas al kernel, hasta la primera MMIO del NV2A ([[arranque-nativo]], [[adr-05-runtime-nativo]]) |
-| **H7** Primer frame | Un frame del juego (logo o pantalla de carga) en una ventana de PC | D3D8 mínimo sobre GL/Vulkan | pendiente |
+| **H7** Primer frame | Un frame del juego (logo o pantalla de carga) en una ventana de PC | D3D8 mínimo sobre GL/Vulkan | **en curso**: H7a hecho (el juego llega a la pantalla de avisos, [[gpu-nv2a]]); falta H7b, el rasterizado ([[adr-06-render-hibrido]]) |
 | **H8** Menú jugable | Menú principal con mando, audio y video | Entrada SDL3, audio, `.sfd` | pendiente |
 | **H9+** Descompilación y mejoras | Funciones en C con tests diferenciales; panorámico, 60+ fps interpolados, resolución alta | Por función o subsistema | pendiente |
 

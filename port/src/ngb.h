@@ -21,6 +21,8 @@
 /* Arena de memoria contigua: en Xbox, MmAllocateContiguousMemory devuelve 0x8xxxxxxx. */
 #define NGB_CONTIG_BASE 0x80000000u
 #define NGB_CONTIG_SIZE 0x04000000u /* 64 MB, la RAM de una Xbox retail */
+/* Ventana "física" de la imagen del XBE (MmGetPhysicalAddress y lecturas de la GPU). */
+#define NGB_PHYS_XBE 0x06000000u
 
 /* Códigos de salida del proceso (y motivo de parada en el log). */
 enum ngb_exit {
@@ -43,6 +45,9 @@ typedef struct ngb_options {
     int echo;                /* 1: copia cada línea del log a stderr */
     int mmio_strict;         /* 1: cualquier MMIO o E/S de puertos para la ejecución */
     int gpu_ram;             /* 1: el NV2A también se traza con RAM a cero (más allá de H6) */
+    unsigned pgraph_frames;  /* frames con todos los métodos en el log de PGRAPH */
+    unsigned long log_cap;   /* líneas de log por función del kernel (0 = sin límite) */
+    const char *symbols;     /* CSV de símbolos (opcional) */
 } ngb_options_t;
 
 extern ngb_options_t g_ngb_opts;
@@ -63,6 +68,7 @@ double ngb_elapsed(void);
 int ngb_memory_init(void);
 int ngb_memory_map_xbe(const xbe_t *xbe);
 int ngb_memory_patch_thunk(const xbe_t *xbe);
+int ngb_memory_patch_irql(const xbe_t *xbe);
 void *ngb_contig_alloc(uint32_t size, uint32_t align, uint32_t lowest, uint32_t highest);
 int ngb_contig_free(void *p);
 uint32_t ngb_contig_size(const void *p);
@@ -104,6 +110,12 @@ uint32_t ngb_tls_total_size(const xbe_t *xbe);
 
 /* crash.c */
 void ngb_crash_install(void);
+void ngb_apu_tick(void); /* DSP falso de la APU (lo llama el hilo de DPC) */
+
+/* symbols.c: nombres de funciones del XBE (--symbols, CSV de Ghidra en NGB_DATA) */
+int ngb_symbols_load(const char *path);
+/* " <Nombre+0xNN>" o "" si no hay símbolos cerca. */
+const char *ngb_symbol(uint32_t addr, char *buf, size_t buflen);
 
 /* Utilidades */
 void ngb_hexdump_line(char *out, size_t outlen, uint32_t va, uint32_t len);

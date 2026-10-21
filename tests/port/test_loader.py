@@ -19,9 +19,12 @@ from .synthetic_loader import (
     HAL_READ_SMC_TRAY_STATE,
     HOLA_VA,
     KE_QUERY_PERFORMANCE_FREQUENCY,
+    PB_PUT,
     RTL_INIT_ANSI_STRING,
     boot_code,
     build_loader_xbe,
+    gpu_code,
+    gpu_extra,
     mmio_code,
     unimplemented_code,
 )
@@ -30,24 +33,50 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 LOADER = Path(os.environ.get("NGB_LOADER", REPO_ROOT / "build" / "port" / "ngb-loader.exe"))
 EXIT_OK, EXIT_UNIMPLEMENTED, EXIT_CRASH = 0, 2, 3
 HOSTPATH_TEST = LOADER.parent / "hostpath_test.exe"
+PUSHBUF_TEST = LOADER.parent / "pushbuf_test.exe"
 
 
 @unittest.skipUnless(os.name == "nt" and LOADER.is_file(), "requiere Windows y el loader compilado")
 class LoaderRunTest(unittest.TestCase):
-    def run_xbe(self, xbe: bytes) -> tuple[int, str]:
+    pgraph_log = ""
+
+    def run_xbe(self, xbe: bytes, *extra_args: str) -> tuple[int, str]:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "synthetic.xbe"
             log = Path(tmp) / "run.log"
             path.write_bytes(xbe)
             env = {**os.environ, "NGB_DATA": tmp}  # el HDD virtual también cae en tmp
             result = subprocess.run(
-                [str(LOADER), str(path), "--log", str(log), "--timeout", "20"],
+                [str(LOADER), str(path), "--log", str(log), "--timeout", "20", *extra_args],
                 capture_output=True,
                 timeout=60,
                 check=False,
                 env=env,
             )
+            pgraph = Path(tmp) / "run-pgraph.log"
+            if pgraph.is_file():
+                self.pgraph_log = pgraph.read_text(encoding="utf-8", errors="replace")
             return result.returncode, log.read_text(encoding="utf-8", errors="replace")
+
+    def test_log_inside_a_git_repo_is_refused(self) -> None:
+        # Junto al log se vuelcan PNG del juego: un --log dentro de un repo se rechaza antes de
+        # ejecutar nada.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            (repo / ".git").mkdir(parents=True)
+            xbe = Path(tmp) / "synthetic.xbe"
+            xbe.write_bytes(build_loader_xbe(boot_code()))
+            log = repo / "runs" / "run.log"
+            result = subprocess.run(
+                [str(LOADER), str(xbe), "--log", str(log), "--timeout", "20"],
+                capture_output=True,
+                timeout=60,
+                check=False,
+                env={**os.environ, "NGB_DATA": tmp},
+            )
+        self.assertNotEqual(result.returncode, EXIT_OK)
+        self.assertIn(b"repo git", result.stderr)
+        self.assertFalse(log.exists())
 
     def test_boot_calls_kernel_and_returns(self) -> None:
         code, log = self.run_xbe(build_loader_xbe(boot_code()))
@@ -78,12 +107,26 @@ class LoaderRunTest(unittest.TestCase):
         self.assertIn("9 HalReadSMCTrayState(0, 0) -> NO IMPLEMENTADA", log)
         self.assertIn("primera sin implementar: 9 HalReadSMCTrayState", log)
 
-    def test_nv2a_mmio_is_reported_as_crash(self) -> None:
-        code, log = self.run_xbe(build_loader_xbe(mmio_code(), imports=()))
+    def test_unmodelled_mmio_is_reported_as_crash(self) -> None:
+        """Con --mmio-strict, un acceso a la APU para la ejecución con informe."""
+        xbe = build_loader_xbe(mmio_code(0xFE820010), imports=())
+        code, log = self.run_xbe(xbe, "--mmio-strict")
         self.assertEqual(code, EXIT_CRASH, log)
         self.assertIn("EXCEPCIÓN ACCESS_VIOLATION", log)
-        self.assertIn("lectura de 0xFD000000: MMIO NV2A (GPU)", log)
+        self.assertIn("lectura de 0xFE820010: MMIO APU (audio)", log)
         self.assertIn("código del XBE", log)
+
+    def test_nv2a_registers_and_push_buffer(self) -> None:
+        """H7a: PMC_BOOT_0, flush de PFB que termina solo y un push buffer decodificado."""
+        xbe = build_loader_xbe(gpu_code(), imports=(DBG_PRINT,), extra=gpu_extra())
+        code, log = self.run_xbe(xbe)
+        self.assertEqual(code, EXIT_OK, log)
+        self.assertIn(f"DbgPrint: boot=02a000a3 get={PB_PUT:08x}", log)
+        pg = self.pgraph_log
+        self.assertIn("SET_COLOR_CLEAR_VALUE              = 0xFF336699", pg)
+        self.assertIn("CLEAR_SURFACE                      = 0x000000F0", pg)
+        self.assertIn("FLIP_STALL", pg)
+        self.assertIn("fin del frame 0", pg)
 
 
 @unittest.skipUnless(os.name == "nt" and HOSTPATH_TEST.is_file(), "requiere el test C compilado")
@@ -95,6 +138,17 @@ class HostPathTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("hostpath_test: OK", result.stdout)
+
+
+@unittest.skipUnless(os.name == "nt" and PUSHBUF_TEST.is_file(), "requiere el test C compilado")
+class PushBufferTest(unittest.TestCase):
+    def test_decoder(self) -> None:
+        """pushbuf_test.exe: cabeceras, saltos, llamadas y errores del push buffer."""
+        result = subprocess.run(
+            [str(PUSHBUF_TEST)], capture_output=True, text=True, timeout=30, check=False
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("pushbuf_test: OK", result.stdout)
 
 
 if __name__ == "__main__":

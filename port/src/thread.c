@@ -8,8 +8,10 @@
  *             en NT_TIB de Windows y en el KPCR de Xbox; se usan tal cual.
  *   fs:[0x1C] SelfPcr     -> TEB.EnvironmentPointer := KPCR falso
  *   fs:[0x20] Prcb        -> TEB.ClientId.UniqueProcess := &KPCR falso.PrcbData
- *   fs:[0x24] Irql (byte) -> TEB.ClientId.UniqueThread := tid << 8 (byte bajo = 0 =
- *             PASSIVE_LEVEL; sigue siendo único por hilo para los CRITICAL_SECTION)
+ *   fs:[0x24] Irql (byte) -> NO se toca: es TEB.ClientId.UniqueThread, y Windows lo usa
+ *             para despertar a los hilos que esperan un CRITICAL_SECTION o un SRW (cambiarlo
+ *             perdía despertares: deadlock en H7a). Las 7 lecturas `movzx r32, byte fs:[24h]`
+ *             del juego se parchean al cargar a `mov r32, 0` (memory.c, ngb_memory_patch_irql).
  *   fs:[0x28] Prcb.CurrentThread -> TEB.ActiveRpcHandle := ETHREAD falso
  *
  * TLS Xbox: el compilador del XDK accede con [fs:[4] + _tls_index*4], con _tls_index
@@ -120,7 +122,6 @@ static void __cdecl xbox_start(ngb_thread_t *t) {
 static void teb_overlay(ngb_thread_t *t) {
     __writefsdword(0x1C, (unsigned long)(uintptr_t)t->kpcr);
     __writefsdword(0x20, (unsigned long)(uintptr_t)(t->kpcr + 0x28));
-    __writefsdword(0x24, (unsigned long)(t->tid << 8));
     __writefsdword(0x28, (unsigned long)(uintptr_t)t->ethread);
 }
 
@@ -321,9 +322,10 @@ void ngb_thread_dump_all(void) {
             uint32_t stackw[8] = {0};
             ReadProcessMemory(GetCurrentProcess(), sp, stackw, sizeof stackw, &got);
             ngb_hexdump_line(bytes, sizeof bytes, ctx.Eip, 16);
-            ngb_log("  T%d (tid %lu): EIP 0x%08lX ESP 0x%08lX EAX 0x%08lX ECX 0x%08lX EDX 0x%08lX "
-                    "| %s",
-                    t->index, t->tid, ctx.Eip, ctx.Esp, ctx.Eax, ctx.Ecx, ctx.Edx, bytes);
+            ngb_log("  T%d (tid %lu): EIP 0x%08lX ESP 0x%08lX EAX 0x%08lX EBX 0x%08lX ECX 0x%08lX "
+                    "EDX 0x%08lX ESI 0x%08lX EDI 0x%08lX | %s",
+                    t->index, t->tid, ctx.Eip, ctx.Esp, ctx.Eax, ctx.Ebx, ctx.Ecx, ctx.Edx, ctx.Esi,
+                    ctx.Edi, bytes);
             ngb_log("     pila: %08X %08X %08X %08X %08X %08X %08X %08X", stackw[0], stackw[1],
                     stackw[2], stackw[3], stackw[4], stackw[5], stackw[6], stackw[7]);
         }

@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "gpu/nv2a.h"
 #include "kernel/kernel.h"
 
 static const char *mmio_region(uint32_t addr) {
@@ -87,7 +88,40 @@ static const char *where(uint32_t eip) {
 #define MMIO_LOG_MAX 400
 
 static volatile LONG g_mmio_count;
-static __declspec(thread) uint32_t t_mmio_page;
+static __declspec(thread) uint32_t t_mmio_page, t_mmio_addr;
+
+static volatile uint32_t g_apu_gpsaddr; /* NV_PAPU_GPSADDR: lista SG de la memoria del GP DSP */
+
+/*
+ * DSP falso (H7a, atajo): DSOUND arranca el GP DSP de la APU con su microcódigo y espera a
+ * que este ponga a 0 un buzón en su memoria de trabajo (offset 0x810 de la primera página
+ * de la lista SG de GPSADDR) tras escribirle un comando. No hay DSP emulado, así que el
+ * hilo de DPC lo hace por él. Ver port/README.md (H7a).
+ */
+void ngb_apu_tick(void) {
+    static int logged;
+    uint32_t sg = g_apu_gpsaddr & ~3u, page;
+    volatile uint32_t *mbox;
+    if (!sg || sg >= NGB_CONTIG_SIZE)
+        return;
+    page = *(volatile uint32_t *)(uintptr_t)(NGB_CONTIG_BASE + sg) & 0x07FFF000u;
+    if (page >= NGB_CONTIG_SIZE - 0x1000u)
+        return;
+    mbox = (volatile uint32_t *)(uintptr_t)(NGB_CONTIG_BASE + page + 0x810u);
+    if (*mbox) {
+        if (logged++ < 8)
+            ngb_log("    · APU: DSP falso, buzón %p = 0x%08X -> 0", (void *)mbox, *mbox);
+        *mbox = 0;
+    }
+}
+
+/* AC97: el bit RR (1) de los registros de control x_CR se limpia solo tras el reset. */
+static void mmio_after_step(uint32_t addr) {
+    if ((addr & ~3u) == 0xFE802040u)
+        g_apu_gpsaddr = *(volatile uint32_t *)(uintptr_t)0xFE802040u;
+    if (addr == 0xFEC0010Bu || addr == 0xFEC0011Bu || addr == 0xFEC0012Bu || addr == 0xFEC0017Bu)
+        *(volatile uint8_t *)(uintptr_t)addr &= 0xFDu;
+}
 
 static int mmio_traceable(uint32_t addr) {
     if (g_ngb_opts.mmio_strict)
@@ -96,6 +130,20 @@ static int mmio_traceable(uint32_t addr) {
         return 1; /* --mmio-gpu-ram: exploración más allá de H6 */
     return addr >= 0xFE000000u; /* APU, AC97, USB, NIC, flash/BIOS; no el NV2A */
 }
+
+/*
+ * Registros de periféricos (no GPU) que el arranque sondea hasta ver un valor: se leen fijos.
+ *   APU VP NV1BA0_PIO_FREE (xemu mcpx/apu/vp/vp.c): 0x80 palabras libres en la cola PIO.
+ *   AC97 GLOB_STA (NABMBAR 0x100 + 0x30): códecs primario y secundario listos (bits 8, 9).
+ *   AC97 CAS (NABMBAR + 0x34): semáforo de acceso al códec libre.
+ */
+static const struct {
+    uint32_t addr, value;
+} k_mmio_fixed[] = {
+    {0xFE820010u, 0x80u},
+    {0xFEC00130u, 0x300u},
+    {0xFEC00134u, 0u},
+};
 
 static LONG mmio_access(EXCEPTION_RECORD *rec, CONTEXT *c) {
     uint32_t addr = (uint32_t)rec->ExceptionInformation[1], page = addr & ~0xFFFu;
@@ -111,6 +159,12 @@ static LONG mmio_access(EXCEPTION_RECORD *rec, CONTEXT *c) {
     }
     if (!VirtualProtect((void *)(uintptr_t)page, 0x1000, PAGE_READWRITE, &old))
         return EXCEPTION_CONTINUE_SEARCH;
+    if (rec->ExceptionInformation[0] == 0) {
+        uint32_t i;
+        for (i = 0; i < sizeof k_mmio_fixed / sizeof k_mmio_fixed[0]; i++)
+            if ((addr & ~3u) == k_mmio_fixed[i].addr)
+                *(volatile uint32_t *)(uintptr_t)k_mmio_fixed[i].addr = k_mmio_fixed[i].value;
+    }
     n = InterlockedIncrement(&g_mmio_count);
     if (n <= MMIO_LOG_MAX) {
         ngb_thread_t *t = ngb_thread_current();
@@ -119,6 +173,7 @@ static LONG mmio_access(EXCEPTION_RECORD *rec, CONTEXT *c) {
                 c->Eip, t ? t->index : 0, n == MMIO_LOG_MAX ? " (último acceso MMIO registrado)" : "");
     }
     t_mmio_page = page;
+    t_mmio_addr = addr;
     c->EFlags |= 0x100; /* TF: una instrucción y vuelta aquí para cerrar la página */
     return EXCEPTION_CONTINUE_EXECUTION;
 }
@@ -166,15 +221,27 @@ static LONG CALLBACK on_exception(EXCEPTION_POINTERS *info) {
     CONTEXT *c = info->ContextRecord;
     const char *name = code_name(rec->ExceptionCode);
     ngb_thread_t *t = ngb_thread_current();
-    char bytes[256], before[128];
+    char bytes[256], before[128], sym[96];
     char detail[256] = "";
     uint32_t stackw[12] = {0};
     SIZE_T got = 0;
     int i;
-    if (!name || ngb_stopping())
+    if (!name)
         return EXCEPTION_CONTINUE_SEARCH;
+    /* El MMIO se sigue atendiendo durante la parada: los hilos Xbox siguen vivos mientras
+     * se escribe el resumen, y un acceso sin atender tiraría el proceso sin informe. */
+    if (rec->ExceptionCode == EXCEPTION_SINGLE_STEP && nv2a_single_step(c)) {
+        c->EFlags &= ~0x100u;
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+    if (rec->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && rec->NumberParameters >= 2 &&
+        rec->ExceptionInformation[0] != 8 && !g_ngb_opts.mmio_strict && !g_ngb_opts.gpu_ram &&
+        nv2a_mmio_fault(rec, c) == EXCEPTION_CONTINUE_EXECUTION)
+        return EXCEPTION_CONTINUE_EXECUTION;
     if (rec->ExceptionCode == EXCEPTION_SINGLE_STEP && t_mmio_page) {
+        c->EFlags &= ~0x100u;
         DWORD old;
+        mmio_after_step(t_mmio_addr);
         VirtualProtect((void *)(uintptr_t)t_mmio_page, 0x1000, PAGE_NOACCESS, &old);
         t_mmio_page = 0;
         return EXCEPTION_CONTINUE_EXECUTION;
@@ -186,6 +253,8 @@ static LONG CALLBACK on_exception(EXCEPTION_POINTERS *info) {
     if (rec->ExceptionCode == EXCEPTION_PRIV_INSTRUCTION && !g_ngb_opts.mmio_strict &&
         port_io(c) == EXCEPTION_CONTINUE_EXECUTION)
         return EXCEPTION_CONTINUE_EXECUTION;
+    if (ngb_stopping())
+        return EXCEPTION_CONTINUE_SEARCH;
     if (rec->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && rec->NumberParameters >= 2) {
         uint32_t addr = (uint32_t)rec->ExceptionInformation[1];
         const char *op = rec->ExceptionInformation[0] == 0   ? "lectura"
@@ -198,8 +267,8 @@ static LONG CALLBACK on_exception(EXCEPTION_POINTERS *info) {
         snprintf(detail, sizeof detail, "instrucción privilegiada%s", priv_hint(c->Eip));
     }
     ngb_log("");
-    ngb_log("==== EXCEPCIÓN %s (0x%08lX) en EIP 0x%08lX, hilo T%d, %s", name, rec->ExceptionCode,
-            c->Eip, t ? t->index : 0, where(c->Eip));
+    ngb_log("==== EXCEPCIÓN %s (0x%08lX) en EIP 0x%08lX%s, hilo T%d, %s", name, rec->ExceptionCode,
+            c->Eip, ngb_symbol(c->Eip, sym, sizeof sym), t ? t->index : 0, where(c->Eip));
     if (detail[0])
         ngb_log("  %s", detail);
     ngb_log("  EAX %08lX EBX %08lX ECX %08lX EDX %08lX ESI %08lX EDI %08lX", c->Eax, c->Ebx,

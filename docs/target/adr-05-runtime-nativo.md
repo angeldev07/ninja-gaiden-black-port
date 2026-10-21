@@ -44,3 +44,5 @@ H6 lo hizo realidad ([[arranque-nativo]]). Este ADR recoge cómo, y las decision
   pueden estar inlineadas y cuesta encontrarlas ([[xbe-default]]).
 
 Se decide en H7 con datos. Antes conviene tener el proyecto Ghidra (H5) para ver cuánto de D3D8 es identificable.
+
+- **Corrección (H7a):** `fs:[0x24]` NO se superpone. En Windows es `ClientId.UniqueThread`, y pisarlo hacía perder despertares de CRITICAL_SECTION/SRW. Las lecturas de IRQL del XBE (`movzx r32, byte fs:[24h]`) se parchean al cargar ([[gpu-nv2a]]).

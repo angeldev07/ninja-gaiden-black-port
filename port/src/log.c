@@ -8,8 +8,10 @@
 #include "ngb.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
+#include "gpu/nv2a.h"
 #include "kernel/kernel.h"
 
 static CRITICAL_SECTION g_log_lock;
@@ -23,7 +25,11 @@ int ngb_log_open(const char *path) {
     QueryPerformanceCounter(&g_t0);
     if (fopen_s(&g_log_file, path, "wb") || !g_log_file)
         return -1;
-    setvbuf(g_log_file, NULL, _IOFBF, 1 << 16);
+    /* NGB_LOG_UNBUFFERED=1: cada línea llega al disco (para depurar muertes sin informe). */
+    if (getenv("NGB_LOG_UNBUFFERED"))
+        setvbuf(g_log_file, NULL, _IONBF, 0);
+    else
+        setvbuf(g_log_file, NULL, _IOFBF, 1 << 16);
     return 0;
 }
 
@@ -113,6 +119,8 @@ __declspec(noreturn) void ngb_stop(int code, const char *fmt, ...) {
     va_end(ap);
     ngb_log("");
     ngb_log("==== STOP %s (%d) a los %.3f s: %s", exit_name(code), code, ngb_elapsed(), reason);
+    /* El resumen del NV2A toma su lock: va ANTES de suspender los hilos para el volcado. */
+    nv2a_summary();
     ngb_thread_dump_all();
     ngb_kernel_summary();
     ngb_log("==== FIN");

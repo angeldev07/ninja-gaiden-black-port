@@ -140,3 +140,9 @@ mayoría de los fallos son el descriptor multiparte. Detalle en [[personajes]].
 `ngb_tools.kmd` ya lee el descriptor multiparte que usan los escenarios y 10 personajes, y `stage` usa ahora el
 mismo parser. Exportan Doku, army, aruma, sohei, tank, truck, ufo, whip, heli y s_aru. Ryu y Ayane salen
 idénticos byte a byte. Detalle en [[kmd]].
+## [2026-10-21] milestone | H7a: el juego llega a la pantalla de avisos
+Con un mínimo de registros del NV2A emulados, más el vblank sintético y el push buffer, `default.xbe` pasa la
+inicialización de D3D8 y envía 37,337 frames con 808,728 primitivas en 30 s, todavía sin rasterizar. Las texturas
+que carga son el rótulo "Warnings" y el atlas de la fuente, revisados por el líder.
+El bloqueo real era un bug de H6: la superposición del TEB pisaba `ClientId.UniqueThread` (`fs:[0x24]`), y con
+eso Windows perdía despertares de hilos. Detalle en [[gpu-nv2a]].

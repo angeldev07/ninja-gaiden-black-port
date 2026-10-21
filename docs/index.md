@@ -21,6 +21,7 @@ en [[CLAUDE]] y la línea de tiempo en [[log]].
 - [[disco-ngb]]: imagen Redump y XISO, 249 archivos por tipo, grupos de AFS, ejecutables y videos.
 - [[arranque-nativo]]: qué hace `default.xbe` al arrancar de forma nativa (H6): hilos, XAPI, unidades, caché en el disco duro, init de D3D hasta la primera MMIO del NV2A.
 - [[personajes]]: galería de los 62 `chr_*`: 49 exportan a GLB, 20 con idle; fallos agrupados por causa.
+- [[gpu-nv2a]]: H7a. Registros del NV2A emulados, vblank y push buffer: el juego llega a la pantalla de avisos y envía 808k primitivas (aún sin rasterizar).
 - [[xbe-default]]: anatomía de `default.xbe`. Motor "Kunai", MSVC 13.10 con el XDK 5849, D3D8LTCG, 16 secciones, 145 imports del kernel, middleware de CRI y los otros 4 XBE del disco.
 
 ## Observación: formatos (`formats/`)
