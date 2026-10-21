@@ -26,6 +26,11 @@ class DecodeTests(unittest.TestCase):
         data = push_buffer_bytes([0, 1, 2, 3]) + bytes(8)
         self.assertEqual(decode_push_buffer(data), (0, 1, 2, 3))
 
+    def test_garbage_in_the_padding_word_after_end_is_ignored(self) -> None:
+        # Como ssato_02.kmd res236: el u32 que sigue a END trae 0xc2f916e6.
+        data = push_buffer_bytes([0, 1, 2])[:-4] + words(0xC2F916E6) + bytes(4)
+        self.assertEqual(decode_push_buffer(data), (0, 1, 2))
+
 
 class RejectTests(unittest.TestCase):
     def assert_rejected(self, data: bytes) -> None:
@@ -50,6 +55,13 @@ class RejectTests(unittest.TestCase):
 
     def test_data_after_end_is_rejected(self) -> None:
         self.assert_rejected(push_buffer_bytes([0, 1, 2]) + words(0x00041800, 1))
+
+    def test_garbage_beyond_the_padding_word_is_rejected(self) -> None:
+        self.assert_rejected(push_buffer_bytes([0, 1, 2])[:-4] + words(0xC2F916E6, 7))
+
+    def test_garbage_before_end_is_a_command(self) -> None:
+        # Sin END, la palabra suelta se lee como cabecera de comando y se rechaza.
+        self.assert_rejected(words(0x000417FC, 6, 0x00041800, 0x00010000, 0xC2F916E6))
 
     def test_truncated_arguments_are_rejected(self) -> None:
         self.assert_rejected(words(0x000417FC, 6, 0x00081800, 0x00010000))

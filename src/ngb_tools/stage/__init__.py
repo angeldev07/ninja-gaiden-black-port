@@ -1,9 +1,8 @@
 """Escenarios de Team Ninja: KMD de zona con varias partes por objeto y colisión (HITMDL).
 
-Usa `ngb_tools.kmd` como librería (OBJINFO, HIERARC, descriptor de una parte, FVF, push
+Usa `ngb_tools.kmd` como librería (OBJINFO, HIERARC, descriptor multiparte, FVF, push
 buffers, tiras) y añade lo que solo aparece en los escenarios. Módulos, de abajo arriba:
 
-- `descriptor`: descriptor de malla con varias partes (varios pares VB/IB por objeto).
 - `collision`: HITMDL, la malla de colisión (registros `VHD`).
 - `model`: el KMD de escenario entero, emparejamiento de partes y buffers, invariantes.
 - `zone`: las partes `<zona>_NN` de los AFS de la zona, sin repetir variantes idénticas.
@@ -15,20 +14,17 @@ buffers, tiras) y añade lo que solo aparece en los escenarios. Módulos, de aba
 from __future__ import annotations
 
 from ngb_tools.stage.collision import CollisionMesh, parse_collision_record, parse_hitmdl
-from ngb_tools.stage.descriptor import StageDescriptor, parse_stage_descriptor
 from ngb_tools.stage.errors import StageError, StageFormatError, ZoneNotFoundError
 from ngb_tools.stage.model import (
     StageModel,
     StageObject,
     StagePart,
     SubmeshRef,
-    decode_stage_push_buffer,
     parse_stage_kmd,
 )
 
 __all__ = [
     "CollisionMesh",
-    "StageDescriptor",
     "StageError",
     "StageFormatError",
     "StageModel",
@@ -36,9 +32,7 @@ __all__ = [
     "StagePart",
     "SubmeshRef",
     "ZoneNotFoundError",
-    "decode_stage_push_buffer",
     "parse_collision_record",
     "parse_hitmdl",
-    "parse_stage_descriptor",
     "parse_stage_kmd",
 ]

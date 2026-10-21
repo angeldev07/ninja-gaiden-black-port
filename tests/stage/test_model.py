@@ -5,8 +5,9 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
+from ngb_tools.kmd.pushbuffer import decode_push_buffer
 from ngb_tools.stage.errors import StageFormatError
-from ngb_tools.stage.model import decode_stage_push_buffer, parse_stage_kmd
+from ngb_tools.stage.model import parse_stage_kmd
 
 from . import synthetic
 from .synthetic import (
@@ -57,7 +58,7 @@ class StageModelTests(unittest.TestCase):
         self.assertEqual(model.submesh_indices((0, 0, 0)), (0, 1, 2, 3))
 
     def test_strict_decoder_is_used_first(self) -> None:
-        self.assertEqual(decode_stage_push_buffer(push_buffer_bytes((0, 1, 2))), (0, 1, 2))
+        self.assertEqual(decode_push_buffer(push_buffer_bytes((0, 1, 2))), (0, 1, 2))
 
     def test_index_out_of_range_is_an_issue_and_not_exportable(self) -> None:
         obj = SynthStageObject(parts=[SynthPart(strip=(0, 1, 9))])

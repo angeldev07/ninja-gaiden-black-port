@@ -130,13 +130,29 @@ También aparecen `0x142` y un grupo 6 en otros personajes; los cubre el decodif
 | Ayane (`chr_ayane#0`, `aya_a`) | completa; la incidencia es una rotación pequeña en los obj24/25, que se ignora |
 | Murai (`murai`, `r_mur`) | completo |
 | Doku: katana (`do_sw`) y máscara (`do_face`) | completos |
-| **Doku: cuerpo** (`chr_doku#0`) | **no**: tiene 88 VB para 87 objetos y un descriptor variante (origen de submalla 24) |
+| **Doku: cuerpo** (`chr_doku#0`) | completo desde la PR #29: usa el descriptor multiparte, ver abajo. La cara se asigna en tiempo de ejecución |
 
 La espada de Ryu no está en `ryu.kmd`.
 
+## Descriptor multiparte (`VERIFIED`: 59 de 60 personajes exportan)
+
+Algunos personajes usan la misma variante que los escenarios ([[escenarios]]). Al principio del descriptor va un
+`u32 n_parts`; la cabecera ocupa `8 + 0x20·n`, y el campo `+0x04` de cada submalla dice a qué parte pertenece.
+Cada parte tiene su propio par VB/IB, y `USERDATA0[2]` cuenta VB, no objetos. `ngb_tools.kmd` presenta un objeto
+de varias partes como uno solo: concatena los vértices y desplaza los índices; si a una parte le faltan UV,
+color o normal, los rellena (las normales se suavizan a partir de los triángulos, `INFERRED`).
+
+- Exportan ahora army, aruma, **doku** (samurái con kabuto de cuernos y katana envainada; la cara se asigna en
+  tiempo de ejecución desde `do_face.kmd`), heli, s_aru, sohei, tank, truck (4 partes), ufo y whip.
+- Push buffers: el primer `u32` tras `END` se ignora, valga lo que valga, y lo que siga tiene que ser 0. En el
+  juego son 2,137 push buffers, todos con exactamente 1 `u32` tras `END` (72 con basura).
+- Regresión: Ryu y Ayane salen idénticos byte a byte, y 47 de los 49 personajes que ya exportaban también.
+  Daina y Rachel ganan triángulos que antes se saltaban.
+- Sigue fallando **unagi**: su HIERARC es otra variante (raíz fuera de rango).
+
 ## Pendiente
 
-- La variante de Doku.
+- La variante de HIERARC de unagi.
 - R ≠ 0 (orden de rotación desconocido).
 - Semántica de los pesos del skin.
 - Estados de material: blend aditivo, alfa de las DXT5 y etapas extra.

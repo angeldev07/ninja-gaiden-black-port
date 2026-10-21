@@ -10,11 +10,17 @@ seguida de sus argumentos:
 
 Las cabeceras de salto o llamada (bits 0-1 o 29) no se admiten. En `ryu.kmd` el único push
 buffer es exactamente `SET_BEGIN_END(TRIANGLE_STRIP)`, `ARRAY_ELEMENT16` con 1085 palabras
-(dos índices u16 por palabra, el bajo primero) y `SET_BEGIN_END(END)`, más un u32 0 de
+(dos índices u16 por palabra, el bajo primero) y `SET_BEGIN_END(END)`, más un u32 de
 relleno. Si la tira tiene un número impar de índices, el último va solo en un
 `ARRAY_ELEMENT32` (un índice por palabra; visto en `ayane.kmd` y `murai.kmd`). Cualquier
 otro método se rechaza: el formato de vértice no viaja en el push buffer sino en el FVF del
 descriptor.
+
+**Relleno tras END.** En los 2137 push buffers de los KMD del juego, detrás de END hay
+exactamente un u32: 0 en 2065 y un valor cualquiera en 72 (de escenarios: `ssato_02.kmd`
+res236 trae `0xc2f916e6`). Ese primer u32 tras END se ignora sea cual sea; lo que venga
+después tiene que ser 0. La basura solo se tolera si de verdad va detrás de END: antes de
+END, cualquier palabra es un comando y se valida.
 
 Fuente de los métodos: xemu, `hw/xbox/nv2a/nv2a_regs.h` (`NV097_SET_BEGIN_END` 0x17FC con
 `OP_TRIANGLE_STRIP` 6 y `OP_END` 0, `NV097_ARRAY_ELEMENT16` 0x1800, `NV097_ARRAY_ELEMENT32`
@@ -86,6 +92,6 @@ def decode_push_buffer(data: bytes) -> tuple[int, ...]:
         i += 1 + count
     if state != "done":
         raise PushBufferError("push buffer sin SET_BEGIN_END(END)")
-    if any(words[i:]):
-        raise PushBufferError(f"push buffer {4 * i:#x}: datos tras SET_BEGIN_END(END)")
+    if any(words[i + 1 :]):  # words[i] es el u32 de relleno: puede valer cualquier cosa
+        raise PushBufferError(f"push buffer {4 * (i + 1):#x}: datos tras SET_BEGIN_END(END)")
     return tuple(indices)

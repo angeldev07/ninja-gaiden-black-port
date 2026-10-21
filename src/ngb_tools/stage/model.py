@@ -4,7 +4,7 @@ Un KMD de escenario (`boff_01.kmd`) es un KMD como el de un personaje (`ngb_tool
 estas diferencias (VERIFIED en los 111 KMD `<zona>_NN` del juego y en `stage00`/`stage02`
 de `debug.afs`):
 
-- **Partes.** Un objeto puede tener hasta 4 pares VB/IB, uno por FVF (`descriptor`). Las
+- **Partes.** Un objeto puede tener hasta 4 pares VB/IB, uno por FVF (`ngb_tools.kmd.mesh`). Las
   cabeceras del XPR0 van objeto a objeto: los VB (cada uno seguido de su IB, si lo hay) de
   sus partes y después sus push buffers. `boff_01.kmd`: 36 objetos, 43 VB y 42 IB.
 - **El USERDATA 0** dice (63, texturas, VB, IB, push buffers): su tercer campo cuenta VB,
@@ -37,14 +37,16 @@ from dataclasses import dataclass, field, replace
 from functools import cached_property
 from typing import Final
 
-from ngb_tools.kmd.errors import KmdError, PushBufferError, UnsupportedVertexFormatError
+from ngb_tools.kmd.errors import KmdError, UnsupportedVertexFormatError
 from ngb_tools.kmd.hierarchy import HIERARC_TAG, Hierarchy, parse_hierarchy
 from ngb_tools.kmd.mesh import (
     IndexSource,
     MeshDescriptor,
     ModelHeader,
+    MultipartDescriptor,
     Submesh,
     parse_model_header,
+    parse_multipart_descriptor,
 )
 from ngb_tools.kmd.model import Issue
 from ngb_tools.kmd.objinfo import OBJINFO_TAG, ObjectInfo, Vec3, parse_objinfo
@@ -52,7 +54,6 @@ from ngb_tools.kmd.pushbuffer import decode_push_buffer
 from ngb_tools.kmd.topology import Triangle, strip_to_triangles
 from ngb_tools.kmd.vertices import VertexData, VertexLayout, decode_vertices, vertex_layout
 from ngb_tools.stage.collision import HITMDL_TAG, CollisionMesh, parse_hitmdl
-from ngb_tools.stage.descriptor import StageDescriptor, parse_stage_descriptor
 from ngb_tools.stage.errors import StageFormatError
 from ngb_tools.teamninja import TeamNinjaChunk, TeamNinjaError, parse_chunk
 from ngb_tools.teamninja.chunk import TAG_SIZE
@@ -91,7 +92,7 @@ class StageObject:
 
     index: int
     info: ObjectInfo
-    descriptor: StageDescriptor
+    descriptor: MultipartDescriptor
     parts: tuple[StagePart, ...]
 
     @property
@@ -254,7 +255,7 @@ def _layout(obj: int, part: int, mesh: MeshDescriptor, issues: list[Issue]) -> V
 
 def _build_objects(
     infos: Sequence[ObjectInfo],
-    descriptors: Sequence[StageDescriptor],
+    descriptors: Sequence[MultipartDescriptor],
     pairs: Sequence[tuple[VertexBuffer, IndexBuffer | None]],
     issues: list[Issue],
 ) -> tuple[StageObject, ...]:
@@ -276,28 +277,11 @@ def _build_objects(
     return tuple(objects)
 
 
-def decode_stage_push_buffer(raw: bytes) -> tuple[int, ...]:
-    """`decode_push_buffer` tolerando basura en el u32 de relleno que sigue a END.
-
-    En los personajes ese último u32 vale 0; en 64 push buffers de 8 escenarios
-    (`ssato_02`, `suiro_02`, `zppln_01`...) trae un valor cualquiera (`0xc2f916e6` en
-    `ssato_02.kmd` res236). Si la lectura estricta falla, se repite con ese u32 a 0.
-
-    TODO(kmd): que `ngb_tools.kmd.pushbuffer` ignore el relleno tras END.
-    """
-    try:
-        return decode_push_buffer(raw)
-    except PushBufferError:
-        if len(raw) < 4 or not any(raw[-4:]):
-            raise
-        return decode_push_buffer(raw[:-4] + bytes(4))
-
-
 def _decode_push_buffers(xpr: XprFile, issues: list[Issue]) -> tuple[tuple[int, ...], ...]:
     decoded: list[tuple[int, ...]] = []
     for pb in (r for r in xpr.resources if isinstance(r, PushBuffer)):
         try:
-            decoded.append(decode_stage_push_buffer(xpr.data_bytes(pb.data, pb.size)))
+            decoded.append(decode_push_buffer(xpr.data_bytes(pb.data, pb.size)))
         except (KmdError, XprError) as error:
             issues.append(Issue(None, f"push buffer res{pb.index}: {error}"))
             decoded.append(())
@@ -363,8 +347,10 @@ def _with_checks(model: StageModel, issues: list[Issue]) -> StageModel:
     header, vb_count = model.header, model.part_count
     if header.texture_count != len(model.textures):
         issues.append(Issue(None, f"la cabecera dice {header.texture_count} texturas"))
-    if header.object_count != vb_count:
-        issues.append(Issue(None, f"la cabecera dice {header.object_count} VB, hay {vb_count}"))
+    if header.vertex_buffer_count != vb_count:
+        issues.append(
+            Issue(None, f"la cabecera dice {header.vertex_buffer_count} VB, hay {vb_count}")
+        )
     extents = _extents(model.xpr)
     unusable: set[SubmeshRef] = set()
     for obj in model.objects:
@@ -422,7 +408,7 @@ def parse_stage_kmd(data: bytes, name: str = "") -> StageModel:
     descriptors = []
     for k, ud in enumerate(userdata[1:]):
         try:
-            descriptors.append(parse_stage_descriptor(ud.payload))
+            descriptors.append(parse_multipart_descriptor(ud.payload))
         except (StageFormatError, KmdError) as error:
             raise StageFormatError(f"{name}: obj{k}: {error}") from error
     issues: list[Issue] = []

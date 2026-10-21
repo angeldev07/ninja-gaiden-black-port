@@ -135,3 +135,8 @@ Por eso se decide un **render híbrido**: PGRAPH emulado, más HLE en Swap, Kick
 ## [2026-10-21] ingest | Galería de personajes
 `ngb_tools.gallery`: 49 de 62 personajes en GLB, 20 de ellos con idle animado, más una hoja de contactos. La
 mayoría de los fallos son el descriptor multiparte. Detalle en [[personajes]].
+
+## [2026-10-21] ingest | Descriptor multiparte en kmd: 59/60 personajes
+`ngb_tools.kmd` ya lee el descriptor multiparte que usan los escenarios y 10 personajes, y `stage` usa ahora el
+mismo parser. Exportan Doku, army, aruma, sohei, tank, truck, ufo, whip, heli y s_aru. Ryu y Ayane salen
+idénticos byte a byte. Detalle en [[kmd]].

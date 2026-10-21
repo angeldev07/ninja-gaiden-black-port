@@ -13,7 +13,8 @@ contactos. Fuente: la ejecución del 2026-10-21. La salida está en `NGB_DATA/ex
 
 ## Resultado
 
-- **49 de 62 exportan; 20 con idle animado:** Ryu y sus 7 trajes, cat, daina, genin, hanin, kage, m_arm, murai,
+- **Con el soporte multiparte (2026-10-21) exportan 59 de los 60 KMD principales**; antes eran 49. Solo falla unagi, por su variante de HIERARC. La hoja de contactos de abajo es anterior a ese cambio.
+- **49 de 62 exportaban, 20 con idle animado:** Ryu y sus 7 trajes, cat, daina, genin, hanin, kage, m_arm, murai,
   rider, s_kag, swat, taike y yonin. El rig humanoide generaliza más allá de Ryu (revisado en murai, genin, cat y
   kage).
 - Se reconocen en la hoja: Ayane, Rachel (`rei`), Ryu y sus trajes, Murai, genin, jonin, Garra, Haiki (araña),
