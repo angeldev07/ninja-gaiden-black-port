@@ -172,8 +172,9 @@ escalado entero, F12 guarda captura en `%NGB_DATA%\runs\shots`, FPS en el títul
   ancho que el juego limpió o dibujó en ese frame (A8R8G8B8, pitch de `SET_SURFACE_PITCH`).
   Cada 300 frames presentados se guarda una captura automática (`<log>-pgraph-shot-NNNNN.png`).
 - **Pacing**: `FLIP_STALL` espera al siguiente 1/60 s de reloj (un vblank de 60 Hz virtual)
-  antes de devolver GET; `--no-pacing` lo quita. Se hace en el propio pusher (dentro del VEH,
-  con el lock del NV2A tomado como mucho 16 ms), así que el resto del juego sigue al ritmo.
+  antes de devolver GET; `--no-pacing` lo quita. Desde H7c la espera se hace al volver del
+  kick, ya sin el lock del NV2A ni el de PGRAPH (issue #35); solo un kick con dos
+  `FLIP_STALL` seguidos (el push buffer en bucle del vídeo) espera dentro.
 - **Rasterizador de referencia** (`gpu/raster.c`, puro, probado en `tests/raster_test.c`):
   triángulos con posición ya en pantalla (XYZRHW: 4 floats en el atributo 0), difuso
   (atributo 3, `UB_D3D`/`UB_OGL`/float, o la constante de `SET_VERTEX_DATA4UB`), coordenadas
@@ -208,6 +209,40 @@ completa ("Warnings" y el texto que se desplaza y se funde) a 60 fps; capturas a
 `spr.afs` y pasa a una pantalla que solo limpia a negro (no hay geometría nueva que dibujar).
 Siguiente paso: averiguar qué espera ahí (mando conectado, carga de datos o vídeo) e
 interpretar los vertex programs para la geometría 3D.
+
+## H7c: render con OpenGL en el runtime
+
+`--renderer gl|soft` elige quién dibuja. Por defecto (`gl` sin pedirlo) se usa OpenGL 4.x si
+hay `--window` y el driver da un contexto; si no, el rasterizador por software de H7b.
+
+- **Hilo de render** (`gpu/pgraph_gl.c`): el contexto GL vive en un hilo propio, sobre la
+  ventana del presentador (`gfx_set_external`: GDI deja de pintar). `pgraph_kick` le pasa el
+  kick entero y espera (sigue siendo síncrono). Motivo: el kick llega desde el VEH en
+  cualquier hilo Xbox, con el TEB parcheado y una pila propia, y un contexto GL solo puede
+  estar actual en un hilo.
+- **Superficies**: cada render target (color y zeta) es una textura GL indexada por su
+  dirección física (`gpu/rcache.c`). Una textura cuya dirección es la de una superficie se
+  muestrea directamente de la GPU (render-to-texture); si además es el destino actual, se
+  copia antes (GL no deja leer y escribir a la vez). Se dibuja con la fila 0 arriba, como en
+  la Xbox, y el present la voltea.
+- **Dibujo**: `INLINE_ARRAY`, `DRAW_ARRAYS` y `ARRAY_ELEMENT16/32` con los formatos de
+  `SET_VERTEX_DATA_ARRAY_FORMAT` y `SET_VERTEX_DATA_ARRAY_OFFSET`; atributos constantes de
+  `SET_VERTEX_DATA*`. Shaders: vertex programs (`0x0B00` + LOAD/START) con `nv2a_vsh_to_glsl`
+  o, en modo fijo, un shader con la matriz compuesta; combiners con `nv2a_psh_to_glsl`;
+  estado con `glstate`. Programas cacheados por hash del microcódigo y de los combiners.
+- **Texturas**: `texconv`, con caché por dirección + formato y hash del contenido, que se
+  comprueba la primera vez que se usa cada textura en un frame.
+- **Present**: en `FLIP_STALL`, blit de la superficie de 720 al back buffer y SwapBuffers
+  (sin vsync: el ritmo lo pone el pacing). Las capturas automáticas leen la textura de la GPU.
+- **Medidas**: cada 300 frames el log escribe una línea `perf:` con los fps reales y el
+  tiempo por frame de cada fase (pusher, dibujo, clear, present, pacing, log), más llamadas al
+  kernel, accesos MMIO y kicks por frame.
+- **Pusher parado** (`gpu/nv2a.c`): con el bit 0 de `CACHE1_PUSH0` o de `CACHE1_DMA_PUSH` a 0,
+  una escritura de PUT solo se guarda, y el kick se hace al reactivarlo. Al reiniciar D3D para
+  el vídeo, el juego para el pusher, libera el push buffer viejo y escribe PUT = 0 antes que
+  GET. Antes ese PUT se ejecutaba: el pusher recorría el búfer liberado durante 4 M de
+  palabras, con FLIP_STALL de los avisos viejos y unos 2 minutos de pantalla negra, en los dos
+  renders. El log anota las escrituras del FIFO que no son un PUT normal (`NV2A: FIFO`).
 
 ## Deuda conocida
 

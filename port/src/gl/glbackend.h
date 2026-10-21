@@ -112,6 +112,9 @@ typedef struct glb_uniform {
  */
 int glb_init(HWND hwnd, int width, int height);
 
+/* DC de la ventana del contexto (para SwapBuffers desde quien dibuja). */
+HDC glb_get_dc(void);
+
 /* Información del driver; NULL si no se ha iniciado. */
 const glb_info *glb_get_info(void);
 

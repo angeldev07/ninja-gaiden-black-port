@@ -19,6 +19,9 @@ static CRITICAL_SECTION g_log_lock;
 static FILE *g_log_file;
 static volatile LONG g_stopping;
 static LARGE_INTEGER g_t0, g_freq;
+static volatile LONG64 g_log_ticks; /* tiempo dentro de ngb_log_raw (lock incluido) */
+
+long long ngb_log_ticks(void) { return (long long)g_log_ticks; }
 
 int ngb_log_open(const char *path) {
     InitializeCriticalSection(&g_log_lock);
@@ -53,14 +56,18 @@ static int log_lock(void) {
 
 void ngb_log_raw(const char *text) {
     int locked;
+    LARGE_INTEGER a, b;
     if (!g_log_file)
         return;
+    QueryPerformanceCounter(&a);
     locked = log_lock();
     fputs(text, g_log_file);
     if (g_ngb_opts.echo)
         fputs(text, stderr);
     if (locked)
         LeaveCriticalSection(&g_log_lock);
+    QueryPerformanceCounter(&b);
+    InterlockedAdd64(&g_log_ticks, b.QuadPart - a.QuadPart);
 }
 
 void ngb_logv(const char *fmt, va_list ap) {

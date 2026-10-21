@@ -20,6 +20,8 @@ static volatile LONG g_seq;
 static volatile LONG g_unimpl_first;
 volatile DWORD g_ngb_last_call_tick;
 
+long ngb_kernel_calls(void) { return g_seq; }
+
 const ngb_kexport_t *ngb_kexport(uint32_t ordinal) {
     return ordinal <= NGB_MAX_ORDINAL ? g_exports[ordinal] : NULL;
 }

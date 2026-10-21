@@ -226,6 +226,8 @@ int glb_init(HWND hwnd, int width, int height) {
     return 0;
 }
 
+HDC glb_get_dc(void) { return g.ready ? g.dc : NULL; }
+
 const glb_info *glb_get_info(void) {
     return g.ready ? &g.info : NULL;
 }

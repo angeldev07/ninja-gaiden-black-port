@@ -371,7 +371,8 @@ static void emit_texture(glsl_buf *b, const psh_program *p, int i) {
         glsl_emit(b, "    vec4 t%d = vec4(0.0);\n", i);
         break;
     case PSH_TEX_PROJECT2D:
-        glsl_emit(b, "    vec4 t%d = textureProj(tex%d, oT%d.xyw);\n", i, i, i);
+        glsl_emit(b, "    vec4 t%d = textureProj(tex%d, vec3(oT%d.xy * texScale[%d], oT%d.w));\n", i,
+                  i, i, i, i);
         break;
     case PSH_TEX_PROJECT3D:
         glsl_emit(b, "    vec4 t%d = textureProj(tex%d, oT%d);\n", i, i, i);
@@ -391,8 +392,8 @@ static void emit_texture(glsl_buf *b, const psh_program *p, int i) {
         break;
     case PSH_TEX_BUMPENVMAP:
     case PSH_TEX_BUMPENVMAP_LUM:
-        glsl_emit(b, "    vec4 t%d = texture(tex%d, oT%d.xy + bumpMat[%d] * t%d.rg);\n", i, i, i,
-                  i, src);
+        glsl_emit(b, "    vec4 t%d = texture(tex%d, (oT%d.xy + bumpMat[%d] * t%d.rg) * texScale[%d]);\n",
+                  i, i, i, i, src, i);
         if (mode == PSH_TEX_BUMPENVMAP_LUM) {
             glsl_emit(b,
                       "    t%d.rgb *= clamp(t%d.b * bumpScale[%d] + bumpOffset[%d], 0.0, 1.0);\n",
@@ -459,7 +460,10 @@ int nv2a_psh_to_glsl(const psh_program *p, char *out, size_t outlen) {
               "uniform vec4 psFinalC0;\nuniform vec4 psFinalC1;\nuniform vec4 fogColor;\n"
               "uniform mat2 bumpMat[%d];\nuniform float bumpScale[%d];\n"
               "uniform float bumpOffset[%d];\nuniform int alphaTest;\nuniform int alphaFunc;\n"
-              "uniform float alphaRef;\nout vec4 fragColor;\n\n"
+              "uniform float alphaRef;\n"
+              "/* Texturas lineales (LU_IMAGE): el NV2A las direcciona en texels y texScale =\n"
+              " * 1/(ancho, alto) las pasa a [0, 1]. Para las demas vale 1. */\n"
+              "uniform vec2 texScale[%d];\nout vec4 fragColor;\n\n"
               "/* Alpha test (estado fijo del NV2A, ver port/src/gl/glstate.c): alphaFunc es\n"
               " * GL_NEVER + n y se compara en 8 bits, como el hardware. */\n"
               "bool nv_alpha_pass(float a) {\n"
@@ -476,7 +480,7 @@ int nv2a_psh_to_glsl(const psh_program *p, char *out, size_t outlen) {
               "    default: return true;\n"
               "    }\n"
               "}\n\nvoid main() {\n",
-              PSH_MAX_STAGES, PSH_MAX_STAGES, PSH_TEXTURES, PSH_TEXTURES, PSH_TEXTURES);
+              PSH_MAX_STAGES, PSH_MAX_STAGES, PSH_TEXTURES, PSH_TEXTURES, PSH_TEXTURES, PSH_TEXTURES);
     for (i = 0; i < PSH_TEXTURES; i++) {
         emit_texture(&b, p, i);
     }

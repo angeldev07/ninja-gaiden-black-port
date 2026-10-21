@@ -140,6 +140,42 @@ desplazándose y fundiéndose. Es el código del juego ejecutándose de forma na
     corto de la Xbox duraba 15,6 ms;
   - se añadió `--watch` para vigilar variables del juego.
 
+## H7c: render por GPU con OpenGL (`VERIFIED`)
+
+`--renderer gl` es el modo por defecto si hay ventana y contexto; `--renderer soft` queda como respaldo. Código en
+`port/src/gpu/pgraph_gl.c` y `rcache.c`; usa [[shaders-nv2a]], `texconv` y `glstate`.
+
+| Métrica (líneas `perf:` del log) | Software | OpenGL (RX 6600) |
+| --- | --- | --- |
+| Título y menú | 16 fps (raster 59 ms/frame) | **60 fps** (pusher 0,7-2 ms) |
+| Avisos | 38-53 fps | **60 fps**: terminan a los 40,0 s, que es su duración de diseño |
+
+- **Hilos:**
+  - el kick llega en cualquier hilo Xbox, pero el contexto GL va atado a un solo hilo. Por eso hay un hilo de
+    render propio, y `pgraph_kick` le pasa el trabajo de forma síncrona;
+  - el pacing se hace fuera de los locks (issue #35).
+- **Superficies:**
+  - las de color y profundidad son texturas GL, indexadas por dirección física;
+  - render-to-texture sin pasar por la CPU;
+  - una firma dispersa de la RAM detecta qué superficies ha pisado la CPU.
+- **Dibujo:**
+  - INLINE_ARRAY, DRAW_ARRAYS y ARRAY_ELEMENT;
+  - vertex programs (`0x0B00` + LOAD/START) o fixed function;
+  - cachés de programas y texturas por hash.
+- **Bug del FIFO que causaba el "parpadeo" tras los avisos** (presente también en soft):
+  - al reiniciar D3D para el vídeo, el juego para el pusher (`CACHE1_PUSH0 = 0`), libera el push buffer viejo y
+    pone PUT a 0;
+  - el NV2A emulado hacía kick con cualquier escritura de PUT, aunque el pusher estuviera parado, y reproducía
+    unos 4 M de palabras del búfer liberado. Salían FLIP de los avisos viejos alternando con negro durante unos 2
+    minutos, más 121 errores del pb;
+  - ahora, con el pusher parado PUT solo se guarda, y el kick llega al reactivarlo.
+  - Resultado: los avisos dan paso al vídeo (mar, montañas, logo de Team NINJA) y al título, a 60 fps.
+- **3D tras New Game** (visto una vez):
+  - 1 091 primitivas por frame con vertex programs y 0 errores de shader, pero a 6,6 fps, y la captura muestra un
+    búfer intermedio;
+  - falta el formato `0x2E` (profundidad lineal como textura), bajar el coste por draw y elegir la superficie que
+    se presenta.
+
 ## Siguiente
 
 1. Pasar de la pantalla de título al menú principal, y averiguar qué esperan los avisos y el vídeo (audio).

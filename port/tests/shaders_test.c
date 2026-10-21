@@ -334,7 +334,7 @@ static void test_psh_modulate(void) {
     n = nv2a_psh_to_glsl(&p, g_glsl, sizeof g_glsl);
     CHECK(n > 0 && (size_t)n == strlen(g_glsl) && is_ascii(g_glsl));
     CONTAINS(g_glsl, "uniform sampler2D tex0;");
-    CONTAINS(g_glsl, "vec4 t0 = textureProj(tex0, oT0.xyw);");
+    CONTAINS(g_glsl, "vec4 t0 = textureProj(tex0, vec3(oT0.xy * texScale[0], oT0.w));");
     CONTAINS(g_glsl, "vec4 r0 = vec4(0.0, 0.0, 0.0, t0.a);");
     CONTAINS(g_glsl, "vec3 A = max(t0.rgb, 0.0);");
     CONTAINS(g_glsl, "vec3 B = max(v0.rgb, 0.0);");
@@ -390,7 +390,7 @@ static void test_psh_two_stages_and_final(void) {
     CHECK(p.tex_mode[1] == PSH_TEX_BUMPENVMAP && p.tex_source[1] == 0);
     n = nv2a_psh_to_glsl(&p, g_glsl, sizeof g_glsl);
     CHECK(n > 0 && is_ascii(g_glsl));
-    CONTAINS(g_glsl, "vec4 t1 = texture(tex1, oT1.xy + bumpMat[1] * t0.rg);");
+    CONTAINS(g_glsl, "vec4 t1 = texture(tex1, (oT1.xy + bumpMat[1] * t0.rg) * texScale[1]);");
     CONTAINS(g_glsl, "vec3 A = (2.0 * max(t0.rgb, 0.0) - 1.0);");
     CONTAINS(g_glsl, "vec3 ab = vec3(dot(A, B));");
     CONTAINS(g_glsl, "ab = ab * 2.0;");
@@ -446,7 +446,7 @@ static void test_psh_errors_and_unsupported(void) {
     CHECK(nv2a_psh_decode(&r, &p) == 1);
     CHECK(p.tex_source[2] == 1 && p.unsupported_tex == (1u << 3) && p.compare[3] == 5);
     CHECK(nv2a_psh_to_glsl(&p, g_glsl, sizeof g_glsl) > 0);
-    CONTAINS(g_glsl, "vec4 t2 = texture(tex2, oT2.xy + bumpMat[2] * t1.rg);");
+    CONTAINS(g_glsl, "vec4 t2 = texture(tex2, (oT2.xy + bumpMat[2] * t1.rg) * texScale[2]);");
     CONTAINS(g_glsl, "t2.rgb *= clamp(t1.b * bumpScale[2] + bumpOffset[2], 0.0, 1.0);");
     CONTAINS(g_glsl, "vec4 t3 = vec4(0.0); /* modo DOT_ST sin emular */");
     CHECK(!strstr(g_glsl, "uniform sampler2D tex3;"));

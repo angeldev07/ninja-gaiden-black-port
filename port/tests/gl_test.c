@@ -439,6 +439,7 @@ static int check_rgb(const uint8_t *img, int x, int y, int r, int g, int b) {
 static int run_visual(int hidden, const char *out_override) {
     static float constants[192 * 4];
     static const float surface[2] = {(float)W, (float)H};
+    static const float tex_scale[8] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
     static const float clip[2] = {0.0f, 1.0f};
     static uint8_t checker[64 * 64 * 4];
     static uint8_t image[W * H * 4];
@@ -477,7 +478,7 @@ static int run_visual(int hidden, const char *out_override) {
     static const uint32_t idx32[6] = {0, 1, 2, 2, 1, 3};
     /* formato NV2A: posición F x4, color UB_D3D (o UB_OGL), uv S1 x2 */
     glb_format nv_format;
-    glb_uniform uniforms[4];
+    glb_uniform uniforms[5];
     glb_draw_call call;
     nv2a_state state;
     uint8_t dxt[32], p8[256], palette[16];
@@ -508,6 +509,10 @@ static int run_visual(int hidden, const char *out_override) {
     uniforms[3].name = "tex0";
     uniforms[3].kind = GLB_U_INT;
     uniforms[3].ivalue = 0;
+    uniforms[4].name = "texScale"; /* psh.c: 1 = coordenadas ya normalizadas */
+    uniforms[4].kind = GLB_U_VEC2;
+    uniforms[4].count = 4;
+    uniforms[4].values = tex_scale;
     memset(&nv_format, 0, sizeof nv_format);
     nv_format.stride = (int)sizeof(vertex_nv);
     nv_format.n_attribs = 3;
@@ -539,7 +544,7 @@ static int run_visual(int hidden, const char *out_override) {
     make_checker(checker, 64, 8);
     CHECK(glb_set_texture(0, 64, 64, checker, 0) == 0);
     CHECK(glb_draw(prog_color, triangle, &k_format, GLB_TRIANGLES, 3, uniforms, 3) == 0);
-    CHECK(glb_draw(prog_textured, quad, &k_format, GLB_TRIANGLE_STRIP, 4, uniforms, 4) == 0);
+    CHECK(glb_draw(prog_textured, quad, &k_format, GLB_TRIANGLE_STRIP, 4, uniforms, 5) == 0);
 
     /* abajo a la izquierda: DXT1 (comprimida si hay S3TC), índices u16 */
     make_dxt1(dxt);
@@ -554,7 +559,7 @@ static int run_visual(int hidden, const char *out_override) {
     call.indices = idx16;
     call.index_size = 2;
     call.uniforms = uniforms;
-    call.n_uniforms = 4;
+    call.n_uniforms = 5;
     CHECK(glb_draw_ex(&call) == 0);
 
     /* abajo a la derecha: P8 swizzled con paleta, índices u32 y color UB_OGL */

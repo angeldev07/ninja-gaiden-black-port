@@ -73,6 +73,12 @@ int gfx_screenshot(const char *path, char *out_path, size_t out_len);
  * `dst_pixels` píxeles; devuelve sus dimensiones. 0 si había frame. Para los tests. */
 int gfx_copy_frame(void *dst, size_t dst_pixels, int *width, int *height);
 
+/* Render externo (OpenGL, H7c): otro hilo dibuja en la ventana. Con `on` = 1, WM_PAINT ya
+ * no pinta con GDI y gfx_note_frame() cuenta los frames para los FPS del título. */
+void *gfx_hwnd(void); /* HWND de la ventana, o NULL */
+void gfx_set_external(int on);
+void gfx_note_frame(void);
+
 /* FPS medidos en el último segundo. */
 double gfx_fps(void);
 

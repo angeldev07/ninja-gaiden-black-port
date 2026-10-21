@@ -35,6 +35,8 @@ int nv2a_vblank_enabled(void);
 
 /* Registro (sombra de lo escrito o valor modelado), offset desde 0xFD000000. */
 uint32_t nv2a_reg_read(uint32_t off);
+/* Accesos MMIO atendidos hasta ahora (medidas de H7c). */
+uint32_t nv2a_mmio_count(void);
 
 /* Memoria física de la Xbox (0..64 MB) a puntero del proceso, o NULL. */
 uint8_t *nv2a_phys(uint32_t phys, uint32_t len);
@@ -49,6 +51,8 @@ void nv2a_summary(void);
 int pgraph_init(const char *log_path);
 /* Decodifica el push buffer de GET a PUT; devuelve el GET final. */
 uint32_t pgraph_kick(uint32_t dma_instance, uint32_t get, uint32_t put);
+/* Pacing de 60 Hz pendiente del último FLIP_STALL; se llama ya sin locks. */
+void pgraph_pace(void);
 void pgraph_vblank(uint32_t count);
 void pgraph_summary(void);
 const char *nv097_method_name(uint32_t method, char *buf, size_t buflen);

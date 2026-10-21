@@ -45,6 +45,7 @@ static struct {
     int frame_w, frame_h;
     size_t frame_cap; /* píxeles reservados */
     volatile LONG should_close;
+    volatile LONG external; /* 1: otro hilo dibuja con OpenGL (H7c); GDI no pinta */
     int init_ok;
     DWORD fps_tick;
     unsigned fps_frames;
@@ -412,6 +413,10 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
     char shot[MAX_PATH];
     switch (msg) {
     case WM_PAINT:
+        if (g.external) {
+            ValidateRect(hwnd, NULL); /* el render GL repinta en el siguiente frame */
+            return 0;
+        }
         paint(hwnd);
         return 0;
     case WM_ERASEBKGND:
@@ -456,7 +461,7 @@ static DWORD WINAPI window_thread(LPVOID param) {
     (void)param;
     memset(&wc, 0, sizeof wc);
     wc.cbSize = sizeof wc;
-    wc.style = CS_HREDRAW | CS_VREDRAW;
+    wc.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC; /* OWNDC: un DC estable para OpenGL */
     wc.lpfnWndProc = window_proc;
     wc.hInstance = inst;
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
@@ -582,6 +587,29 @@ int gfx_present(const void *pixels, int width, int height, int pitch, unsigned f
 }
 
 int gfx_should_close(void) { return g.should_close != 0; }
+
+void *gfx_hwnd(void) { return g.hwnd; }
+
+void gfx_set_external(int on) { InterlockedExchange(&g.external, on ? 1 : 0); }
+
+void gfx_note_frame(void) {
+    DWORD now;
+    HWND hwnd = NULL;
+    if (!g.lock_ready)
+        return;
+    EnterCriticalSection(&g.lock);
+    g.fps_frames++;
+    now = GetTickCount();
+    if (now - g.fps_tick >= 1000) {
+        g.fps = g.fps_frames * 1000.0 / (double)(now - g.fps_tick);
+        g.fps_frames = 0;
+        g.fps_tick = now;
+        hwnd = g.hwnd;
+    }
+    LeaveCriticalSection(&g.lock);
+    if (hwnd)
+        PostMessageW(hwnd, WM_GFX_TITLE, 0, 0);
+}
 
 int gfx_poll(void) { return gfx_should_close(); }
 

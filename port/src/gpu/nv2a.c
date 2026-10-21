@@ -38,6 +38,7 @@
 #define PFIFO_INTR_0 0x002100u
 #define PFIFO_RAMHT 0x002210u
 #define PFIFO_RUNOUT_STATUS 0x002400u
+#define PFIFO_CACHE1_PUSH0 0x003200u
 #define PFIFO_CACHE1_PUSH1 0x003204u
 #define PFIFO_CACHE1_STATUS 0x003214u
 #define PFIFO_CACHE1_DMA_PUSH 0x003220u
@@ -92,6 +93,7 @@ static int g_ready;
 static uint8_t *g_ramin;        /* RAMIN accesible por el loader */
 static int g_pramin_mapped;     /* PRAMIN es RAM real (alias) y no pasa por el VEH */
 static uint32_t g_put, g_get;   /* canal 0 del FIFO (offsets en el objeto DMA) */
+static int g_push0_off, g_dmapush_off, g_fifo_off; /* pusher parado (CACHE1_PUSH0/DMA_PUSH bit 0 = 0) */
 static uint32_t g_pcrtc_pending, g_pmc_pending;
 static uint32_t g_raster;
 static LARGE_INTEGER g_t0, g_freq;
@@ -122,7 +124,7 @@ static int is_modelled(uint32_t off) {
     switch (off) {
     case PMC_BOOT_0: case PMC_INTR_0: case PMC_INTR_EN_0: case PBUS_PCI_NV_0:
     case PBUS_PCI_NV_2: case PFIFO_INTR_0: case PFIFO_RAMHT: case PFIFO_RUNOUT_STATUS:
-    case PFIFO_CACHE1_PUSH1: case PFIFO_CACHE1_STATUS: case PFIFO_CACHE1_DMA_PUSH:
+    case PFIFO_CACHE1_PUSH0: case PFIFO_CACHE1_PUSH1: case PFIFO_CACHE1_STATUS: case PFIFO_CACHE1_DMA_PUSH:
     case PFIFO_CACHE1_DMA_INSTANCE: case PFIFO_CACHE1_DMA_CTL: case PFIFO_CACHE1_DMA_PUT:
     case PFIFO_CACHE1_DMA_GET: case PFIFO_CACHE1_REF: case PTIMER_INTR_0:
     case PTIMER_NUMERATOR: case PTIMER_DENOMINATOR: case PTIMER_TIME_0: case PTIMER_TIME_1:
@@ -175,6 +177,10 @@ static uint32_t nv2a_write(uint32_t off, uint32_t val) {
         ngb_log("    · NV2A: habilitación de interrupciones %s = 0x%08X",
                 off == PMC_INTR_EN_0 ? "PMC_INTR_EN_0" : off == PCRTC_INTR_EN_0 ? "PCRTC_INTR_EN_0"
                 : off == 0x400140u ? "PGRAPH_INTR_EN" : "PFIFO_INTR_EN_0", val);
+    /* Traza del FIFO: todo lo que no es un PUT normal (reinicios de D3D, GET, instancia). */
+    if ((off >= 0x003200u && off < 0x003250u && off != PFIFO_CACHE1_DMA_PUT) || off == USER_DMA_GET ||
+        ((off == PFIFO_CACHE1_DMA_PUT || off == USER_DMA_PUT) && val < g_put))
+        ngb_log("    · NV2A: FIFO 0x%06X = 0x%08X (GET 0x%08X, PUT 0x%08X)", off, val, g_get, g_put);
     switch (off) {
     case PMC_INTR_0:
         g_pmc_pending &= ~val;
@@ -189,7 +195,20 @@ static uint32_t nv2a_write(uint32_t off, uint32_t val) {
         return val;
     case PFIFO_CACHE1_DMA_PUT: case USER_DMA_PUT:
         g_put = val;
-        g_get = pgraph_kick(g_regs[PFIFO_CACHE1_DMA_INSTANCE / 4] & 0xFFFFu, g_get, g_put);
+        if (!g_fifo_off) /* con el pusher parado, PUT solo se guarda (reinicio de D3D) */
+            g_get = pgraph_kick(g_regs[PFIFO_CACHE1_DMA_INSTANCE / 4] & 0xFFFFu, g_get, g_put);
+        return val;
+    case PFIFO_CACHE1_PUSH0: case PFIFO_CACHE1_DMA_PUSH:
+        /* Bit 0 = ACCESS. Al reiniciar D3D lo baja, mueve GET/PUT a un push buffer nuevo
+         * (PUT = 0 antes que GET) y lo vuelve a subir: ejecutar ese PUT con el pusher parado
+         * recorría el push buffer viejo, ya liberado, durante millones de palabras. */
+        if (off == PFIFO_CACHE1_PUSH0)
+            g_push0_off = !(val & 1u);
+        else
+            g_dmapush_off = !(val & 1u);
+        g_fifo_off = g_push0_off || g_dmapush_off;
+        if (!g_fifo_off && g_get != g_put)
+            g_get = pgraph_kick(g_regs[PFIFO_CACHE1_DMA_INSTANCE / 4] & 0xFFFFu, g_get, g_put);
         return val;
     case USER_REF:
         g_regs[PFIFO_CACHE1_REF / 4] = val;
@@ -273,7 +292,17 @@ int nv2a_single_step(CONTEXT *ctx) {
     t_pending = 0;
     LeaveCriticalSection(&g_lock);
     ngb_kernel_leave(ngb_thread_current());
+    if (t_is_write) /* PUT o reactivación del pusher: puede haber un FLIP pendiente */
+        pgraph_pace(); /* fuera del lock del NV2A y de g_pg_lock (issue #35) */
     return 1;
+}
+
+/* Accesos MMIO atendidos por el VEH (cada uno cuesta dos excepciones). */
+uint32_t nv2a_mmio_count(void) {
+    uint32_t i, n = 0;
+    for (i = 0; i <= NBLOCKS; i++)
+        n += g_reads[i] + g_writes[i];
+    return n;
 }
 
 uint32_t nv2a_reg_read(uint32_t off) {

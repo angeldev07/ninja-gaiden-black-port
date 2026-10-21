@@ -51,10 +51,16 @@ typedef struct ngb_options {
     const char *symbols;     /* CSV de símbolos (opcional) */
     int window;              /* 1: abre la ventana del presentador (gfx/present.c, H7) */
     int no_pacing;           /* 1: FLIP_STALL no espera al siguiente 1/60 s (H7b) */
+    int renderer;            /* NGB_RENDERER_*: --renderer gl|soft (H7c) */
     const char *input_script; /* pulsaciones automáticas (input/input.h), opcional */
     int no_host_input;        /* 1: ni mando de PC ni teclado, solo el guion */
     const char *watch;        /* --watch: direcciones del juego a vigilar (watch.c) */
 } ngb_options_t;
+
+/* --renderer: AUTO = OpenGL si hay ventana y contexto 4.x; si no, el rasterizador. */
+#define NGB_RENDERER_AUTO 0
+#define NGB_RENDERER_SOFT 1
+#define NGB_RENDERER_GL 2
 
 extern ngb_options_t g_ngb_opts;
 extern xbe_t g_ngb_xbe;
@@ -72,6 +78,11 @@ double ngb_elapsed(void);
 /* watch.c: --watch ADDR[:1|2|4],... (los cambios van al log desde el hilo de DPC) */
 int ngb_watch_parse(const char *spec);
 void ngb_watch_tick(void);
+
+/* Medidas baratas (H7c): ticks de QueryPerformanceCounter gastados escribiendo el log y
+ * número de llamadas al kernel hasta ahora. */
+long long ngb_log_ticks(void);
+long ngb_kernel_calls(void);
 
 /* memory.c */
 int ngb_memory_init(void);

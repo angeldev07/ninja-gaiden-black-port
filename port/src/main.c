@@ -30,6 +30,7 @@ static void usage(void) {
     fprintf(stderr,
             "uso: ngb-loader.exe <ruta.xbe> [--log ARCHIVO] [--max-calls N] [--timeout S]\n"
             "                    [--idle S] [--lenient] [--echo] [--window] [--no-pacing]\n"
+            "                    [--renderer gl|soft]\n"
             "                    [--mmio-strict] [--mmio-gpu-ram] [--pgraph-frames N]\n"
             "                    [--log-cap N] [--symbols CSV]\n"
             "                    [--input-script GUION] [--no-host-input]\n"
@@ -41,6 +42,7 @@ static void usage(void) {
             "  --echo       copia el log a stderr\n"
             "  --window     abre la ventana del presentador de frames (H7; F12 = captura)\n"
             "  --no-pacing  FLIP_STALL no espera al siguiente 1/60 s (frames tan rápido como pueda)\n"
+            "  --renderer   gl (OpenGL 4.x, por defecto si hay contexto) o soft (rasterizador)\n"
             "  --mmio-strict   para en el primer MMIO o E/S de puertos que no sea el NV2A modelado\n"
             "  --mmio-gpu-ram  NV2A como RAM trazada en vez del modelo (exploración de H6)\n"
             "  --pgraph-frames N  frames con todos los métodos en el log de PGRAPH (3)\n"
@@ -147,6 +149,15 @@ static int parse_args(void) {
             g_ngb_opts.window = 1;
         else if (!strcmp(a, "--no-pacing"))
             g_ngb_opts.no_pacing = 1;
+        else if (!strcmp(a, "--renderer") && more) {
+            const char *v = argv[++i];
+            if (!strcmp(v, "gl"))
+                g_ngb_opts.renderer = NGB_RENDERER_GL;
+            else if (!strcmp(v, "soft"))
+                g_ngb_opts.renderer = NGB_RENDERER_SOFT;
+            else
+                return -1;
+        }
         else if (a[0] == '-' || g_ngb_opts.xbe_path)
             return -1;
         else

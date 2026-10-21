@@ -198,3 +198,9 @@ termina en 1,5 s y los avisos se desplazan 0,3 px por frame, unos 38 s a 60 fps.
 menos con el rasterizador por software, duran de 1 a 3 minutos. Se corrige con el render por GPU (H7c). Además,
 el loader pide al sistema un reloj de 1 ms (`timeBeginPeriod`). Lección: medir con `--watch` antes de suponer
 una espera. Detalle en [[gpu-nv2a]].
+
+## [2026-10-22] milestone | H7c: render por GPU a 60 fps
+PGRAPH dibuja con OpenGL (RX 6600): el título y el menú pasan de 16 a 60 fps, y los avisos duran 40 s, que es su
+diseño. El "parpadeo" tras los avisos era el NV2A emulado haciendo kick con el pusher parado: reproducía el push
+buffer que D3D acababa de liberar. Arreglado, aparecen el vídeo, el logo de Team NINJA y el título. Detalle en
+[[gpu-nv2a]].
