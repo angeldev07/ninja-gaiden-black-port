@@ -146,3 +146,8 @@ inicialización de D3D8 y envía 37,337 frames con 808,728 primitivas en 30 s, t
 que carga son el rótulo "Warnings" y el atlas de la fuente, revisados por el líder.
 El bloqueo real era un bug de H6: la superposición del TEB pisaba `ClientId.UniqueThread` (`fs:[0x24]`), y con
 eso Windows perdía despertares de hilos. Detalle en [[gpu-nv2a]].
+
+## [2026-10-21] ingest | Shaders del NV2A a GLSL
+`port/src/shaders/` traduce los vertex programs (MAC+ILU de 128 bits, epílogo de screen space) y los register
+combiners a GLSL 4.00. Los 16 vertex programs que hay en `default.xbe` se decodifican. Falta emular los modos
+de textura `DOT_*`, que usan los 2 pixel shaders reales. Detalle en [[shaders-nv2a]].

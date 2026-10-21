@@ -46,5 +46,6 @@ rem 3b) Prueba del decodificador del push buffer (buffers hechos a mano).
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\pushbuf_test.pdb" /Fe"%OUT%\pushbuf_test.exe" "%PORT%tests\pushbuf_test.c" "%SRC%\gpu\pushbuf.c" || exit /b 1
 "%OUT%\pushbuf_test.exe" || exit /b 1
 
+cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\shaders_test.pdb" /Fe"%OUT%\shaders_test.exe" "%PORT%tests\shaders_test.c" "%SRC%\shaders\vsh.c" "%SRC%\shaders\psh.c" "%SRC%\shaders\emit.c" && "%OUT%\shaders_test.exe" || exit /b 1
 echo build: %OUT%\ngb-loader.exe + ngb-core.dll
 endlocal
