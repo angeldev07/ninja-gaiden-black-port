@@ -70,3 +70,14 @@ revisó a ojo. Hallazgos en [[xpr0]]:
 - `header_size` no va alineado a `0x800`;
 - DXT va sin swizzle.
 En [[chunk-teamninja]]: el campo de tamaño no acota los slots. La tabla de las texturas de Ryu está en [[kmd]].
+
+## [2026-10-20] milestone | H3: Ryu en 3D (glTF)
+Un spike resolvió la geometría de `ryu.kmd`, validado con renders hechos por un rasterizador propio:
+- vértices FVF de D3D (`0x112`/`0x116`/`0x042`);
+- triangle strips u16;
+- la cara se dibuja desde un push buffer;
+- HIERARC: los vértices vienen en el espacio de su hueso.
+`ngb_tools.kmd` lo exporta a glTF 2.0 y OBJ. Ryu, Ayane, Murai y las armas de Doku salen completos; el cuerpo de
+Doku usa una variante del descriptor que todavía no se soporta. Detalle en [[kmd]].
+Además se adoptó una política nueva, una sola ronda de revisión por PR ([[equipo]]), y la PR #8 (H2) entró
+en `main` con el tag `milestone/h2`.

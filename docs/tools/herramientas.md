@@ -42,6 +42,7 @@ git config core.hooksPath .githooks              # activa la guardia pre-commit
 | `ngb_tools.afs` | Lista, extrae e inventaría contenedores AFS (estructura, invariantes, magias, entropía) | `python -I -m ngb_tools.afs list|extract|inventory …` | [[afs]] |
 | `ngb_tools.xbe` | Analiza ejecutables XBE: cabecera, certificado, secciones, librerías del XDK, imports del kernel y strings | `python -I -m ngb_tools.xbe <xbe> [--strings] [--json …] [--md …]` | [[xbe-default]] |
 | `ngb_tools.xpr` | Exporta las texturas de un XPR0 (suelto o dentro de un KMD) a PNG: DXT1/3/5, P8, A8, ARGB, des-swizzle | `python -I -m ngb_tools.xpr list|export <archivo> [--kmd]` | [[xpr0]] |
+| `ngb_tools.kmd` | Exporta modelos KMD a glTF 2.0 u OBJ, con jerarquía, materiales y texturas | `python -I -m ngb_tools.kmd info|export <kmd>` | [[kmd]] |
 | `ngb_tools.hygiene` | Guardia que impide versionar datos del juego (hook y CI) | `python -m ngb_tools.hygiene [--staged]` | [[adr-03-datos-fuera-del-repo]] |
 
 ### `ngb_tools.afs`
@@ -87,3 +88,19 @@ python -I -m ngb_tools.xpr export %USERPROFILE%\ngb-data\game\Media\font.xpr
   XPR0 suelto (`.xpr`, `.spr`).
 - Las texturas son datos del juego: nunca se escriben dentro de un repo (`ngb_tools._paths`).
 - Formatos: [[xpr0]].
+
+### `ngb_tools.kmd`
+
+```sh
+python -I -m ngb_tools.kmd info   %USERPROFILE%\ngb-data\extracted\chr_ryu\0000_ryu.kmd
+python -I -m ngb_tools.kmd export %USERPROFILE%\ngb-data\extracted\chr_ryu\0000_ryu.kmd             # → NGB_DATA\extracted\models\0000_ryu\
+python -I -m ngb_tools.kmd export <kmd> --format obj      # OBJ + MTL (posiciones de mundo)
+python -I -m ngb_tools.kmd export <kmd> --skin --all-groups
+```
+
+- glTF 2.0 (`.gltf` + `.bin`): un nodo por hueso de HIERARC, una malla por objeto y una primitiva por submalla en
+  TRIANGLES, con materiales PBR que usan los PNG de [[xpr0]]. Es glTF estándar, así que cualquier visor de glTF
+  debería abrirlo (Visor 3D de Windows, Blender). Por ahora solo se ha validado con el rasterizador propio
+  (`preview.png`).
+- Reutiliza los PNG de H2 si su manifiesto cuadra; si no, los exporta.
+- Formato: [[kmd]].

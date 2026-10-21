@@ -61,7 +61,83 @@ Todas tienen 1 mip. El XPR0 está en el slot 1 (`0x3000`).
 
 `r_ryu.kmd` tiene 26 texturas.
 
-## Siguiente (H3)
+## Geometría (H3, `VERIFIED` en los 59 objetos de `ryu.kmd` y 63 de `r_ryu.kmd`)
 
-Decodificar los vertex buffers y los index buffers del XPR0 (la declaración de vértices debería estar en
-OBJINFO o en el push buffer) y exportar la malla, con sus UV y estas texturas, a glTF.
+**Correspondencias.** El objeto *k* es a la vez la entrada *k* de OBJINFO, el nodo *k* de HIERARC, el USERDATA
+*k+1*, y el *k*-ésimo VB y el *k*-ésimo IB del [[xpr0]], en orden de recurso. El USERDATA 0 es una cabecera:
+63, **19 texturas**, **59 objetos**, …
+
+**Descriptor de malla** (payload del USERDATA *k+1*):
+- Cabecera de `0x28` B: `+4` n_sub, `+8` **FVF de D3D**, `+0x14` nv, `+0x18` stride, `+0x24` n_idx.
+- En los 59 objetos de ryu, nv·stride = tamaño del VB y ceil4(n_idx·2) = tamaño del IB (`VERIFIED`, script del
+  spike). La herramienta solo exige que quepan: tamaño ≥ lo necesario.
+- Después, un registro por submalla:
+  - `0x60` B fijos, más `0x50` de material D3DMATERIAL8 si `+0x20 = 1`;
+  - `n_tex` etapas de `0x40` B: cola del nombre, **índice de textura** (el mismo de H2) y 14 `u32` de estados;
+  - en `+0x10` el origen de los índices: `2` = IB, `0` = push buffer;
+  - en `+0x14` y `+0x18` el inicio y el tamaño en bytes.
+
+| FVF | Stride | Campos |
+| --- | --- | --- |
+| `0x112` (XYZ\|NORMAL\|TEX1) | 32 | pos f32×3, normal f32×3, uv f32×2 |
+| `0x116` (XYZB1\|NORMAL\|TEX1) | 36 | pos, peso f32, normal, uv (piezas con skin) |
+| `0x042` (XYZ\|DIFFUSE) | 16 | pos, D3DCOLOR (sombras) |
+
+También aparecen `0x142` y un grupo 6 en otros personajes; los cubre el decodificador genérico de FVF.
+
+- **No hay declaración de vértices NV2A en el push buffer.** El formato sale del FVF.
+- Normales en float de magnitud 1, sin NORMPACKED3.
+- UV con wrap: el glTF las conserva y el OBJ exporta `1−v`.
+
+**Índices.**
+- u16 en **triangle strip** sin reinicio, unidos con degenerados.
+- Winding: pares `abc`, impares `bac`. Coincide con las normales en 14,673 de 14,683 triángulos.
+- La cabeza de Ryu (submalla 1 del obj1) se dibuja desde el **push buffer**:
+  - `BEGIN TRIANGLE_STRIP` y `ARRAY_ELEMENT16` × 1085 palabras = 2,170 índices, y `END`;
+  - usa exactamente los 732 vértices que su IB no toca (`VERIFIED`, script `pbcheck.py` del spike, guardado en
+    `NGB_DATA\extracted\h3\spike\`).
+  - `INFERRED`: es la cara, con MORPH para las expresiones.
+
+**Jerarquía (HIERARC).**
+- Cabecera con la raíz en `+0x28`.
+- Entradas `u16 self, parent (0xFFFF = raíz), n_children, subtree_size, children[n]`.
+- Los nodos son los propios objetos.
+- TRS en OBJINFO (`+0x30` T, `+0x40` R, `+0x50` S). En Ryu R = 0 y S = 1, así que la posición en el mundo es la
+  suma de las T a lo largo de la cadena.
+- **Los vértices vienen en el espacio local de su hueso**, por eso hay que aplicar la jerarquía.
+- Las piezas con skin van en su hueso padre e ignoran su propia T. La herramienta las reconoce por el FVF con
+  peso (XYZB*), no por el grupo; en ryu coinciden con el grupo 4.
+- Esqueleto:
+  - cadera 2 → pecho 0 → cabeza 1;
+  - hombros 8/14 → codos 4/10 → manos 5/11;
+  - muslos 6/12 → rodillas 7/13 → pies 3/9.
+  - Pose T, 1.78 m de alto.
+
+**Grupos de objeto** (OBJINFO `+0xC`):
+- 1: cuerpo de detalle.
+- 4: articulaciones con skin.
+- 5: LOD bajo.
+- 2: sombra, `INFERRED`.
+- 3: efecto con escala 0, `INFERRED`.
+- El glTF exporta 1 y 4 por defecto.
+
+## Exportado a glTF (`VERIFIED`: las cifras son la salida de `ngb_tools.kmd export`; renderizado desde el glTF releído y revisado a ojo)
+
+| Modelo | Resultado |
+| --- | --- |
+| `ryu.kmd` | 27 objetos, 9,143 vértices, 13,431 triángulos, 0 incidencias |
+| `r_ryu.kmd` | 39 objetos, 20,623 triángulos (variante de cinemáticas) |
+| Ayane (`chr_ayane#0`, `aya_a`) | completa; la incidencia es una rotación pequeña en los obj24/25, que se ignora |
+| Murai (`murai`, `r_mur`) | completo |
+| Doku: katana (`do_sw`) y máscara (`do_face`) | completos |
+| **Doku: cuerpo** (`chr_doku#0`) | **no**: tiene 88 VB para 87 objetos y un descriptor variante (origen de submalla 24) |
+
+La espada de Ryu no está en `ryu.kmd`.
+
+## Pendiente
+
+- La variante de Doku.
+- R ≠ 0 (orden de rotación desconocido).
+- Semántica de los pesos del skin.
+- Estados de material: blend aditivo, alfa de las DXT5 y etapas extra.
+- MORPH y animaciones (`chr_dat`/`.mtn`, [[chunk-teamninja]]).
