@@ -31,7 +31,12 @@ optimiza es el avance tangible por token gastado.
 5. **Evidencia antes de afirmar.** Un reporte sin ancla (offset, archivo#entrada o
    comando) es una hipótesis. El líder verifica una muestra de cada reporte antes de
    marcarlo `VERIFIED`.
-6. **Revisión al cierre de cada hito:** el revisor pasa por el código nuevo.
+6. **Una sola ronda de revisión por PR** (decisión del 2026-10-20, a petición del usuario: "más nitro"). Bloquean
+   únicamente dos cosas: un bug real con los datos del juego y una fuga de datos del juego al repo. El
+   endurecimiento contra archivos hostiles, los riesgos teóricos y los nits van a un issue de seguimiento, y la PR
+   se mergea con CI en verde. Las entradas son el disco oficial, no archivos adversarios.
+6b. **Varios frentes en paralelo:** 3 o 4 agentes a la vez en worktrees separados (assets, audio, cargador
+   nativo…). El vault se actualiza en lote por hito.
 7. **Caveman ultra solo en la respuesta del agente al líder**, para ahorrar tokens. Todo
    lo que se guarda en archivos (código, comentarios, reportes, vault) va en prosa
    normal.

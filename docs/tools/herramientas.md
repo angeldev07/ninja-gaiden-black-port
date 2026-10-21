@@ -41,6 +41,7 @@ git config core.hooksPath .githooks              # activa la guardia pre-commit
 | --- | --- | --- | --- |
 | `ngb_tools.afs` | Lista, extrae e inventaría contenedores AFS (estructura, invariantes, magias, entropía) | `python -I -m ngb_tools.afs list|extract|inventory …` | [[afs]] |
 | `ngb_tools.xbe` | Analiza ejecutables XBE: cabecera, certificado, secciones, librerías del XDK, imports del kernel y strings | `python -I -m ngb_tools.xbe <xbe> [--strings] [--json …] [--md …]` | [[xbe-default]] |
+| `ngb_tools.xpr` | Exporta las texturas de un XPR0 (suelto o dentro de un KMD) a PNG: DXT1/3/5, P8, A8, ARGB, des-swizzle | `python -I -m ngb_tools.xpr list|export <archivo> [--kmd]` | [[xpr0]] |
 | `ngb_tools.hygiene` | Guardia que impide versionar datos del juego (hook y CI) | `python -m ngb_tools.hygiene [--staged]` | [[adr-03-datos-fuera-del-repo]] |
 
 ### `ngb_tools.afs`
@@ -70,3 +71,19 @@ python -I -m ngb_tools.xbe %USERPROFILE%\ngb-data\game\default.xbe            # 
 - La tabla de exports del kernel viene en el paquete (`ngb_tools/data/xboxkrnl_exports.tsv`, de nxdk, CC0).
   `--exports` permite usar otra.
 - Hallazgos: [[xbe-default]].
+
+### `ngb_tools.xpr`
+
+```sh
+python -I -m ngb_tools.xpr list   %USERPROFILE%\ngb-data\extracted\chr_ryu\0000_ryu.kmd --kmd
+python -I -m ngb_tools.xpr export %USERPROFILE%\ngb-data\extracted\chr_ryu\0000_ryu.kmd --kmd    # → NGB_DATA\extracted\textures\0000_ryu\
+python -I -m ngb_tools.xpr export %USERPROFILE%\ngb-data\game\Media\font.xpr
+```
+
+- Un PNG por textura (`NNNN_<formato>_<ancho>x<alto>.png`, nivel 0) y un `_manifest.json` con el índice, el
+  formato, las dimensiones, los mips, el offset y el sha256 de los bytes de origen.
+- `--kmd` busca, entre los slots del chunk de Team Ninja, el único cuyo contenido empieza por `XPR0` (en `ryu.kmd` es
+  el slot 1, ver [[kmd]]). Sin `--kmd`, el archivo tiene que ser un
+  XPR0 suelto (`.xpr`, `.spr`).
+- Las texturas son datos del juego: nunca se escriben dentro de un repo (`ngb_tools._paths`).
+- Formatos: [[xpr0]].

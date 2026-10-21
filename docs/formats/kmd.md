@@ -33,9 +33,35 @@ personajes y escenarios ([[afs]]).
 - **19 texturas:** 14 DXT1 y 5 DXT4/5 (`VERIFIED` por el analista, contando los formatos D3D de los recursos XPR0).
 - HIERARC con 59 slots (57 usados), MORPH, ACSSRI, MISCDATA y OBJHIT con 11 hitboxes.
 
-## Siguiente (H2 y H3)
+## Texturas de `ryu.kmd` (H2, `VERIFIED`: exportadas con `ngb_tools.xpr` y revisadas a ojo)
 
-1. Exportar una textura DXT1 de `ryu.kmd` a PNG. En el NV2A, las texturas DXT se guardan como bloques 4×4
-   lineales, sin swizzle; las que no están comprimidas (P8, A8, ARGB) sí van swizzled (Morton), ver [[xpr0]].
-   `INFERRED`, por el formato Xbox: hay que confirmarlo exportando una de cada tipo.
-2. Decodificar los vertex buffers (`D3DVERTEXDECL` en OBJINFO o en el pushbuffer) y exportar la malla a glTF.
+Todas tienen 1 mip. El XPR0 está en el slot 1 (`0x3000`).
+
+| # | Formato | Tamaño | Qué se ve |
+| --- | --- | --- | --- |
+| 0 | DXT1 | 256x512 | torso del traje negro: correas y hebillas |
+| 1 | DXT1 | 128x256 | tela negra tejida |
+| 2 | DXT1 | 256x256 | banda de metal dorado y pliegues de tela negra |
+| 3 | DXT1 | 256x256 | pliegues de tela negra |
+| 4 | DXT1 | 256x256 | adornos de metal, **ojo verde**, párpado y piel |
+| 5 | DXT5 | 128x128 | rayos morados (efecto con alfa) |
+| 6 | DXT5 | 32x32 | bocanada de humo (partícula) |
+| 7 | DXT1 | 256x64 | banda metálica de la frente o la máscara |
+| 8 | DXT5 | 128x128 | anillo rojo brillante con venas |
+| 9 | DXT1 | 256x128 | hoja o vaina, ornamento y cuero oscuro |
+| 10 | DXT1 | 256x256 | piel (músculo) |
+| 11 | DXT5 | 256x256 | rayos morados (alfa) |
+| 12 | DXT1 | 256x256 | traje negro: correas, remaches y malla |
+| 13 | DXT5 | 64x64 | emblema dorado (alfa) |
+| 14 | DXT1 | 128x128 | palma y dorso de la mano, guante negro |
+| 15 | DXT1 | 128x128 | tela negra tejida con una franja clara |
+| 16 | DXT1 | 256x512 | traje negro con correas y hebillas |
+| 17 | DXT1 | 16x16 | punto negro redondo (sombra o pupila) |
+| 18 | DXT1 | 256x256 | atlas de un traje azul alternativo: ojales y piel |
+
+`r_ryu.kmd` tiene 26 texturas.
+
+## Siguiente (H3)
+
+Decodificar los vertex buffers y los index buffers del XPR0 (la declaración de vértices debería estar en
+OBJINFO o en el push buffer) y exportar la malla, con sus UV y estas texturas, a glTF.

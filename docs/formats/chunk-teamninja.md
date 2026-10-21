@@ -14,7 +14,7 @@ Los formatos propios del motor (KMD, `itm_dat2`, `chr_dat`, `stry_dat`, `rtm_dat
 | Offset | Tipo | Campo |
 | --- | --- | --- |
 | `0x00` | `char[12]` | etiqueta ASCII rellenada con NUL (`KMD`, `chr_dat`…) |
-| `0x0C` | `u32` | tamaño del chunk. Coincide con el tamaño de la entrada salvo en KMD, donde su semántica es desconocida |
+| `0x0C` | `u32` | tamaño del chunk. Coincide con el tamaño de la entrada salvo en KMD. **No acota los slots**: en `r_ryu.kmd` vale `0x1385e0` y el slot 7 está en `0x138840` (`VERIFIED`, `ngb_tools.teamninja`). El último slot llega hasta el final de los datos |
 | `0x10` | `u32` | `n_slots` |
 | `0x14` | `u32` | `n_used`: cuántos offsets son distintos de 0 |
 | `0x18` | `u32` | `table_pos` (`0x20`; en KMD `0x80` y en MESSTR `0x40`) |

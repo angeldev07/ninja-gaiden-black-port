@@ -12,8 +12,8 @@ actualiza al cerrar cada sesión, y el detalle de cada cierre queda en [[log]].
 | Hito | Resultado tangible | Criterio de terminado | Estado |
 | --- | --- | --- | --- |
 | **H0** Cerebro y base | Vault, repo, datos extraídos, equipo definido | Una sesión nueva puede retomar el proyecto con [[GOAL-ngb-port]] | **hecho** (2026-10-20) |
-| **H1** Mapa del disco y del binario | Reporte del XBE (versión del XDK, librerías, imports del kernel, secciones) e inventario de los `.afs` | [[xbe-default]] y [[afs]] con datos `VERIFIED`; herramientas con tests en verde | en curso |
-| **H2** Primera textura | Una textura del juego exportada a PNG, por ejemplo la de Ryu | Formato de textura documentado en `formats/`; exportador con test | pendiente |
+| **H1** Mapa del disco y del binario | Reporte del XBE (versión del XDK, librerías, imports del kernel, secciones) e inventario de los `.afs` | [[xbe-default]] y [[afs]] con datos `VERIFIED`; herramientas con tests en verde | **hecho** (2026-10-20, tag `milestone/h1`) |
+| **H2** Primera textura | Una textura del juego exportada a PNG, por ejemplo la de Ryu | Formato de textura documentado en `formats/`; exportador con test | **hecho** (2026-10-20): 19 texturas de Ryu, menú y fuentes ([[kmd]], [[xpr0]]) |
 | **H3** Primer modelo | Modelo de Ryu exportado a glTF/OBJ y visible en un visor | Formato de modelo documentado; exportador | pendiente |
 | **H4** Primer sonido | Una pista de `bgm.afs` reproducida como WAV | Formato de audio documentado | pendiente |
 | **H5** Proyecto Ghidra y firmas del SDK | Proyecto Ghidra persistente; librerías del XDK identificadas por firmas; % de funciones con nombre | Métrica de cobertura en [[xbe-default]] | pendiente |
@@ -28,6 +28,5 @@ estructuras que luego usa el código.
 
 ## Siguiente paso concreto
 
-Cerrar H1: ingerir los reportes de `ngb_tools.xbe` y `ngb_tools.afs` en
-[[xbe-default]] y [[afs]], y elegir la textura de H2 según los formatos más
-frecuentes del inventario.
+H3: Ryu en 3D. Decodificar los vertex buffers e index buffers del XPR0 de `ryu.kmd` y exportar la malla con sus
+UV y sus texturas a glTF ([[kmd]]). Se valida abriéndolo en un visor glTF.

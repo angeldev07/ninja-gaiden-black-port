@@ -58,3 +58,15 @@ entropía alta y ninguna firma de zlib o gzip. ADPCM y DXT son códecs conocidos
 [[afs]], [[chunk-teamninja]], [[kmd]], [[xpr0]], [[adx]] y [[wva]]. Peculiaridad: el `u32` final de cada
 atributo AFS no es el tamaño, sino la cabecera leída como array. `ryu.kmd` lleva 19 texturas (DXT1 y
 DXT4/5), que son el objetivo de H2.
+
+## [2026-10-20] milestone | H1 cerrado (tag milestone/h1) y H2: primeras texturas del juego en PNG
+Las PRs #4 (AFS y `_paths`) y #5 (XBE) entraron después de 4 y 2 rondas de revisión. Los menores pendientes
+están en los issues #6 y #7, y el tag `milestone/h1` está en `14fd808`.
+**H2: `ngb_tools.xpr` exporta las texturas del juego a PNG.** `ryu.kmd` da 19 texturas (traje, ojo verde, piel,
+metal y efectos), `menu.spr` 97 (Dragon Sword, marcos y kanji) y `font.xpr` 1 (atlas de glifos). El líder las
+revisó a ojo. Hallazgos en [[xpr0]]:
+- `Data` es relativo a `header_size`;
+- el push buffer ocupa 24 B y no 20;
+- `header_size` no va alineado a `0x800`;
+- DXT va sin swizzle.
+En [[chunk-teamninja]]: el campo de tamaño no acota los slots. La tabla de las texturas de Ryu está en [[kmd]].

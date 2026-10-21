@@ -23,7 +23,7 @@ ingeniería**. El remoto es `github.com/angeldev07/ninja-gaiden-black-port`, **p
   vault que le corresponde: un cambio sin documentar no se considera terminado.
 - **Merge:** squash y borrado de la rama. El título de la PR pasa a ser el commit en `main`.
 - **Revisión:** antes de mergear, el revisor (`caveman:cavecrew-reviewer`) y el líder
-  revisan el diff. GitHub **no permite aprobar una PR propia** (la cuenta autora es la
+  revisan el diff, **en una sola ronda** (ver [[equipo]] § reglas). GitHub **no permite aprobar una PR propia** (la cuenta autora es la
   misma), así que la revisión se publica como comentario (`gh pr review --comment`) con
   veredicto `APROBADO` o `BLOQUEANTE`. Solo se mergea si CI está en verde y no quedan
   bloqueantes.
