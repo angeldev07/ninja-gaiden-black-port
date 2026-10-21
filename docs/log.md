@@ -170,3 +170,11 @@ Con un backend OpenGL 4.6 propio (WGL, sin dependencias), los 18 shaders reales 
 `port/src/shaders/` compilan y enlazan en el driver. `texconv` convierte las texturas del NV2A (swizzle, P8,
 DXT, con signo, cube) igual que `ngb_tools.xpr`, y `glstate` traduce el estado NV097. Aún no está enganchado al
 runtime. Detalle en [[shaders-nv2a]].
+
+## [2026-10-22] milestone | El vídeo de introducción se reproduce
+La pantalla negra que seguía a los avisos no la causaban el audio ni el mando. `GetExitCodeThread` lee
+SignalState y ExitStatus del ETHREAD, y el kernel emulado no los escribía al terminar un hilo, así que el
+juego esperaba para siempre al hilo de las partidas guardadas. Con el arreglo, el juego reinicia D3D y
+reproduce su vídeo de introducción (Sofdec) en la ventana. Lo encontró un agente de investigación en Ghidra.
+Lección: ante un bloqueo, buscar primero qué espera el hilo principal antes de suponer una causa. Detalle en
+[[gpu-nv2a]].

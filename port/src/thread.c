@@ -172,6 +172,17 @@ static __declspec(naked) void __cdecl call_on_stack(uint32_t new_esp,
 }
 #pragma warning(pop)
 
+/* El hilo termina: el ETHREAD queda señalado con su código de salida. GetExitCodeThread de
+ * XAPI lee Header.SignalState (+4) y, si no es 0, ExitStatus (+0x120); sin esto el juego
+ * espera para siempre a los hilos que crea (la pantalla negra tras los avisos). Las esperas
+ * KeWaitFor* sobre el hilo usan el handle del host, que Windows señala por su cuenta. */
+static void mark_exited(ngb_thread_t *t, uint32_t status) {
+    *(volatile uint32_t *)(t->ethread + 0x120) = status;
+    MemoryBarrier();
+    *(volatile int32_t *)(t->ethread + 4) = 1;
+    InterlockedExchange(&t->exited, 1);
+}
+
 typedef void(__cdecl *entry_fn)(void);
 typedef void(__stdcall *system_routine_fn)(uint32_t start_routine, uint32_t start_context);
 typedef void(__stdcall *start_routine_fn)(uint32_t start_context);
@@ -240,7 +251,7 @@ static DWORD WINAPI thread_proc(LPVOID param) {
     __writefsdword(0x00, t->saved_seh);
     __writefsdword(0x04, t->saved_stack_base);
     __writefsdword(0x08, t->saved_stack_limit);
-    InterlockedExchange(&t->exited, 1);
+    mark_exited(t, 0);
     ngb_log("hilo T%d: %s ha vuelto", t->index, t->is_entry ? "el entry point" : "la rutina");
     return 0;
 }
@@ -333,7 +344,7 @@ ngb_thread_t *ngb_thread_from_handle(HANDLE h) {
 __declspec(noreturn) void ngb_thread_exit(uint32_t status) {
     ngb_thread_t *t = ngb_thread_current();
     if (t) {
-        InterlockedExchange(&t->exited, 1);
+        mark_exited(t, status);
         ngb_log("hilo T%d: PsTerminateSystemThread(0x%08X)", t->index, status);
     }
     /* Seguimos en la pila Xbox, que el TEB describe bien: ExitThread puede correr aquí. */

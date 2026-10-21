@@ -104,13 +104,22 @@ desplazándose y fundiéndose. Es el código del juego ejecutándose de forma na
 ### Hasta dónde llega
 
 1. La pantalla de avisos completa, unos 40 s.
-2. Después abre `spr.afs`, `zppln_*.afs` y los datos de guardado en `U:`.
-3. Pasa a una **pantalla en negro**: solo limpia y usa el back buffer como textura. No hay crash y los hilos
-   siguen vivos. `INFERRED`: espera algo, como entrada del mando, una carga o un vídeo.
+2. **Se reproduce el vídeo de introducción** (Sofdec, un mar tormentoso), decodificado por el propio juego y
+   dibujado con el rasterizador por software. El líder revisó la captura del frame 3600 de `exit-fix.log`.
+   - Antes, el juego se quedaba en una pantalla negra. **La causa era un bug del kernel emulado**, no el audio
+     ni el mando.
+   - `GetExitCodeThread` de XAPI (`0x32BE72`) lee `Header.SignalState` (+4) y `ExitStatus` (+0x120) del ETHREAD.
+     El hilo que enumera las partidas guardadas termina pronto, pero `ngb_thread_exit` nunca escribía esos
+     campos.
+   - Por eso la tarea de fibra del hilo principal (`0x168030`) esperaba en un bucle `while (code == 0x103)`
+     para siempre.
+   - **Arreglo:** al terminar, un hilo escribe ExitStatus y pone SignalState a 1. Lo cubre un test con un XBE
+     sintético.
+3. Para reproducir el vídeo, el juego reinicia D3D dos veces (`AvSetDisplayMode` con pitch `0xB40`) y el pusher
+   lo soporta.
 
 ## Siguiente
 
-1. **Entrada del mando** (`feat/xinput-hle`): las pulsaciones ya llegan al juego. Toca probarla junto con el
-   pacing de H7b en la pantalla negra.
+1. Llegar al menú de título tras el vídeo: probar START durante el vídeo y después.
 2. Geometría 3D: vertex programs ([[shaders-nv2a]]) y dibujo desde arrays de vértices (`DRAW_ARRAYS`/`ARRAY_ELEMENT`)
    sobre el backend OpenGL.

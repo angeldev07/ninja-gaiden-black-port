@@ -147,6 +147,62 @@ def gpu_extra() -> dict[int, bytes]:
     }
 
 
+# --- Fin de hilo: el ETHREAD queda señalado con su código de salida -------------------
+PS_CREATE_SYSTEM_THREAD_EX = 255
+PS_TERMINATE_SYSTEM_THREAD = 258
+OB_REFERENCE_OBJECT_BY_HANDLE = 246
+KE_WAIT_FOR_SINGLE_OBJECT = 159
+THREAD_IMPORTS = (
+    PS_CREATE_SYSTEM_THREAD_EX,
+    PS_TERMINATE_SYSTEM_THREAD,
+    OB_REFERENCE_OBJECT_BY_HANDLE,
+    KE_WAIT_FOR_SINGLE_OBJECT,
+    DBG_PRINT,
+)
+THREAD_EXIT_STATUS = 0x1234
+THREAD_ROUTINE_VA = TEXT_VA + 0x300
+THREAD_HANDLE_VA = TEXT_VA + 0xB00
+THREAD_ETHREAD_VA = TEXT_VA + 0xB04
+THREAD_FMT_VA = TEXT_VA + 0xB10  # "exit signal=%d status=%x\n"
+
+
+def thread_exit_code() -> bytes:
+    """Crea un hilo que termina con PsTerminateSystemThread(0x1234), lo espera con
+    KeWaitForSingleObject sobre su ETHREAD y escribe SignalState (+4) y ExitStatus (+0x120),
+    que es lo que lee GetExitCodeThread de XAPI."""
+    return b"".join(
+        (
+            b"\x6a\x00" * 4,  # SystemRoutine, DebuggerThread, CreateSuspended, StartContext
+            push_imm32(THREAD_ROUTINE_VA),
+            b"\x6a\x00\x6a\x00",  # ThreadId, TlsDataSize
+            push_imm32(0x4000),  # KernelStackSize
+            b"\x6a\x00",  # ThreadExtensionSize
+            push_imm32(THREAD_HANDLE_VA),
+            call_slot(0),  # PsCreateSystemThreadEx (stdcall, 10 argumentos)
+            push_imm32(THREAD_ETHREAD_VA),
+            b"\x6a\x00",
+            b"\xff\x35" + struct.pack("<I", THREAD_HANDLE_VA),  # push dword [handle]
+            call_slot(2),  # ObReferenceObjectByHandle(handle, 0, &ethread)
+            b"\x6a\x00" * 4,  # Timeout NULL (infinito), Alertable, WaitMode, WaitReason
+            b"\xff\x35" + struct.pack("<I", THREAD_ETHREAD_VA),  # push dword [ethread]
+            call_slot(3),  # KeWaitForSingleObject(ethread, ...)
+            b"\xa1" + struct.pack("<I", THREAD_ETHREAD_VA),  # mov eax, [ethread]
+            b"\xff\xb0\x20\x01\x00\x00",  # push dword [eax+0x120]  (ExitStatus)
+            b"\xff\x70\x04",  # push dword [eax+4]  (Header.SignalState)
+            push_imm32(THREAD_FMT_VA),
+            call_slot(4),  # DbgPrint (cdecl)
+            b"\x83\xc4\x0c",  # add esp, 12
+            b"\xc3",
+        )
+    )
+
+
+def thread_exit_extra() -> dict[int, bytes]:
+    """Rutina del hilo (stdcall, 1 argumento) y cadena de formato."""
+    routine = push_imm32(THREAD_EXIT_STATUS) + call_slot(1)  # PsTerminateSystemThread: no vuelve
+    return {THREAD_ROUTINE_VA: routine, THREAD_FMT_VA: b"exit signal=%d status=%x\n\0"}
+
+
 def build_loader_xbe(
     code: bytes, imports: Sequence[int] = DEFAULT_IMPORTS, extra: dict[int, bytes] | None = None
 ) -> bytes:

@@ -21,11 +21,15 @@ from .synthetic_loader import (
     KE_QUERY_PERFORMANCE_FREQUENCY,
     PB_PUT,
     RTL_INIT_ANSI_STRING,
+    THREAD_EXIT_STATUS,
+    THREAD_IMPORTS,
     boot_code,
     build_loader_xbe,
     gpu_code,
     gpu_extra,
     mmio_code,
+    thread_exit_code,
+    thread_exit_extra,
     unimplemented_code,
 )
 
@@ -78,6 +82,14 @@ class LoaderRunTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, EXIT_OK)
         self.assertIn(b"repo git", result.stderr)
         self.assertFalse(log.exists())
+
+    def test_exited_thread_is_signalled_with_its_status(self) -> None:
+        # GetExitCodeThread de XAPI lee SignalState y ExitStatus del ETHREAD: si el kernel no
+        # los escribe, el juego espera para siempre a sus hilos (pantalla negra tras los avisos).
+        xbe = build_loader_xbe(thread_exit_code(), THREAD_IMPORTS, thread_exit_extra())
+        code, log = self.run_xbe(xbe)
+        self.assertEqual(code, EXIT_OK, log)
+        self.assertIn(f"exit signal=1 status={THREAD_EXIT_STATUS:x}", log)
 
     def test_boot_calls_kernel_and_returns(self) -> None:
         code, log = self.run_xbe(build_loader_xbe(boot_code()))

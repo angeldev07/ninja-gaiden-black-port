@@ -54,13 +54,9 @@ funciones** por implementaciones propias que leen el mando de PC o el teclado. E
 - **Guion determinista:** `--input-script "t=42s:START,t=45s:A@300ms"`. Con `--no-host-input` se ignoran el mando y
   el teclado reales.
 
-## Lo que se descubrió: el bloqueo después de los avisos no es el mando
+## Lo que se descubrió: el bloqueo tras los avisos no era el mando
 
-- **El juego recibe START y A** (comprobado en su memoria y con 8 pulsaciones por guion en 80 s), y aun así la
-  pantalla negra que sigue a los avisos no cambia.
-- **Hipótesis principal (`INFERRED`): un vídeo de Sofdec.** Al arrancar, el juego abre todos los `.sfd` de
-  `movie\` (CRI Sofdec: vídeo MPEG más audio ADX). Tras los avisos, lo esperable es el vídeo de introducción.
-  Sofdec sincroniza el vídeo con el reloj del audio, y como la APU no está emulada (`DirectSound` no consume),
-  ese reloj no avanza y la imagen se queda en negro.
-- **Siguiente paso:** confirmarlo en Ghidra con la ruta de reproducción de Sofdec y su dependencia de
-  DirectSound. Después, o se emula un mínimo de DirectSound o se hace HLE del reloj.
+- **El juego recibe START y A** (comprobado en su memoria), y aun así seguía en la pantalla negra.
+- La hipótesis del vídeo de Sofdec esperando al reloj del audio **resultó falsa**. La causa real era un bug del
+  kernel emulado, que se describe en [[gpu-nv2a]] ("Hasta dónde llega"). Corregido eso, el vídeo de
+  introducción se reproduce.
