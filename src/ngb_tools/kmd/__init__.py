@@ -14,6 +14,7 @@ propios. Módulos, de abajo arriba:
 - `motion`: bancos de motions `.mtn`/`.mot` (pistas con claves de 20 bits, Hermite).
 - `rig`: rig humanoide (FK del tronco + IK de los miembros) y clips de animación.
 - `animation`: clips TRS por nodo para el glTF.
+- `attach`: anclajes de armas de los `.itm` y modelos montados en un hueso.
 - `gltf`, `obj`: exportadores (`gltf` también GLB).
 - `cli`: `python -m ngb_tools.kmd {info,export}`.
 
@@ -23,6 +24,13 @@ Formato verificado en `ryu.kmd` y `r_ryu.kmd`. Lo INFERRED está marcado en cada
 from __future__ import annotations
 
 from ngb_tools.kmd.animation import AnimationClip, NodeChannel
+from ngb_tools.kmd.attach import (
+    Attachment,
+    ItemAnchor,
+    ItemFormatError,
+    find_anchor,
+    parse_item_anchors,
+)
 from ngb_tools.kmd.errors import (
     KmdError,
     KmdFormatError,
@@ -43,11 +51,14 @@ from ngb_tools.kmd.vertices import VertexData, VertexLayout, decode_vertices, ve
 
 __all__ = [
     "AnimationClip",
+    "Attachment",
     "ExportOptions",
     "Hierarchy",
     "HierarchyNode",
     "HumanoidRig",
     "Issue",
+    "ItemAnchor",
+    "ItemFormatError",
     "KmdError",
     "KmdFormatError",
     "KmdModel",
@@ -70,9 +81,11 @@ __all__ = [
     "build_obj",
     "decode_push_buffer",
     "decode_vertices",
+    "find_anchor",
     "find_rig",
     "motion_clip",
     "parse_hierarchy",
+    "parse_item_anchors",
     "parse_kmd",
     "parse_mesh_descriptor",
     "parse_motion_bank",

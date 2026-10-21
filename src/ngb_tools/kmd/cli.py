@@ -2,7 +2,8 @@
 
     info   <kmd>                          objetos, grupos, texturas, huesos e incidencias
     export <kmd> [--out DIR] [--format gltf|glb|obj] [--all-groups] [--skin] [--textures DIR]
-                 [--motions BANCO[:ids]]... [--motion ids|all]
+                 [--motions BANCO[:ids]]... [--motion ids|all] [--attach ARMA@ANCLA]...
+                 [--name NOMBRE]
 
 `export` escribe `<archivo sin extensión>.gltf` + `.bin` (o `.obj` + `.mtl`). Sin `--out`
 va a `$NGB_DATA/extracted/models/<archivo sin extensión>`, nunca dentro de un repo git. Las
@@ -16,6 +17,16 @@ añade LOD, sombra y efectos.
 `all`: todas las motions distintas del banco). Cada clip se llama `<banco>#<id>`. Hace falta
 el rig humanoide de `ngb_tools.kmd.rig`: si el KMD no lo tiene, es un hallazgo (1). Las
 animaciones no van en OBJ: `--format obj` con `--motions` es un error de uso (2).
+
+`--attach` (repetible) monta otro KMD, un arma, en un hueso del modelo: el exportador
+lo cuelga como hijo de ese nodo y así hereda la animación. Hay dos formas de ancla:
+
+    arma.kmd@arma.itm[#estado]          la tabla de anclajes del .itm (por defecto el
+                                        estado 2: el arma en la mano derecha)
+    arma.kmd@HUESO[:x,y,z[,rx,ry,rz]]   un objeto del modelo y un desplazamiento en
+                                        metros y grados
+
+`--name` cambia el nombre de los archivos de salida (por defecto, el del KMD).
 
 Códigos de salida:
 
@@ -31,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import math
 import re
 import sys
 from collections import Counter
@@ -48,13 +60,20 @@ from ngb_tools._paths import (
     ensure_outside_repos,
 )
 from ngb_tools.kmd.animation import AnimationClip
+from ngb_tools.kmd.attach import (
+    HELD_STATE,
+    Attachment,
+    ItemFormatError,
+    find_anchor,
+    parse_item_anchors,
+)
 from ngb_tools.kmd.errors import KmdError
 from ngb_tools.kmd.gltf import DEFAULT_GROUPS, ExportOptions, write_glb, write_gltf
 from ngb_tools.kmd.model import KmdModel, parse_kmd
 from ngb_tools.kmd.motion import parse_motion_bank
 from ngb_tools.kmd.obj import write_obj
 from ngb_tools.kmd.objinfo import group_name
-from ngb_tools.kmd.rig import find_rig, motion_clip
+from ngb_tools.kmd.rig import euler_xyz, find_rig, motion_clip, quaternion
 from ngb_tools.kmd.textures import default_texture_dir, resolve_texture_files
 from ngb_tools.xpr.errors import XprError
 
@@ -62,6 +81,8 @@ PROG: Final = "python -m ngb_tools.kmd"
 MODELS_SUBDIR: Final = "models"
 UNNAMED: Final = "sin_nombre"
 _IDS: Final = re.compile(r"all|\d+(,\d+)*")
+_NAME: Final = re.compile(r"[A-Za-z0-9_.-]+")
+IDENTITY_QUAT: Final = (0.0, 0.0, 0.0, 1.0)
 
 
 class UsageError(Exception):
@@ -158,9 +179,61 @@ def load_clips(model: KmdModel, specs: Sequence[str], default: str) -> list[Anim
     return clips
 
 
+def _bone_anchor(
+    target: str,
+) -> tuple[int, tuple[float, float, float], tuple[float, float, float, float]]:
+    """`HUESO[:x,y,z[,rx,ry,rz]]`: objeto, traslación y rotación (grados) del ancla."""
+    bone_text, colon, offset_text = target.partition(":")
+    try:
+        bone = int(bone_text)
+        values = [float(v) for v in offset_text.split(",")] if colon else []
+    except ValueError as error:
+        raise UsageError(f"--attach: ancla {target!r} ilegible") from error
+    if len(values) not in (0, 3, 6):
+        raise UsageError("--attach: el desplazamiento son 3 o 6 números (x,y,z[,rx,ry,rz])")
+    translation = (values[0], values[1], values[2]) if values else (0.0, 0.0, 0.0)
+    rotation = IDENTITY_QUAT
+    if len(values) == 6:
+        rotation = quaternion(euler_xyz(*(math.radians(v) for v in values[3:])))
+    return bone, translation, rotation
+
+
+def load_attachment(model: KmdModel, spec: str) -> Attachment:
+    """Un `--attach`: el KMD del arma, sus texturas y el ancla (del .itm o explícita)."""
+    weapon_text, at, target = spec.rpartition("@")
+    if not at or not weapon_text or not target:
+        raise UsageError(f"--attach {spec!r}: se esperaba ARMA.kmd@ANCLA")
+    weapon_path = Path(weapon_text)
+    weapon = _load(weapon_path)
+    item_text, hash_sign, state_text = target.partition("#")
+    if item_text.lower().endswith(".itm"):
+        if hash_sign and not state_text.isdigit():
+            raise UsageError(f"--attach: estado {state_text!r} no es un número")
+        state = int(state_text) if hash_sign else HELD_STATE
+        anchor = find_anchor(parse_item_anchors(Path(item_text).read_bytes()), state)
+        bone, translation, rotation = anchor.bone, anchor.position, anchor.quaternion
+    else:
+        bone, translation, rotation = _bone_anchor(target)
+    if not 0 <= bone < len(model.objects):
+        raise UsageError(f"--attach: el hueso {bone} no es un objeto del modelo")
+    files, _ = resolve_texture_files(weapon, weapon_path, default_texture_dir(weapon_path))
+    return Attachment(
+        name=model_stem(weapon_path),
+        model=weapon,
+        texture_files=files,
+        parent=bone,
+        translation=translation,
+        rotation=rotation,
+    )
+
+
 def cmd_export(args: argparse.Namespace) -> ExitCode:
     if args.motions and args.format == "obj":
         raise UsageError("las animaciones (--motions) no caben en OBJ: usa gltf o glb")
+    if args.attach and args.format == "obj":
+        raise UsageError("los modelos montados (--attach) no caben en OBJ: usa gltf o glb")
+    if args.name is not None and not (_NAME.fullmatch(args.name) and args.name.strip(".")):
+        raise UsageError(f"--name {args.name!r}: solo letras, cifras, _ . -")
     model = _load(args.file)
     out_dir: Path = args.out if args.out is not None else default_output_dir(args.file)
     ensure_outside_repos(out_dir)  # antes de exportar texturas: nada a medias
@@ -169,12 +242,14 @@ def cmd_export(args: argparse.Namespace) -> ExitCode:
     )
     files, exported = resolve_texture_files(model, args.file, texture_dir)
     clips = load_clips(model, args.motions, args.motion) if args.motions else []
+    attachments = [load_attachment(model, spec) for spec in args.attach]
     options = ExportOptions(
         groups=None if args.all_groups else DEFAULT_GROUPS,
         skin=args.skin,
         animations=tuple(clips),
+        attachments=tuple(attachments),
     )
-    stem = model_stem(args.file)
+    stem = args.name if args.name is not None else model_stem(args.file)
     paths: tuple[Path, ...]
     if args.format == "obj":
         paths, obj_stats = write_obj(model, out_dir, stem, files, options)
@@ -204,6 +279,8 @@ def cmd_export(args: argparse.Namespace) -> ExitCode:
     if clips:
         frames = sum(len(clip.times) for clip in clips)
         print(f"animaciones: {len(clips)} clips, {frames} muestras a {clips[0].extras['fps']} fps")
+    for attachment in attachments:
+        print(f"montado: {attachment.name} en obj{attachment.parent}")
     for warning in warnings:
         print(f"aviso: {warning}")
     findings = _print_issues(model) + len(warnings)
@@ -254,6 +331,14 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="ids|all",
         help="ids por defecto para los bancos sin ':ids' (por defecto all)",
     )
+    p.add_argument(
+        "--attach",
+        action="append",
+        default=[],
+        metavar="ARMA.kmd@ANCLA",
+        help="monta otro KMD en un hueso: @arma.itm[#estado] o @HUESO[:x,y,z[,rx,ry,rz]]",
+    )
+    p.add_argument("--name", metavar="NOMBRE", help="nombre de los archivos de salida")
     return parser
 
 
@@ -272,7 +357,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     command = _COMMANDS[args.command]
     try:
         return command(args)
-    except (KmdError, XprError) as err:
+    except (KmdError, XprError, ItemFormatError) as err:
         print(f"error: {err}", file=sys.stderr)
         return ExitCode.FINDINGS
     except (UnsafeOutputError, UsageError, OSError) as err:

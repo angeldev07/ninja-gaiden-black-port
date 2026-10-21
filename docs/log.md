@@ -115,3 +115,8 @@ claves de 20 bits con signo, unidades de 1e-4 y los miembros por objetivo de IK.
 vértices ya en mundo y sin jerarquía; la misma variante explica que no se exportara el cuerpo de Doku. La colisión
 HITMDL también está descifrada. Renders revisados: Boff (ciudad de Tairon y fortaleza), la aldea Hayabusa y la
 catedral. La colocación de props está en el bytecode `.sty`, pendiente. Detalle en [[escenarios]].
+
+## [2026-10-21] ingest | Ryu con la Dragon Sword
+`--attach` monta un arma en un hueso con la tabla de anclaje del `.itm` (registros de estado, hueso, posición y
+rotación). Se encontraron las 10 armas de Ryu en `cmn.afs`. La pose de la katana guardada en la espalda confirma
+el orden Euler Rz·Ry·Rx. Detalle en [[armas]].

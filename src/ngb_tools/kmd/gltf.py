@@ -23,6 +23,10 @@
   semántica INFERRED. Las matrices inversas de bind son traslaciones a -mundo(joint). Sin
   skin, cada pieza va rígida en su nodo padre, igual que en el spike.
 
+- **Modelos montados (`attachments`, opcional):** cada uno es un nodo ancla con su
+  traslación y rotación locales, hijo del nodo del hueso (`ngb_tools.kmd.attach`), así que
+  hereda la animación. Dentro va el modelo del arma con su jerarquía. Sus mallas,
+  materiales e imágenes llevan el prefijo `<arma>_` y sus nodos, `extras.attachment`.
 - **Animaciones (`animations`, opcional):** clips de `ngb_tools.kmd.animation` (los genera
   `ngb_tools.kmd.rig` a partir de las motions). Cada canal da un sampler LINEAR con su
   traslación o rotación por instante, y todos los samplers de un clip comparten la misma
@@ -44,6 +48,7 @@ from urllib.parse import quote
 
 from ngb_tools._paths import atomic_write_bytes, ensure_outside_repos
 from ngb_tools.kmd.animation import ROTATION, AnimationClip
+from ngb_tools.kmd.attach import Attachment
 from ngb_tools.kmd.model import KmdModel
 from ngb_tools.kmd.objinfo import ObjectGroup, Vec3, group_name
 from ngb_tools.kmd.vertices import VertexData
@@ -65,11 +70,12 @@ type Json = dict[str, Any]
 
 @dataclass(frozen=True, slots=True)
 class ExportOptions:
-    """Qué exportar: grupos de OBJINFO (`None` = todos), si se crea la skin y los clips."""
+    """Qué exportar: grupos (`None` = todos), skin, clips y modelos montados (armas)."""
 
     groups: frozenset[int] | None = DEFAULT_GROUPS
     skin: bool = False
     animations: tuple[AnimationClip, ...] = ()
+    attachments: tuple[Attachment, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,19 +201,26 @@ class _GltfWriter:
         self.nodes: list[Json] = []
         self.meshes: list[Json] = []
         self.materials: list[Json] = []
-        self.material_index: dict[MaterialKey, int] = {}
+        # Claves con el prefijo del modelo: un arma montada tiene sus propias texturas.
+        self.tag = ""
+        self.material_index: dict[tuple[str, MaterialKey], int] = {}
         self.textures: list[Json] = []
-        self.texture_index: dict[int, int] = {}
+        self.texture_index: dict[tuple[str, int], int] = {}
+        self.image_paths: list[Path] = []
+        self.image_names: list[str] = []
         self.joint_slot: dict[int, int] = {}
         self.animation_count = 0
         self.warnings: list[str] = []
         self.vertices = self.triangles = self.primitives = 0
 
     def _texture(self, ordinal: int) -> int:
-        if ordinal not in self.texture_index:
-            self.texture_index[ordinal] = len(self.textures)
-            self.textures.append({"sampler": 0, "source": len(self.textures)})
-        return self.texture_index[ordinal]
+        key = (self.tag, ordinal)
+        if key not in self.texture_index:
+            self.texture_index[key] = len(self.textures)
+            self.textures.append({"sampler": 0, "source": len(self.image_paths)})
+            self.image_paths.append(self.files[ordinal])
+            self.image_names.append(f"{self.tag}tex{ordinal:02d}")
+        return self.texture_index[key]
 
     def _material(self, obj: int, position: int) -> int:
         sub = self.model.objects[obj].mesh.submeshes[position]
@@ -215,8 +228,8 @@ class _GltfWriter:
         if texture >= 0 and texture not in self.files:
             self.warnings.append(f"obj{obj} submalla {sub.index}: textura {texture} sin PNG")
         key = material_key(texture, sub.alpha_blend, sub.double_sided, self.files)
-        if key in self.material_index:
-            return self.material_index[key]
+        if (self.tag, key) in self.material_index:
+            return self.material_index[(self.tag, key)]
         pbr: Json = {"metallicFactor": 0.0, "roughnessFactor": 1.0}
         if key.texture >= 0:
             pbr["baseColorTexture"] = {"index": self._texture(key.texture)}
@@ -234,14 +247,18 @@ class _GltfWriter:
                 "emissive": list(m.emissive),
                 "power": m.power,
             }
-        material: Json = {"name": key.name, "pbrMetallicRoughness": pbr, "extras": extras}
+        material: Json = {
+            "name": self.tag + key.name,
+            "pbrMetallicRoughness": pbr,
+            "extras": extras,
+        }
         if key.blend:
             material["alphaMode"] = "BLEND"
         if key.double_sided:
             material["doubleSided"] = True
-        self.material_index[key] = len(self.materials)
+        self.material_index[(self.tag, key)] = len(self.materials)
         self.materials.append(material)
-        return self.material_index[key]
+        return self.material_index[(self.tag, key)]
 
     def _attributes(self, obj: int, data: VertexData, offset: Vec3, skinned: bool) -> Json:
         buffer = self.buffer
@@ -356,7 +373,7 @@ class _GltfWriter:
             return None
         self.vertices += len(data)
         self.primitives += len(primitives)
-        self.meshes.append({"name": f"obj{obj:02d}", "primitives": primitives})
+        self.meshes.append({"name": f"{self.tag}obj{obj:02d}", "primitives": primitives})
         return len(self.meshes) - 1
 
     def build(self) -> Json:
@@ -392,11 +409,51 @@ class _GltfWriter:
         }
         if joints:
             gltf["skins"] = [self._skin(joints, node_of)]
+        for attachment in options.attachments:
+            self._attach(attachment, node_of)
         animations = [self._animation(clip, node_of) for clip in options.animations]
         if animations:
             gltf["animations"] = animations
         self._finish(gltf)
         return gltf
+
+    def _attach(self, attachment: Attachment, node_of: Mapping[int, int]) -> None:
+        """Nodo ancla hijo del objeto `parent` (traslación y rotación), con el arma dentro."""
+        parent = node_of.get(attachment.parent)
+        if parent is None:
+            self.warnings.append(f"{attachment.name}: obj{attachment.parent} no se exporta")
+            return
+        saved = (self.model, self.files, self.tag)
+        self.model, self.files = attachment.model, attachment.texture_files
+        self.tag = f"{attachment.name}_"
+        try:
+            model = attachment.model
+            selected = selected_objects(model, attachment.groups)
+            needed = set(selected)
+            for obj in selected:
+                needed.update(model.ancestors(obj))
+            order = sorted(needed)
+            anchor: Json = {
+                "name": f"{attachment.name}_anchor",
+                "extras": {"attachment": attachment.name, "parent_object": attachment.parent},
+            }
+            if any(attachment.translation):
+                anchor["translation"] = list(attachment.translation)
+            if attachment.rotation != (0.0, 0.0, 0.0, 1.0):
+                anchor["rotation"] = list(attachment.rotation)
+            anchor_index = len(self.nodes)
+            self.nodes.append(anchor)
+            sub_node_of = {obj: anchor_index + 1 + i for i, obj in enumerate(order)}
+            for obj in order:
+                node = self._node(obj, sub_node_of, needed, obj in selected)
+                node["extras"]["attachment"] = attachment.name
+                self.nodes.append(node)
+            roots = [sub_node_of[o] for o in order if model.parent(o) not in needed]
+            if roots:
+                anchor["children"] = roots
+            self.nodes[parent].setdefault("children", []).append(anchor_index)
+        finally:
+            self.model, self.files, self.tag = saved
 
     def _animation(self, clip: AnimationClip, node_of: Mapping[int, int]) -> Json:
         """Un clip: un sampler LINEAR por canal, todos con la misma entrada de tiempos."""
@@ -437,7 +494,7 @@ class _GltfWriter:
         model = self.model
         item = model.objects[obj]
         node: Json = {
-            "name": f"obj{obj:02d}_{group_name(item.group)}",
+            "name": f"{self.tag}obj{obj:02d}_{group_name(item.group)}",
             "extras": {"kmd_object": obj, "group": item.group, "fvf": f"{item.mesh.fvf:#05x}"},
         }
         translation = model.local_translation(obj)
@@ -478,10 +535,9 @@ class _GltfWriter:
             gltf["samplers"] = [
                 {"magFilter": LINEAR, "minFilter": LINEAR, "wrapS": REPEAT, "wrapT": REPEAT}
             ]
-            by_slot = sorted(self.texture_index.items(), key=lambda item: item[1])
             gltf["images"] = [
-                {"uri": texture_uri(self.files[ordinal], self.base), "name": f"tex{ordinal:02d}"}
-                for ordinal, _ in by_slot
+                {"uri": texture_uri(path, self.base), "name": name}
+                for path, name in zip(self.image_paths, self.image_names, strict=True)
             ]
         if self.buffer.accessors:
             gltf["accessors"] = self.buffer.accessors
@@ -489,8 +545,7 @@ class _GltfWriter:
 
     def image_files(self) -> list[Path]:
         """PNG de cada imagen, en el orden de `images`."""
-        by_slot = sorted(self.texture_index.items(), key=lambda item: item[1])
-        return [self.files[ordinal] for ordinal, _ in by_slot]
+        return list(self.image_paths)
 
     def stats(self) -> ExportStats:
         objects = sum(1 for node in self.nodes if "mesh" in node)

@@ -30,6 +30,7 @@ en [[CLAUDE]] y la línea de tiempo en [[log]].
 - [[xpr0]]: Xbox Packed Resource (texturas, paletas, VB e IB). Campo `Format` y swizzle.
 - [[mtn]]: animaciones `.mtn`/`.mot`: 44 pistas (raíz, tronco e IK de 4 miembros), claves de 20 bits, 258 motions de Ryu.
 - [[escenarios]]: KMD de zona (descriptor multiparte, vértices en mundo), colisión HITMDL y las 17 zonas exportadas a glb.
+- [[armas]]: las 10 armas de Ryu (KMD + `.itm`) y la tabla de anclaje a los huesos (estado, hueso, posición y rotación).
 - [[adx]]: audio de CRI (95 pistas de música y 317 voces).
 - [[wva]]: banco de efectos de sonido en Xbox ADPCM.
 

@@ -99,6 +99,7 @@ python -I -m ngb_tools.kmd export %USERPROFILE%\ngb-data\extracted\chr_ryu\0000_
 python -I -m ngb_tools.kmd export <kmd> --format obj      # OBJ + MTL (posiciones de mundo)
 python -I -m ngb_tools.kmd export <kmd> --skin --all-groups
 python -I -m ngb_tools.kmd export <kmd> --format glb     # un solo archivo con texturas incrustadas
+python -I -m ngb_tools.kmd export <ryu.kmd> --format glb --name ryu_sword --attach <katana.kmd>@<katana.itm>#2 --motions <rm_kt.mot>:141,151
 python -I -m ngb_tools.kmd export <ryu.kmd> --format glb --motions <ryu.mtn>:1,3,90,36 --motions <rm_kt.mot>:141,151
 ```
 
