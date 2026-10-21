@@ -15,6 +15,10 @@ atómica, de una en una (en memoria solo hay una), y el manifiesto va el último
 es lo que da por buena la exportación. Un fallo a medias no deja PNG truncados ni un
 manifiesto que describa archivos que no existen.
 
+Cada textura exportada lleva `encoding`: `color`, o `signed-bump` si el PNG es un mapa de
+relieve con signo (V8U8, L6V5U5) pasado a RGBA con el mapeo de `ngb_tools.xpr.bump`. En
+L6V5U5, `alpha` vale `luminance`: el canal A es la luminancia, no transparencia.
+
 Varias cabeceras pueden apuntar a los mismos datos, así que un archivo pequeño podría pedir
 miles de texturas de 4096x4096. `pixel_budget` (por defecto `MAX_EXPORT_PIXELS`) acota los
 píxeles decodificados por exportación; las texturas que no caben se saltan con su motivo.
@@ -35,7 +39,7 @@ from typing import Final, Literal, TypedDict
 from ngb_tools._paths import EXTRACTED_SUBDIR, atomic_write_bytes, data_root, ensure_outside_repos
 from ngb_tools.xpr.catalog import CatalogEntry, catalog
 from ngb_tools.xpr.errors import UnsupportedTextureError, XprFormatError
-from ngb_tools.xpr.formats import lookup_format
+from ngb_tools.xpr.formats import TextureFormat, lookup_format
 from ngb_tools.xpr.png import encode_png
 from ngb_tools.xpr.source import XprSource
 from ngb_tools.xpr.texture import AlphaMode, alpha_mode, decode_texture
@@ -44,6 +48,8 @@ MANIFEST_NAME: Final = "_manifest.json"
 TEXTURES_SUBDIR: Final = "textures"
 TOOL: Final = "ngb_tools.xpr"
 UNNAMED: Final = "sin_nombre"
+COLOR: Final = "color"
+SIGNED_BUMP: Final = "signed-bump"
 # Píxeles de nivel 0 decodificados por exportación: una textura de 4096x4096. Coste medido
 # (Python 3.13, un núcleo): DXT1 2,8 Mpx/s, DXT5 1,6, ARGB 6,5, P8 y A8 9; el PNG nivel 9
 # cuesta de 0,15 a 4 s por Mpx según los datos. 16 Mpx son 10 s de DXT5 y, en el peor PNG,
@@ -91,6 +97,7 @@ class TextureRecord(TypedDict):
     levels: list[LevelRecord]
     palette: PaletteRecord | None
     alpha: str | None
+    encoding: str | None
     warnings: list[str]
 
 
@@ -158,6 +165,11 @@ def _levels(entry: CatalogEntry) -> list[LevelRecord]:
     ]
 
 
+def _encoding(fmt: TextureFormat | None) -> str:
+    """Qué significa el PNG: color, o un mapa de relieve con signo (`ngb_tools.xpr.bump`)."""
+    return SIGNED_BUMP if fmt is not None and fmt.is_signed_bump else COLOR
+
+
 def _record(
     source: XprSource, entry: CatalogEntry, issue: str | None, alpha: AlphaMode | None = None
 ) -> TextureRecord:
@@ -190,6 +202,7 @@ def _record(
         levels=_levels(entry),
         palette=_palette_record(source, entry),
         alpha=alpha.value if alpha is not None and exported else None,
+        encoding=_encoding(fmt) if exported else None,
         warnings=entry.warnings if exported else [],
     )
 

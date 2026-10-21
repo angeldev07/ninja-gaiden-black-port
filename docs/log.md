@@ -120,3 +120,7 @@ catedral. La colocación de props está en el bytecode `.sty`, pendiente. Detall
 `--attach` monta un arma en un hueso con la tabla de anclaje del `.itm` (registros de estado, hueso, posición y
 rotación). Se encontraron las 10 armas de Ryu en `cmn.afs`. La pose de la katana guardada en la espalda confirma
 el orden Euler Rz·Ry·Rx. Detalle en [[armas]].
+## [2026-10-21] ingest | Texturas de relieve V8U8 y L6V5U5
+`ngb_tools.xpr` decodifica las 358 texturas de relieve con signo del juego, 0 fallos ([[xpr0]]). Con esto
+desaparecen los avisos de "textura sin PNG" de 8 zonas de [[escenarios]]. Pendiente: que los glTF las usen como
+`normalTexture` en lugar de color base.

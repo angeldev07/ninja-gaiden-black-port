@@ -50,9 +50,16 @@ en los 16 a 19, `log2 U` en los 20 a 23 y `log2 V` en los 24 a 27.
 | `0x0E` | DXT2/3 / BC2 | `dlcustom.xpr` (3 texturas de 1024x512) | no |
 | `0x0F` | DXT4/5 / BC3 | 5 texturas de ryu (efectos con alfa) | no |
 | `0x19` | A8 | 8 texturas de `menu.spr` | sí |
+| `0x28` | V8U8 (relieve con signo; alias G8B8) | 326 texturas (agua y superficies de escenarios) | sí |
+| `0x27` / `0x37` | L6V5U5 (relieve con signo más luminancia; alias R6G5B5) | 32 texturas (por ejemplo `chr_kotei`) | sí / no |
 
-- La tabla de `ngb_tools.xpr.formats` conoce 54 códigos `D3DFORMAT` de Xbox. Los de profundidad, YUV y con signo
-  se reconocen, pero no se decodifican (no aparecen en los datos).
+- La tabla de `ngb_tools.xpr.formats` conoce 54 códigos `D3DFORMAT` de Xbox. Los de profundidad y YUV se
+  reconocen, pero no se decodifican, porque no aparecen en los datos.
+- **Relieve con signo** (V8U8 y L6V5U5): en la NV2A son formatos de color sin signo, y el signo lo pone el estado
+  de la etapa de textura, que el XPR0 no guarda. Se usa la semántica D3D de los nombres; leídos con signo, la
+  variación entre píxeles vecinos es 74 veces menor (`VERIFIED`, spike del analista). En el PNG, R y G llevan
+  U y V en binario desplazado, B la z de la normal reconstruida y A la luminancia. El manifiesto los marca con
+  `encoding: signed-bump`.
 - **DXT va sin swizzle.** `VERIFIED`, por dos vías:
   - en xemu, `pgraph/texture.c` solo des-swizzlea los formatos marcados como swizzled y los compressed los
     pasa a `pgraph/s3tc.c` en bloques lineales;

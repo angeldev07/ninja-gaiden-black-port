@@ -9,6 +9,7 @@ Módulos, de abajo arriba:
 - `formats`: tabla de D3DFORMAT de Xbox (nombre, bpp, swizzled/linear/compressed, códec).
 - `swizzle`: orden Morton de la NV2A y des-swizzle.
 - `dxt`, `pixels`: decodificadores a RGBA8 (DXT1/3/5; ARGB, 565, 1555, 4444, A8, L8, P8...).
+- `bump`: relieve con signo (V8U8, L6V5U5) a RGBA8 con un mapeo de normal map documentado.
 - `resources`: cabecera XPR0 y recursos tipados (Texture, Palette, buffers, UserData).
 - `texture`: mips, validación y decodificación del nivel 0 de una textura.
 - `catalog`: qué texturas hay y cuáles se pueden exportar (lo comparten list y export).

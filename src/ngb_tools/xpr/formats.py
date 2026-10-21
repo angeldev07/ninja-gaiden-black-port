@@ -13,8 +13,9 @@ maneras:
   DXT2 y DXT3 comparten código (0x0E), igual que DXT4 y DXT5 (0x0F): la NV2A no distingue
   el alfa premultiplicado, así que se decodifican como DXT3 y DXT5.
 
-Los formatos con datos con signo (V8U8, L6V5U5, V16U16), de profundidad (D16, D24S8...) y
-YUV (YUY2, UYVY) se conocen pero no se decodifican: no son texturas de color de un modelo.
+V8U8 y L6V5U5 (y su variante lineal) son mapas de relieve con signo y se exportan con el
+mapeo de `bump`. Los demás formatos con signo (V16U16), de profundidad (D16, D24S8...) y
+YUV (YUY2, UYVY) se conocen pero no se decodifican: no aparecen en el juego.
 
 Los canales de los formatos empaquetados se describen sobre la palabra little endian del
 píxel, con la convención de D3D de nombrar del bit más alto al más bajo: en A1R5G5B5, A es
@@ -57,6 +58,8 @@ class Codec(StrEnum):
     BC1 = "bc1"
     BC2 = "bc2"
     BC3 = "bc3"
+    V8U8 = "v8u8"  # relieve con signo, ver `bump`
+    L6V5U5 = "l6v5u5"
     UNSUPPORTED = "unsupported"
 
 
@@ -97,6 +100,11 @@ class TextureFormat:
     @property
     def is_decodable(self) -> bool:
         return self.codec is not Codec.UNSUPPORTED
+
+    @property
+    def is_signed_bump(self) -> bool:
+        """V8U8 o L6V5U5: el PNG es un mapa de relieve, no un color (ver `bump`)."""
+        return self.codec in (Codec.V8U8, Codec.L6V5U5)
 
     @property
     def is_compressed(self) -> bool:
@@ -190,8 +198,8 @@ _TABLE: Final = (
     _packed(0x20, "LIN_A8L8", 16, _LIN, _A8L8),
     TextureFormat(0x24, "YUY2", 16, _LIN, _NO),
     TextureFormat(0x25, "UYVY", 16, _LIN, _NO),
-    TextureFormat(0x27, "L6V5U5", 16, _SZ, _NO, aliases=("R6G5B5",)),
-    TextureFormat(0x28, "V8U8", 16, _SZ, _NO, aliases=("G8B8",)),
+    TextureFormat(0x27, "L6V5U5", 16, _SZ, Codec.L6V5U5, aliases=("R6G5B5",)),
+    TextureFormat(0x28, "V8U8", 16, _SZ, Codec.V8U8, aliases=("G8B8",)),
     TextureFormat(0x29, "R8B8", 16, _SZ, _NO),
     TextureFormat(0x2A, "D24S8", 32, _SZ, _NO),
     TextureFormat(0x2B, "F24S8", 32, _SZ, _NO),
@@ -205,7 +213,7 @@ _TABLE: Final = (
     TextureFormat(0x33, "V16U16", 32, _SZ, _NO),
     _packed(0x35, "LIN_L16", 16, _LIN, _L16),
     TextureFormat(0x36, "LIN_V16U16", 32, _LIN, _NO),
-    TextureFormat(0x37, "LIN_L6V5U5", 16, _LIN, _NO, aliases=("LIN_R6G5B5",)),
+    TextureFormat(0x37, "LIN_L6V5U5", 16, _LIN, Codec.L6V5U5, aliases=("LIN_R6G5B5",)),
     _packed(0x38, "R5G5B5A1", 16, _SZ, _R5G5B5A1),
     _packed(0x39, "R4G4B4A4", 16, _SZ, _R4G4B4A4),
     _packed(0x3A, "A8B8G8R8", 32, _SZ, _A8B8G8R8),

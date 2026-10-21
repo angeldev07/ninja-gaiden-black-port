@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
+from ngb_tools.xpr.bump import decode_bump
 from ngb_tools.xpr.dxt import compressed_size, decode_bc1, decode_bc2, decode_bc3
 from ngb_tools.xpr.errors import (
     TextureTooLargeError,
@@ -220,6 +221,8 @@ def _decode(
             return decode_palette(raw, palette)
         case Codec.PACKED:
             return decode_packed(raw, width, height, fmt, pitch=pitch)
+        case Codec.V8U8 | Codec.L6V5U5:
+            return decode_bump(raw, width, height, fmt, pitch=pitch)
         case Codec.UNSUPPORTED:
             raise UnsupportedTextureError(f"formato {fmt.name} sin decodificador")
 
@@ -252,6 +255,7 @@ class AlphaMode(StrEnum):
     STRAIGHT = "straight"  # el formato no tiene gemelo premultiplicado
     STRAIGHT_PROVEN = "straight-proven"  # DXT2-5: los píxeles descartan el premultiplicado
     STRAIGHT_ASSUMED = "straight-assumed"  # DXT2-5: no se puede distinguir; se supone recto
+    LUMINANCE = "luminance"  # L6V5U5: A es la luminancia L, no transparencia (ver `bump`)
 
 
 def alpha_mode(fmt: TextureFormat, rgba: bytes) -> AlphaMode:
@@ -260,7 +264,10 @@ def alpha_mode(fmt: TextureFormat, rgba: bytes) -> AlphaMode:
     Un color premultiplicado cumple R, G, B <= A en todos los píxeles. Si algún canal supera
     a su alfa, el premultiplicado queda descartado; si todo es opaco, los dos coinciden. Si
     no, no se puede saber y se supone recto (DXT3/DXT5), que es lo que hacen xemu y Cxbx.
+    En L6V5U5 el canal A lleva la luminancia (`LUMINANCE`).
     """
+    if fmt.codec is Codec.L6V5U5:
+        return AlphaMode.LUMINANCE
     if fmt.codec not in (Codec.BC2, Codec.BC3):
         return AlphaMode.STRAIGHT
     alpha = rgba[3::4]
