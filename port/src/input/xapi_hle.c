@@ -84,6 +84,14 @@ static const char *g_xinput_dll = "ninguna";
 
 static int key_down(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
 
+/* El teclado solo cuenta si la ventana activa es del loader: GetAsyncKeyState es global y,
+ * sin esto, escribir en otra ventana (Enter, flechas, WASD...) movía el juego. */
+static int we_have_focus(void) {
+    DWORD pid = 0;
+    HWND fg = GetForegroundWindow();
+    return fg && GetWindowThreadProcessId(fg, &pid) && pid == GetCurrentProcessId();
+}
+
 static void load_xinput(void) {
     static const char *const dlls[] = {"xinput1_4.dll", "xinput9_1_0.dll"};
     int i;
@@ -110,8 +118,10 @@ static void read_gamepad(xbox_gamepad_t *out) {
             xpad_from_pc(&pc.pad, &part);
             xpad_merge(out, &part);
         }
-        xpad_from_keys(key_down, &part);
-        xpad_merge(out, &part);
+        if (we_have_focus()) {
+            xpad_from_keys(key_down, &part);
+            xpad_merge(out, &part);
+        }
     }
     input_script_apply(&g_script, GetTickCount() - g_t0, (uint32_t)InterlockedIncrement(&g_polls), out);
 }

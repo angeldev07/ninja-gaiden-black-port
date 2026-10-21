@@ -95,7 +95,7 @@ static void default_log_path(char *out, size_t outlen) {
 }
 
 static int parse_args(void) {
-    int argc = 0, i;
+    int argc = 0, i, explicit_limits = 0; /* bits: 1 max-calls, 2 timeout, 4 idle */
     LPWSTR *wargv = CommandLineToArgvW(GetCommandLineW(), &argc);
     static char argbuf[32][2048]; /* un --input-script largo no cabe en MAX_PATH */
     char *argv[32];
@@ -117,12 +117,16 @@ static int parse_args(void) {
         int more = i + 1 < argc;
         if (!strcmp(a, "--log") && more)
             snprintf(g_ngb_opts.log_path, MAX_PATH, "%s", argv[++i]);
-        else if (!strcmp(a, "--max-calls") && more)
+        else if (!strcmp(a, "--max-calls") && more) {
             g_ngb_opts.max_calls = strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--timeout") && more)
+            explicit_limits |= 1;
+        } else if (!strcmp(a, "--timeout") && more) {
             g_ngb_opts.timeout_s = (unsigned)strtoul(argv[++i], NULL, 0);
-        else if (!strcmp(a, "--idle") && more)
+            explicit_limits |= 2;
+        } else if (!strcmp(a, "--idle") && more) {
             g_ngb_opts.idle_s = (unsigned)strtoul(argv[++i], NULL, 0);
+            explicit_limits |= 4;
+        }
         else if (!strcmp(a, "--lenient"))
             g_ngb_opts.lenient = 1;
         else if (!strcmp(a, "--echo"))
@@ -171,6 +175,16 @@ static int parse_args(void) {
             return -1;
         else
             g_ngb_opts.xbe_path = _strdup(a);
+    }
+    /* Con ventana visible se juega: sin límites salvo los que se pidan expresamente (los
+     * límites por defecto son para las ejecuciones de diagnóstico y los tests). */
+    if (g_ngb_opts.window == 1) {
+        if (!(explicit_limits & 1))
+            g_ngb_opts.max_calls = 0;
+        if (!(explicit_limits & 2))
+            g_ngb_opts.timeout_s = 0;
+        if (!(explicit_limits & 4))
+            g_ngb_opts.idle_s = 0;
     }
     if (!g_ngb_opts.xbe_path)
         return -1;

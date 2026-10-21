@@ -259,3 +259,18 @@ hay `--window` y el driver da un contexto; si no, el rasterizador por software d
   direcciones "físicas" es aproximada (arena, ventana del XBE, identidad).
 - Las tablas de secciones críticas y objetos crecen sin liberar; las pilas Xbox no se liberan.
 - Atajos frágiles documentados arriba: superposición en el TEB y cabecera PE sombra.
+
+## Jugar
+
+```
+portuild.cmd      compila (una vez)
+port\play.cmd       abre el juego en una ventana: sonido, mando de PC y teclado
+port\play.cmd --mute
+```
+
+- Con `--window` (lo que usa `play.cmd`) no hay límites de tiempo ni de llamadas, salvo que se pidan con
+  `--timeout`, `--max-calls` o `--idle`.
+- El teclado solo cuenta con la ventana del juego activa:
+  - Enter = START + A, Esc = BACK + B;
+  - flechas = cruceta, WASD = stick izquierdo;
+  - J K L I = A B X Y.
