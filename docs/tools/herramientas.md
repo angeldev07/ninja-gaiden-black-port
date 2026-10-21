@@ -19,15 +19,44 @@ status: draft
 - Convención de nombre: `<Juego>.xiso.iso`.
 - Gotcha: en este entorno, `Invoke-WebRequest` falla con `release-assets.githubusercontent.com`. Con `curl -L` sí funciona.
 
-## Herramientas propias (`tools/`)
+## Herramientas propias: el paquete `ngb_tools` (`src/ngb_tools/`)
 
-Solo stdlib de Python 3.13. Tests en `tests/` con `unittest`:
-`python -m unittest discover -s tests -v`. Sobre datos del juego siempre con `python -I`.
+Usan solo la stdlib de Python 3.13 y no tienen dependencias de runtime. El layout es `src/`, y cada
+herramienta es un subpaquete con su propia CLI.
+
+**Puesta en marcha, una vez por clon:**
+```sh
+python -m venv .venv
+.venv/Scripts/python -m pip install -e ".[dev]"   # ruff y mypy fijados
+git config core.hooksPath .githooks              # activa la guardia pre-commit
+```
+
+**Ejecución sobre datos del juego:** con el paquete instalado, `python -I -m ngb_tools.<herramienta> …`.
+`-I` deja el directorio de los datos fuera de `sys.path`. En un worktree sin instalar se usa
+`PYTHONPATH=src python -P -s -m ngb_tools.<herramienta> …` desde la raíz del repo, que es equivalente.
+
+**Calidad:** `ruff format .`, `ruff check .`, `mypy` (strict) y `python -m unittest discover -s tests -v`.
 
 | Herramienta | Qué hace | Uso | Página |
 | --- | --- | --- | --- |
-| `tools/xbe_info.py` | Parsea el XBE: cabecera, certificado, secciones, librerías del XDK, imports del kernel y strings | en construcción (H1) | [[xbe-default]] |
-| `tools/afs.py` | Lista, extrae e inventaría los contenedores AFS | en construcción (H1) | [[afs]] |
+| `ngb_tools.afs` | Lista, extrae e inventaría contenedores AFS (estructura, invariantes, magias, entropía) | `python -I -m ngb_tools.afs list|extract|inventory …` | [[afs]] |
+| `ngb_tools.xbe` | Analiza ejecutables XBE: cabecera, certificado, secciones, librerías del XDK, imports del kernel y strings | `python -I -m ngb_tools.xbe <xbe> [--strings] [--json …] [--md …]` | [[xbe-default]] |
+| `ngb_tools.hygiene` | Guardia que impide versionar datos del juego (hook y CI) | `python -m ngb_tools.hygiene [--staged]` | [[adr-03-datos-fuera-del-repo]] |
+
+### `ngb_tools.afs`
+
+```sh
+python -I -m ngb_tools.afs list    %USERPROFILE%\ngb-data\game\chr_ryu.afs
+python -I -m ngb_tools.afs extract %USERPROFILE%\ngb-data\game\chr_ryu.afs            # → NGB_DATA\extracted\chr_ryu\
+python -I -m ngb_tools.afs extract %USERPROFILE%\ngb-data\game\cmn.afs --index 253
+python -I -m ngb_tools.afs inventory %USERPROFILE%\ngb-data\game --json build/reports/afs/inventory.json --md build/reports/afs/inventory.md
+```
+
+- Códigos de salida: 0 = OK, 1 = archivo que no es AFS o con invariantes rotos, 2 = error de uso o de E/S.
+- `extract` se niega a escribir dentro del repo. Escribe cada archivo de forma atómica (`.part` y luego
+  rename) y deja un `_manifest.json`.
+- El inventario de los 206 AFS tarda unos 6 a 7 s. Lo midió el analista el 2026-10-20 en esta máquina (Ryzen 7 5700G con
+  los datos en un disco local).
 
 ### `ngb_tools.xbe`
 

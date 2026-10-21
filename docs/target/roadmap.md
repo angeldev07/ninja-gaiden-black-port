@@ -28,6 +28,6 @@ estructuras que luego usa el código.
 
 ## Siguiente paso concreto
 
-Cerrar H1: ingerir los reportes de `tools/xbe_info.py` y `tools/afs.py` en
+Cerrar H1: ingerir los reportes de `ngb_tools.xbe` y `ngb_tools.afs` en
 [[xbe-default]] y [[afs]], y elegir la textura de H2 según los formatos más
 frecuentes del inventario.

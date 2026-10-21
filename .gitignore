@@ -1,4 +1,4 @@
-# Datos del juego: nunca al repo (copyright). Viven fuera, en NGB_DATA (por defecto %USERPROFILE%\ngb-data).
+# Datos del juego: nunca al repo (copyright). Viven fuera, en $NGB_DATA (por defecto ~/ngb-data).
 # Esto es solo comodidad: en Linux .gitignore distingue mayúsculas (*.afs no cubre CMN.AFS) y
 # `git add -f` lo salta. La barrera real es la guardia (python -m ngb_tools.hygiene: hook y
 # CI), que no distingue mayúsculas, mira ruta, firma y tamaño y bloquea los comprimidos.

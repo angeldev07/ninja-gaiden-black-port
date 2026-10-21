@@ -45,3 +45,16 @@ aprobar una PR propia), puertas de CI y tags por hito. Gotcha: git y gh se ejecu
 **D3D8LTCG**, lo que complicará la identificación por firmas en H5. Importa 145 símbolos del kernel (128 funciones
 y 17 variables de datos), que son el alcance del kernel HLE de H6. Enlaza middleware de CRI (ADX, AIX y Sofdec), de mayo y junio de 2005.
 `NinjaTrilogy.xbe` y `NinjaTomoe.xbe` son el emulador de los Ninja Gaiden de NES (US y JP).
+## [2026-10-20] milestone | PR #2 y PR #1 mergeadas: puertas de calidad y vault
+`main` incorpora el paquete `ngb_tools` con ruff, mypy strict, CI en Ubuntu y Windows, y la guardia
+`ngb_tools.hygiene`, que pasó tres rondas de revisión y cerró dos bypass ([[adr-03-datos-fuera-del-repo]]).
+Los menores pendientes están en el issue #3. El repo solo admite squash y `main` está protegida
+([[adr-04-control-de-versiones]]).
+
+## [2026-10-20] ingest | Formato AFS y contenido de los assets (H1)
+`ngb_tools.afs` inventaría los 206 AFS: 3,766 entradas, todas con nombre, e invariantes válidos en 206/206.
+**No hay compresión de propósito general ni cifrado** en la ventana de 64 KiB que se midió: solo 2 entradas de
+entropía alta y ninguna firma de zlib o gzip. ADPCM y DXT son códecs conocidos. Se crearon
+[[afs]], [[chunk-teamninja]], [[kmd]], [[xpr0]], [[adx]] y [[wva]]. Peculiaridad: el `u32` final de cada
+atributo AFS no es el tamaño, sino la cabecera leída como array. `ryu.kmd` lleva 19 texturas (DXT1 y
+DXT4/5), que son el objetivo de H2.

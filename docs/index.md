@@ -23,7 +23,12 @@ en [[CLAUDE]] y la línea de tiempo en [[log]].
 
 ## Observación: formatos (`formats/`)
 
-- [[afs]]: contenedor AFS de CRI. Estructura, inventario de los 206 contenedores y magias internas. _(pendiente: llega con la PR de `afs`)_
+- [[afs]]: contenedor AFS de CRI. Estructura, peculiaridad del campo custom, inventario de las 3,766 entradas, magias y entropía.
+- [[chunk-teamninja]]: cabecera común de los formatos del motor Kunai (KMD, `chr_dat`, `stry_dat`…).
+- [[kmd]]: modelos y escenas. Slots fijos (OBJINFO, XPR0, HIERARC…); `ryu.kmd` tiene 59 objetos y 19 texturas.
+- [[xpr0]]: Xbox Packed Resource (texturas, paletas, VB e IB). Campo `Format` y swizzle.
+- [[adx]]: audio de CRI (95 pistas de música y 317 voces).
+- [[wva]]: banco de efectos de sonido en Xbox ADPCM.
 
 ## Observación: hallazgos (`findings/`)
 
