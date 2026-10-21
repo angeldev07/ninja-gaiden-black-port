@@ -19,6 +19,7 @@ ngb-xbe = "ngb_tools.xbe.cli:run"
 ngb-afs = "ngb_tools.afs.cli:run"
 ngb-xpr = "ngb_tools.xpr.cli:run"
 ngb-kmd = "ngb_tools.kmd.cli:run"
+ngb-audio = "ngb_tools.audio.cli:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]

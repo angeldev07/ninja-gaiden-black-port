@@ -1,7 +1,7 @@
 ---
 tags: [ngb, formats, cri, audio]
 updated: 2026-10-20
-status: draft
+status: current
 ---
 
 # ADX: audio de CRI
@@ -23,8 +23,21 @@ Es un formato público, y ffmpeg y vgmstream lo decodifican.
 | `0x0C` | u32 big endian | total de muestras. `INFERRED` |
 | `0x1E` | `(c)CRI` | copyright. `VERIFIED` |
 
+## Decodificación (H4, con `ngb_tools.audio`: validada de forma visual y estadística, sin comparar bit a bit)
+
+- Los 412 ADX del juego son **v3, codificación 3, corte de highpass 500 Hz y sin cifrado** (el byte `0x13` vale 0).
+- Los coeficientes del predictor salen de la fórmula pública: con 500 Hz a 44,100 Hz, `(7334, −3283)` en punto
+  fijo ×4096.
+- Cada bloque de 18 B tiene una escala u16be y 32 nibbles con signo. En v3 la escala se usa como escala+1 y cada
+  producto se desplaza por separado, como en vgmstream.
+- Lote completo:
+  - **bgm 95/95** (unos 150 min de música). El manifiesto marca 65 pistas con loop; falta comprobar el offset
+    real del loop en v3 (issue de seguimiento);
+  - **sse 317/317** voces.
+- La validación fue visual y estadística (forma de onda, espectrograma y RMS). No se comparó bit a bit con otro
+  decodificador porque no hay ffmpeg ni vgmstream instalados.
+
 ## Notas
 
 - `bgm.afs#66` (`bgm_rtm_dummy.adx`) es una de las 2 únicas entradas de entropía alta del juego.
 - El motor enlaza ADXT 9.50 y AIXP 2.32 ([[xbe-default]]). `movie\ninja.aix` es AIX (`AIXF`), ADX multipista.
-- **H4:** basta un decodificador ADX → WAV (es ADPCM con predictor fijo) para oír la primera pista.

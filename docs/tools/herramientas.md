@@ -43,6 +43,7 @@ git config core.hooksPath .githooks              # activa la guardia pre-commit
 | `ngb_tools.xbe` | Analiza ejecutables XBE: cabecera, certificado, secciones, librerías del XDK, imports del kernel y strings | `python -I -m ngb_tools.xbe <xbe> [--strings] [--json …] [--md …]` | [[xbe-default]] |
 | `ngb_tools.xpr` | Exporta las texturas de un XPR0 (suelto o dentro de un KMD) a PNG: DXT1/3/5, P8, A8, ARGB, des-swizzle | `python -I -m ngb_tools.xpr list|export <archivo> [--kmd]` | [[xpr0]] |
 | `ngb_tools.kmd` | Exporta modelos KMD a glTF 2.0 u OBJ, con jerarquía, materiales y texturas | `python -I -m ngb_tools.kmd info|export <kmd>` | [[kmd]] |
+| `ngb_tools.audio` | Decodifica ADX, Xbox ADPCM (.wva) y XWB a WAV; análisis con espectrograma | `python -I -m ngb_tools.audio adx|wva|xwb|analyze …` | [[adx]] |
 | `ngb_tools.hygiene` | Guardia que impide versionar datos del juego (hook y CI) | `python -m ngb_tools.hygiene [--staged]` | [[adr-03-datos-fuera-del-repo]] |
 
 ### `ngb_tools.afs`
@@ -104,3 +105,15 @@ python -I -m ngb_tools.kmd export <kmd> --skin --all-groups
   (`preview.png`).
 - Reutiliza los PNG de H2 si su manifiesto cuadra; si no, los exporta.
 - Formato: [[kmd]].
+
+### `ngb_tools.audio`
+
+```sh
+python -I -m ngb_tools.audio adx %USERPROFILE%\ngb-data\game\bgm.afs             # 95 pistas → NGB_DATA\extracted\audio\bgm\
+python -I -m ngb_tools.audio adx %USERPROFILE%\ngb-data\game\sse.afs --index 2   # una voz
+python -I -m ngb_tools.audio wva %USERPROFILE%\ngb-data\game\cmn.afs             # bancos .wva → un WAV por registro
+python -I -m ngb_tools.audio xwb %USERPROFILE%\ngb-data\game\Media\Wave.xwb
+python -I -m ngb_tools.audio analyze <wav...> --png-dir <dir>                       # RMS, saturación, forma de onda + espectrograma
+```
+
+- Salida en WAV PCM16 con `_manifest.json` (loops, frecuencia, canales). Formatos: [[adx]] y [[wva]].

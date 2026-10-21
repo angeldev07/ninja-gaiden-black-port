@@ -81,3 +81,9 @@ Un spike resolvió la geometría de `ryu.kmd`, validado con renders hechos por u
 Doku usa una variante del descriptor que todavía no se soporta. Detalle en [[kmd]].
 Además se adoptó una política nueva, una sola ronda de revisión por PR ([[equipo]]), y la PR #8 (H2) entró
 en `main` con el tag `milestone/h2`.
+
+## [2026-10-20] milestone | H3 cerrado (tag milestone/h3) y H4: todo el audio del juego en WAV
+La PR #10 (`ngb_tools.kmd`, glTF) entró con una sola ronda de revisión; los menores quedan en el issue #11.
+**H4: `ngb_tools.audio`** decodifica bgm 95/95, sse 317/317, 2,966 registros `.wva` y los 7 de `Wave.xwb`. Ningún
+ADX va cifrado. Se corrigió el layout de [[wva]]: el bit31 marca el tamaño del bloque de parámetros. Se validó
+con espectrogramas (música, voz y efectos reconocibles) y estadísticas. Detalle en [[adx]].
