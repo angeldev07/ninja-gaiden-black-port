@@ -132,3 +132,6 @@ Pero LTCG metió unas 900 escrituras de estado inline, y `RunPushBuffer` ejecuta
 Por eso se decide un **render híbrido**: PGRAPH emulado, más HLE en Swap, KickOff, fences y vblank
 ([[adr-06-render-hibrido]]). Además apareció la receta exacta del vblank que bloqueaba H7a (ISR `0x3D2040` → DPC
 `0x3D2310`). Detalle en [[xbe-default]].
+## [2026-10-21] ingest | Galería de personajes
+`ngb_tools.gallery`: 49 de 62 personajes en GLB, 20 de ellos con idle animado, más una hoja de contactos. La
+mayoría de los fallos son el descriptor multiparte. Detalle en [[personajes]].
