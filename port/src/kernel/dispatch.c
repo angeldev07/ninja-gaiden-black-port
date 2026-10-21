@@ -1,0 +1,135 @@
+/*
+ * dispatch.c: ngb_kcall(), el punto común de todos los stubs del kernel.
+ *
+ * Registra cada llamada en una línea: `[n] T<hilo> @<llamador> <ordinal> <nombre>(args) -> ret`
+ * (la línea se escribe al volver, así que los detalles que añade la implementación
+ * aparecen justo encima). Si el ordinal no tiene implementación, para la ejecución
+ * (o devuelve STATUS_SUCCESS con --lenient).
+ */
+#include "../ngb.h"
+
+#include <stdio.h>
+#include <string.h>
+
+#include "kernel.h"
+
+static const ngb_kexport_t *g_exports[NGB_MAX_ORDINAL + 1];
+static ngb_kimpl_fn g_impls[NGB_MAX_ORDINAL + 1];
+static volatile LONG g_counts[NGB_MAX_ORDINAL + 1];
+static volatile LONG g_seq;
+static volatile LONG g_unimpl_first;
+volatile DWORD g_ngb_last_call_tick;
+
+const ngb_kexport_t *ngb_kexport(uint32_t ordinal) {
+    return ordinal <= NGB_MAX_ORDINAL ? g_exports[ordinal] : NULL;
+}
+
+void ngb_kernel_register(const ngb_kimpl_t *impls, size_t count) {
+    size_t i;
+    for (i = 0; i < count; i++)
+        if (impls[i].ordinal <= NGB_MAX_ORDINAL)
+            g_impls[impls[i].ordinal] = impls[i].fn;
+}
+
+void ngb_kernel_init(void) {
+    size_t i;
+    for (i = 0; i < ngb_kexport_count; i++)
+        if (ngb_kexports[i].ordinal <= NGB_MAX_ORDINAL)
+            g_exports[ngb_kexports[i].ordinal] = &ngb_kexports[i];
+    ngb_impl_register_mm();
+    ngb_impl_register_rtl();
+    ngb_impl_register_ke();
+    ngb_impl_register_ps();
+    ngb_impl_register_io();
+    ngb_impl_register_misc();
+}
+
+size_t ngb_kernel_impl_count(void) {
+    size_t i, n = 0;
+    for (i = 0; i <= NGB_MAX_ORDINAL; i++)
+        n += g_impls[i] != NULL;
+    return n;
+}
+
+int ngb_kernel_is_implemented(uint32_t ordinal) {
+    return ordinal <= NGB_MAX_ORDINAL && g_impls[ordinal] != NULL;
+}
+
+static void format_args(char *out, size_t outlen, const ngb_kexport_t *e, const uint32_t *args) {
+    size_t pos = 0;
+    int i;
+    out[0] = 0;
+    for (i = 0; args && i < e->nargs && pos + 16 < outlen; i++) {
+        uint32_t v = args[i];
+        pos += (size_t)snprintf(out + pos, outlen - pos, v < 10 ? "%s%u" : "%s0x%08X",
+                                i ? ", " : "", v);
+    }
+    if (e->conv == NGB_CONV_CDECL && pos + 6 < outlen)
+        snprintf(out + pos, outlen - pos, ", ...");
+}
+
+uint64_t ngb_kcall(uint32_t ordinal, uint32_t *args, uint32_t caller) {
+    const ngb_kexport_t *e = ngb_kexport(ordinal);
+    ngb_thread_t *t = ngb_thread_current();
+    uint32_t prev_ord = 0, prev_caller = 0;
+    LONG n = InterlockedIncrement(&g_seq);
+    ngb_kimpl_fn fn = ordinal <= NGB_MAX_ORDINAL ? g_impls[ordinal] : NULL;
+    char argtext[512];
+    uint64_t ret = STATUS_SUCCESS;
+
+    g_ngb_last_call_tick = GetTickCount();
+    if (ordinal <= NGB_MAX_ORDINAL)
+        InterlockedIncrement(&g_counts[ordinal]);
+    if (!e)
+        ngb_stop(NGB_EXIT_UNIMPLEMENTED, "ordinal %u desconocido (desde 0x%08X)", ordinal, caller);
+    format_args(argtext, sizeof argtext, e, args);
+    if (!fn) {
+        ngb_log("[%ld] T%d @%08X %u %s(%s) -> NO IMPLEMENTADA", n, t ? t->index : 0, caller,
+                ordinal, e->name, argtext);
+        InterlockedCompareExchange(&g_unimpl_first, (LONG)ordinal, 0);
+        if (!g_ngb_opts.lenient)
+            ngb_stop(NGB_EXIT_UNIMPLEMENTED, "primera llamada sin implementar: %u %s(%s) desde 0x%08X",
+                     ordinal, e->name, argtext, caller);
+        return STATUS_SUCCESS;
+    }
+    if (t) {
+        prev_ord = t->inflight_ordinal;
+        prev_caller = t->inflight_caller;
+        t->inflight_ordinal = ordinal;
+        t->inflight_caller = caller;
+    }
+    ret = fn(args);
+    if (t) {
+        t->inflight_ordinal = prev_ord;
+        t->inflight_caller = prev_caller;
+    }
+    if (ret >> 32)
+        ngb_log("[%ld] T%d @%08X %u %s(%s) -> 0x%08X%08X", n, t ? t->index : 0, caller, ordinal,
+                e->name, argtext, (uint32_t)(ret >> 32), (uint32_t)ret);
+    else
+        ngb_log("[%ld] T%d @%08X %u %s(%s) -> 0x%08X", n, t ? t->index : 0, caller, ordinal,
+                e->name, argtext, (uint32_t)ret);
+    if (g_ngb_opts.max_calls && (unsigned long)n >= g_ngb_opts.max_calls)
+        ngb_stop(NGB_EXIT_MAX_CALLS, "--max-calls %lu alcanzado", g_ngb_opts.max_calls);
+    return ret;
+}
+
+void ngb_kernel_summary(void) {
+    uint32_t i;
+    int distinct = 0, distinct_impl = 0;
+    ngb_log("resumen: %ld llamadas al kernel; %u exports implementados en total",
+            (long)g_seq, (unsigned)ngb_kernel_impl_count());
+    for (i = 0; i <= NGB_MAX_ORDINAL; i++) {
+        if (!g_counts[i])
+            continue;
+        distinct++;
+        distinct_impl += g_impls[i] != NULL;
+        ngb_log("  %8ld  %3u %-36s %s", (long)g_counts[i], i, g_exports[i] ? g_exports[i]->name : "?",
+                g_impls[i] ? "" : "NO IMPLEMENTADA");
+    }
+    ngb_log("resumen: %d funciones distintas llamadas (%d implementadas)", distinct, distinct_impl);
+    if (g_unimpl_first) {
+        const ngb_kexport_t *e = ngb_kexport((uint32_t)g_unimpl_first);
+        ngb_log("resumen: primera sin implementar: %ld %s", (long)g_unimpl_first, e ? e->name : "?");
+    }
+}

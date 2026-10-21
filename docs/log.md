@@ -97,3 +97,10 @@ con espectrogramas (música, voz y efectos reconocibles) y estadísticas. Detall
   vblank), `feat/kmd-anim` (`--format glb` y el parser de `.mtn`: 258 motions de Ryu) y `feat/stage-export`
   (parser de escenarios: descriptor multiparte y HITMDL). Las notas de traspaso están en `NGB_DATA\handoff\`.
 - Se instaló **Ghidra 12.1.4 + ghidra-xbe** con aprobación del usuario ([[herramientas]]) y se lanzó H5.
+## [2026-10-21] milestone | H6: el código de NGB corre de forma nativa en PC
+`ngb-loader.exe` (C, MSVC x86, `/W4 /WX`) carga `default.xbe` en `0x10000` dentro de un proceso Win32 y lo ejecuta
+**de forma nativa**, con un kernel HLE propio: 118 exports, 105 de las 128 funciones que importa el juego. El juego
+crea su hilo, inicializa XAPI, monta las unidades, escribe metadatos en U:, formatea la caché Z:, inicializa los
+dispositivos USB y arranca D3D8, hasta la primera lectura de la GPU (`0xFD001804`, NV_PBUS, en `EIP 0x003D171B`).
+Son 285 llamadas al kernel. El líder lo reprodujo de forma independiente. Decisiones en [[adr-05-runtime-nativo]];
+observación en [[arranque-nativo]]. Próxima decisión, H7: emulación mínima del NV2A frente a HLE de D3D8.

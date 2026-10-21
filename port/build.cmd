@@ -1,0 +1,43 @@
+@echo off
+rem Compila el loader nativo (x86, MSVC) en build\port\ del repo.
+rem   port\build.cmd           compilación normal (/O2 /Zi)
+rem Requiere Visual Studio 2022 (C++ x86). VCVARSALL puede apuntar a otro vcvarsall.bat.
+setlocal
+set "PORT=%~dp0"
+set "SRC=%PORT%src"
+set "OUT=%PORT%..\build\port"
+if not defined VCVARSALL set "VCVARSALL=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat"
+if not exist "%OUT%\obj" mkdir "%OUT%\obj"
+call "%VCVARSALL%" x86 >nul 2>nul
+where cl >nul 2>nul || (echo build: no se encuentra cl.exe; revisa VCVARSALL & exit /b 1)
+
+set "CFLAGS=/nologo /W4 /WX /O2 /Zi /MT /GS /utf-8 /D_CRT_SECURE_NO_WARNINGS /I"%SRC%""
+
+rem 1) ngb-core.dll: el loader, el kernel emulado y los stubs generados.
+cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\core.pdb" /c ^
+  "%SRC%\main.c" "%SRC%\xbe.c" "%SRC%\memory.c" "%SRC%\log.c" "%SRC%\thread.c" "%SRC%\crash.c" ^
+  "%SRC%\kernel\stubs.c" "%SRC%\kernel\dispatch.c" "%SRC%\kernel\data.c" ^
+  "%SRC%\kernel\impl_mm.c" "%SRC%\kernel\impl_rtl.c" "%SRC%\kernel\impl_ke.c" ^
+  "%SRC%\kernel\impl_ps.c" "%SRC%\kernel\impl_io.c" "%SRC%\kernel\impl_misc.c" "%SRC%\kernel\hostpath.c" || exit /b 1
+link /nologo /DLL /DEBUG /OUT:"%OUT%\ngb-core.dll" /PDB:"%OUT%\ngb-core.pdb" ^
+  /BASE:0x60000000 /LARGEADDRESSAWARE ^
+  "%OUT%\obj\main.obj" "%OUT%\obj\xbe.obj" "%OUT%\obj\memory.obj" "%OUT%\obj\log.obj" ^
+  "%OUT%\obj\thread.obj" "%OUT%\obj\crash.obj" "%OUT%\obj\stubs.obj" "%OUT%\obj\dispatch.obj" ^
+  "%OUT%\obj\data.obj" "%OUT%\obj\impl_mm.obj" "%OUT%\obj\impl_rtl.obj" "%OUT%\obj\impl_ke.obj" ^
+  "%OUT%\obj\impl_ps.obj" "%OUT%\obj\impl_io.obj" "%OUT%\obj\impl_misc.obj" "%OUT%\obj\hostpath.obj" ^
+  kernel32.lib shell32.lib || exit /b 1
+
+rem 2) ngb-loader.exe: base fija 0x10000 + BSS que reserva la imagen del XBE. Sin CRT.
+cl /nologo /W4 /WX /O1 /GS- /Zi /utf-8 /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\stub.pdb" /c "%SRC%\loader_stub.c" || exit /b 1
+link /nologo /DEBUG /OUT:"%OUT%\ngb-loader.exe" /PDB:"%OUT%\ngb-loader.pdb" ^
+  /NODEFAULTLIB /ENTRY:ngb_stub_entry /SUBSYSTEM:CONSOLE ^
+  /BASE:0x10000 /FIXED /DYNAMICBASE:NO /NXCOMPAT:NO /SAFESEH:NO /LARGEADDRESSAWARE ^
+  /SECTION:.xbox,RWE ^
+  "%OUT%\obj\loader_stub.obj" kernel32.lib || exit /b 1
+
+rem 3) Prueba del confinamiento de rutas (hostpath.c), sin datos del juego.
+cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\hostpath_test.pdb" /Fe"%OUT%\hostpath_test.exe" "%PORT%tests\hostpath_test.c" "%SRC%\kernel\hostpath.c" || exit /b 1
+"%OUT%\hostpath_test.exe" || exit /b 1
+
+echo build: %OUT%\ngb-loader.exe + ngb-core.dll
+endlocal

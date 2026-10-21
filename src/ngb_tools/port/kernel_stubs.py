@@ -1,0 +1,163 @@
+"""Genera `port/src/kernel/stubs.c`: un stub en C por cada export de xboxkrnl.
+
+La fuente de verdad es la tabla `ngb_tools/data/xboxkrnl_exports.tsv` (derivada del
+`.def` de nxdk, CC0-1.0). Cada función exportada recibe un stub con su convención de
+llamada real y tantos argumentos de 32 bits como indica `arg_bytes`:
+
+- `stdcall`: el stub declara N parámetros `uint32_t` y MSVC genera `ret 4*N`, así que la
+  pila del llamador queda como espera el código Xbox.
+- `fastcall`: los dos primeros argumentos llegan en ECX y EDX; el resto, en pila, lo
+  limpia el stub (`ret 4*(N-2)`).
+- `cdecl`: son las variádicas (`DbgPrint`, `RtlSprintf`...). El stub declara un
+  parámetro fijo y `...`; pasa la dirección de los argumentos en pila, que el llamador
+  limpia.
+
+Todos devuelven `uint64_t` (EDX:EAX): cubre las funciones que devuelven 64 bits
+(`KeQueryPerformanceCounter`) y para las de 32 bits EDX es basura inofensiva. Cada stub
+llama a `ngb_kcall(ordinal, args, caller)`, que registra la llamada y la despacha a la
+implementación o detiene la ejecución si no la hay. Las variables exportadas (`data`) no
+llevan stub: el loader escribe en el thunk la dirección de su almacenamiento.
+
+Uso: `python -m ngb_tools.port.kernel_stubs [--out RUTA] [--check]`.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from collections.abc import Sequence
+from pathlib import Path
+
+from ngb_tools.xbe.kernel import (
+    CallConv,
+    ExportKind,
+    KernelExport,
+    KernelExports,
+    load_kernel_exports,
+)
+
+DEFAULT_OUT = Path("port") / "src" / "kernel" / "stubs.c"
+VARIADIC_LOGGED_ARGS = 4  # argumentos que se registran de una función variádica
+_CONV_ENUM = {
+    CallConv.STDCALL: "NGB_CONV_STDCALL",
+    CallConv.FASTCALL: "NGB_CONV_FASTCALL",
+    CallConv.CDECL: "NGB_CONV_CDECL",
+    CallConv.NONE: "NGB_CONV_NONE",
+}
+_CONV_KEYWORD = {
+    CallConv.STDCALL: "__stdcall",
+    CallConv.FASTCALL: "__fastcall",
+    CallConv.CDECL: "__cdecl",
+}
+
+HEADER = """\
+/*
+ * GENERADO por `python -m ngb_tools.port.kernel_stubs` (tools/gen_kernel_stubs.py)
+ * desde src/ngb_tools/data/xboxkrnl_exports.tsv. NO EDITAR A MANO: regenerar.
+ *
+ * Un stub por export de xboxkrnl con su convención real (stdcall/fastcall/cdecl) y
+ * N argumentos de 32 bits según arg_bytes. Todos acaban en ngb_kcall().
+ */
+#include <intrin.h>
+#include "kernel.h"
+
+#pragma intrinsic(_ReturnAddress)
+"""
+
+
+class StubError(ValueError):
+    """La tabla de exports tiene una fila con la que no se puede generar un stub."""
+
+
+def stub_name(ordinal: int) -> str:
+    """Nombre C del stub: `kstub_NNN` (3 dígitos para que ordene igual que el ordinal)."""
+    return f"kstub_{ordinal:03d}"
+
+
+def arg_count(export: KernelExport) -> int:
+    """Argumentos de 32 bits del stub; un `arg_bytes` que no es múltiplo de 4 es un error."""
+    if export.callconv is CallConv.CDECL:
+        return VARIADIC_LOGGED_ARGS
+    arg_bytes = export.arg_bytes or 0
+    if arg_bytes % 4:
+        raise StubError(f"ordinal {export.ordinal} ({export.name}): arg_bytes={arg_bytes}")
+    return arg_bytes // 4
+
+
+def render_stub(export: KernelExport) -> str:
+    """Código C de la función stub de un export `func`."""
+    conv = export.callconv
+    if export.kind is not ExportKind.FUNC or conv not in _CONV_KEYWORD:
+        raise StubError(f"ordinal {export.ordinal} ({export.name}): no es una función con stub")
+    name = stub_name(export.ordinal)
+    keyword = _CONV_KEYWORD[conv]
+    nargs = arg_count(export)
+    comment = f"/* {export.ordinal} {export.name}: {conv.value}, {nargs} args */"
+    call = f"ngb_kcall({export.ordinal}u, {{args}}, (uint32_t)(uintptr_t)_ReturnAddress())"
+    if conv is CallConv.CDECL:
+        body = f"    return {call.format(args='&a0')};"
+        params = "uint32_t a0, ..."
+    elif nargs == 0:
+        body = f"    return {call.format(args='NULL')};"
+        params = "void"
+    else:
+        params = ", ".join(f"uint32_t a{index}" for index in range(nargs))
+        stores = "".join(f"    args[{index}] = a{index};\n" for index in range(nargs))
+        body = f"    uint32_t args[{nargs}];\n{stores}    return {call.format(args='args')};"
+    return f"{comment}\nstatic uint64_t {keyword} {name}({params})\n{{\n{body}\n}}\n"
+
+
+def render_table_row(export: KernelExport) -> str:
+    """Fila de `ngb_kexports[]`: ordinal, tipo, convención, nº de args, nombre y stub."""
+    if export.kind is ExportKind.FUNC:
+        conv = export.callconv or CallConv.NONE
+        return (
+            f"    {{{export.ordinal}, NGB_KIND_FUNC, {_CONV_ENUM[conv]}, "
+            f'{arg_count(export)}, "{export.name}", (const void *){stub_name(export.ordinal)}}},'
+        )
+    return f'    {{{export.ordinal}, NGB_KIND_DATA, NGB_CONV_NONE, 0, "{export.name}", NULL}},'
+
+
+def render_stubs_c(exports: KernelExports) -> str:
+    """El archivo `stubs.c` completo, en orden de ordinal y con fin de línea LF."""
+    ordered = [exports[ordinal] for ordinal in sorted(exports)]
+    unusable = [e for e in ordered if e.kind is None]
+    if unusable:
+        names = ", ".join(f"{e.ordinal} {e.name}" for e in unusable)
+        raise StubError(f"exports sin tipo (func/data): {names}")
+    stubs = "\n".join(render_stub(e) for e in ordered if e.kind is ExportKind.FUNC)
+    rows = "\n".join(render_table_row(e) for e in ordered)
+    max_ordinal = ordered[-1].ordinal if ordered else 0
+    return (
+        f"{HEADER}\n{stubs}\n"
+        f"const ngb_kexport_t ngb_kexports[] = {{\n{rows}\n}};\n\n"
+        "const size_t ngb_kexport_count = sizeof(ngb_kexports) / sizeof(ngb_kexports[0]);\n"
+        f"const uint32_t ngb_kexport_max_ordinal = {max_ordinal}u;\n"
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Genera los stubs C del kernel Xbox.")
+    parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help=f"salida ({DEFAULT_OUT})")
+    parser.add_argument("--exports", type=Path, help="TSV de exports (por defecto, el incluido)")
+    parser.add_argument(
+        "--check", action="store_true", help="no escribe: falla si la salida no está al día"
+    )
+    args = parser.parse_args(argv)
+    text = render_stubs_c(load_kernel_exports(args.exports))
+    if args.check:
+        current = args.out.read_text(encoding="utf-8") if args.out.is_file() else None
+        if current != text:
+            print(f"{args.out}: desactualizado; regenera con tools/gen_kernel_stubs.py")
+            return 1
+        print(f"{args.out}: al día")
+        return 0
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    with args.out.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+    print(f"{args.out}: {text.count(chr(10))} líneas")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

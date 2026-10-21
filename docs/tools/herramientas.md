@@ -129,3 +129,16 @@ python -I -m ngb_tools.audio analyze <wav...> --png-dir <dir>                   
   con XbSymbolDatabase).
 - El proyecto de análisis vive en `%USERPROFILE%\ngb-data\ghidra\` (proyecto `ngb`), con sus scripts e informes.
   Resultados en [[xbe-default]] (H5).
+## Cargador nativo (`port/`, C con MSVC x86)
+
+```bat
+port\build.cmd                                                        :: MSVC x86, /W4 /WX → build\port\ngb-loader.exe + ngb-core.dll
+build\port\ngb-loader.exe %USERPROFILE%\ngb-data\game\default.xbe   :: ejecuta el juego hasta la 1.ª MMIO del NV2A
+   [--log F] [--max-calls N] [--timeout S] [--idle S] [--echo] [--mmio-strict] [--mmio-gpu-ram]
+python tools\gen_kernel_stubs.py [--check]                           :: regenera port\src\kernel\stubs.c desde el TSV
+```
+
+- Log por defecto en `NGB_DATA\runs\h6-<fecha>.log`; disco duro virtual en `NGB_DATA\runs\hdd\`.
+- Códigos de salida: 0 OK, 2 llamada sin implementar, 3 crash o MMIO, 4 `--max-calls`, 5 timeout o inactividad,
+  6 el juego pidió apagar.
+- Diseño: [[adr-05-runtime-nativo]]. Lo que hace el juego al arrancar: [[arranque-nativo]].

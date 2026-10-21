@@ -19,6 +19,7 @@ en [[CLAUDE]] y la línea de tiempo en [[log]].
 ## Observación: ingeniería inversa (`reverse-engineering/`)
 
 - [[disco-ngb]]: imagen Redump y XISO, 249 archivos por tipo, grupos de AFS, ejecutables y videos.
+- [[arranque-nativo]]: qué hace `default.xbe` al arrancar de forma nativa (H6): hilos, XAPI, unidades, caché en el disco duro, init de D3D hasta la primera MMIO del NV2A.
 - [[xbe-default]]: anatomía de `default.xbe`. Motor "Kunai", MSVC 13.10 con el XDK 5849, D3D8LTCG, 16 secciones, 145 imports del kernel, middleware de CRI y los otros 4 XBE del disco.
 
 ## Observación: formatos (`formats/`)
@@ -40,6 +41,7 @@ _(todavía vacío)_
 - [[adr-01-enfoque-port]]: rehosting más capa de plataforma más descompilación incremental.
 - [[adr-02-herramientas-re]]: Ghidra con ghidra-xbe, herramientas propias, REA auxiliar, xemu como oráculo.
 - [[adr-03-datos-fuera-del-repo]]: los datos del juego en `NGB_DATA`, fuera del repo y de OneDrive.
+- [[adr-05-runtime-nativo]]: cargador con base fija, cabecera PE sombra, KPCR superpuesta en el TEB, TLS, archivos y MMIO. Opciones para H7.
 - [[adr-04-control-de-versiones]]: trunk-based, Conventional Commits, PRs con squash, revisión, puertas de CI y tags por hito.
 
 ## Equipo (`team/`)
