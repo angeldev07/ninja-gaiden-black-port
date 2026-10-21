@@ -218,3 +218,10 @@ La demo de gameplay del título, que el juego reproduce con su propio motor, se 
 Ryu pelea con la Dragon Sword. También se corrigió el aviso "Unable to load game settings": la EEPROM emulada
 devolvía basura de la pila, y la firma de `system.dat` cambiaba en cada ejecución. Pendientes el cielo (azul
 plano) y parte del suelo. Detalle en [[gpu-nv2a]].
+
+## [2026-10-22] ingest | El cuelgue de la demo: fixups de push buffers de D3D
+D3D marca con un `NO_OPERATION` de parámetro especial los push buffers estáticos cuyo JUMP de vuelta todavía no
+puede reescribir; en la Xbox, la GPU se detiene y la rutina de interrupción lo parchea. Sin emular eso, la GPU
+emulada daba vueltas por push buffers viejos (hasta 400 M palabras), pisaba el fence y colgaba el juego al
+empezar la demo. Con el HLE del parcheo, la demo va a 55-60 fps sin cuelgues. Lo diagnosticó el líder con
+`--watch`, trazas de kicks y Ghidra. Detalle en [[gpu-nv2a]].

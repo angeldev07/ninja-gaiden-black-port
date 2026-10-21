@@ -209,6 +209,37 @@ Si se deja la pantalla de título sin pulsar nada, el juego reproduce una **demo
 puede saltar sin partida guardada, y llenó `NGB_DATA` de capturas. La demo del título daba la misma escena 3D sin
 input. Los agentes tienen que limpiar sus capturas y buscar antes el caso de prueba más barato.
 
+## Fixups de push buffers estáticos (el cuelgue de la demo y los fps del 3D)
+
+**Síntoma:** al empezar la demo del título, el juego se colgaba en `D3D_BlockOnTime` (`0x3CD0D0`) en 2 de cada
+3 ejecuciones, y la demo iba a 35-44 fps.
+
+**Causa (`VERIFIED` en Ghidra y con trazas):**
+- `D3DDevice_RunPushBuffer` (`0x3CD680`) salta desde el anillo a un push buffer estático que termina en un JUMP de
+  vuelta, y D3D reescribe ese JUMP en cada uso.
+- Si la GPU no ha terminado el uso anterior, D3D mete `NO_OPERATION` (`0x100`) con el parámetro `(i << 5) | 0xD`
+  (registro `i` de una tabla del dispositivo) o `(va << 5) | 0xC` (registro en el anillo).
+- En la Xbox, ese NOP detiene la GPU y lanza una interrupción; la rutina de D3D hace el parcheo, el mismo que
+  `FUN_003cd5e0` hace directamente cuando la GPU ya pasó.
+- Nosotros lo tratábamos como un NOP más:
+  - el JUMP de vuelta seguía apuntando al uso anterior y la GPU emulada daba vueltas hasta el tope de 4 M
+    palabras (hasta 400 M palabras por ejecución);
+  - pisaba el fence de D3D (`0x82774000`) con valores viejos, y el juego esperaba para siempre.
+
+**Arreglo:** HLE del parcheo en `pgraph.c` (`d3d_pushbuffer_fixup`):
+- recorre la lista de registros, escribe el JUMP de vuelta y aplica la lista de fixups;
+- valida cada puntero contra la RAM contigua o la imagen del XBE.
+
+**Resultado:** cero kicks enormes, sin cuelgues en las pruebas y la demo a **55-60 fps**.
+
+**Herramientas nuevas:**
+- las líneas `perf:` miden ahora `pb_run`, `kick_body`, la espera del lock y `pgl_call`;
+- un kick de más de 1 M palabras se registra con sus primeros saltos;
+- cada cambio de destino del semáforo de D3D va al log.
+
+**Probado y descartado:** sustituir el traspaso por eventos al hilo de render por una espera activa. En esta CPU
+(Ryzen 7 5700G) añadía ~17 ms por frame, así que se queda el traspaso por eventos (~1,6 ms por frame en total).
+
 ## Siguiente
 
 1. Pasar de la pantalla de título al menú principal, y averiguar qué esperan los avisos y el vídeo (audio).

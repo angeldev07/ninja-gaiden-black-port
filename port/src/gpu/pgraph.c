@@ -83,6 +83,8 @@ static uint32_t g_aidx_n, g_aidx_cap;
 #define PERF_EVERY 300
 static struct {
     LONGLONG kick, draw, clear, present, pace, t0, log0;
+    LONGLONG pb, body; /* dentro de pb_run y de kick_body (en el hilo que lo ejecuta) */
+    LONGLONG lockwait, call; /* esperando g_pg_lock y dentro de pgl_call */
     long kcalls0;
     uint32_t mmio0, flips0, kicks0, tris0;
     char last[320];
@@ -109,7 +111,7 @@ static void perf_report(void) {
     if (!g_perf.t0 || !n) {
         g_perf.t0 = now;
         if (g_gl) {
-            char gl[400];
+            char gl[700];
             pgl_perf_take(gl, sizeof gl, 1); /* descarta lo acumulado antes de la primera ventana */
         }
     } else {
@@ -117,16 +119,18 @@ static void perf_report(void) {
         snprintf(g_perf.last, sizeof g_perf.last,
                  "perf: frames %u-%u: %.1f fps reales, %.2f ms/frame; por frame: pusher %.2f ms "
                  "(dibujo %.2f, clear %.2f), present %.2f, pacing %.2f, log %.2f ms; %.0f llamadas "
-                 "al kernel, %.0f MMIO, %.1f kicks, %.0f primitivas",
+                 "al kernel, %.0f MMIO, %.1f kicks, %.0f primitivas; pb_run %.2f ms, kick_body %.2f ms, lock %.2f ms, pgl_call %.2f ms",
                  g_perf.flips0, g_flips, n * 1000.0 / wall, wall / n,
                  ticks_ms(g_perf.kick - g_perf.present) / n,
                  ticks_ms(g_perf.draw) / n, ticks_ms(g_perf.clear) / n, ticks_ms(g_perf.present) / n,
                  ticks_ms(g_perf.pace) / n, ticks_ms(log_now - g_perf.log0) / n,
                  (double)(kc - g_perf.kcalls0) / n, (double)(mmio - g_perf.mmio0) / n,
-                 (double)(g_kicks - g_perf.kicks0) / n, (double)(g_begin_end - g_perf.tris0) / n);
+                 (double)(g_kicks - g_perf.kicks0) / n, (double)(g_begin_end - g_perf.tris0) / n,
+                 ticks_ms(g_perf.pb) / n, ticks_ms(g_perf.body) / n, ticks_ms(g_perf.lockwait) / n,
+                 ticks_ms(g_perf.call) / n);
         ngb_log("    · %s", g_perf.last);
         if (g_gl) {
-            char gl[400];
+            char gl[700];
             pgl_perf_take(gl, sizeof gl, n);
             ngb_log("    · %s", gl);
         }
@@ -139,6 +143,7 @@ static void perf_report(void) {
     g_perf.kicks0 = g_kicks;
     g_perf.tris0 = g_begin_end;
     g_perf.kick = g_perf.draw = g_perf.clear = g_perf.present = g_perf.pace = 0;
+    g_perf.pb = g_perf.body = g_perf.lockwait = g_perf.call = 0;
 }
 
 /* Racha de palabras del mismo método (para no escribir 10000 líneas de INLINE_ARRAY). */
@@ -888,6 +893,82 @@ static void do_clear(uint32_t flags) {
         dump_png("primer clear de color");
 }
 
+/*
+ * HLE del "fixup" de push buffers estáticos de D3D (D3DDevice_RunPushBuffer, 0x3CD680).
+ *
+ * D3D salta desde su anillo a un push buffer estático que termina en un JUMP de vuelta, y
+ * reescribe ese JUMP en cada uso. Si la GPU todavía no ha terminado el uso anterior, no
+ * puede reescribirlo aún: mete en el anillo NO_OPERATION (0x100) con un parámetro que en la
+ * Xbox detiene la GPU y lanza una interrupción; la rutina de D3D hace entonces el parcheo
+ * (el mismo que FUN_003cd5e0 hace directamente cuando la GPU ya pasó) y la GPU sigue con el
+ * JUMP al push buffer. Aquí no hay interrupción: el parcheo se hace en el acto.
+ *   parámetro (i << 5) | 0xD: registro i de la tabla del dispositivo (dev + 0x264 + i·20);
+ *   parámetro (va << 5) | 0xC: registro en el propio anillo, en va (contigua, 0x8xxxxxxx).
+ * Registro (5 palabras): [0] retorno en el anillo | flags, [1] siguiente registro, [2] palabra
+ * final del push buffer (donde va el JUMP de vuelta), [3] lista de fixups, [4] base.
+ * Sin esto, el JUMP de vuelta seguía apuntando al uso anterior: la GPU emulada daba vueltas
+ * hasta el tope de 4 M palabras, pisaba el fence de D3D con valores viejos y el juego se
+ * colgaba en D3D_BlockOnTime (al empezar la demo del título).
+ */
+#define D3D_G_PDEVICE_VA 0x003DAA88u /* D3D_g_pDevice de NGB (symbols.csv de H5) */
+static uint32_t g_pb_fixups;
+
+/* Memoria del juego accesible: RAM contigua o la imagen del XBE. */
+static void *game_mem(uint32_t va, uint32_t len) {
+    if (va >= NGB_CONTIG_BASE && va - NGB_CONTIG_BASE <= NGB_CONTIG_SIZE &&
+        len <= NGB_CONTIG_SIZE - (va - NGB_CONTIG_BASE))
+        return (void *)(uintptr_t)va;
+    if (va >= NGB_RESERVE_BASE && va < NGB_RESERVE_END && len <= NGB_RESERVE_END - va)
+        return (void *)(uintptr_t)va;
+    return NULL;
+}
+
+static void d3d_apply_fixups(uint32_t list, uint32_t base) {
+    int n;
+    for (n = 0; n < 4096; n++) {
+        uint32_t *hdr = (uint32_t *)game_mem(list, 8), size;
+        void *dst, *src;
+        if (!hdr || hdr[0] == 0xFFFFFFFFu)
+            return;
+        size = hdr[0];
+        src = game_mem(list + 8, size);
+        dst = game_mem(base + hdr[1], size);
+        if (!src || !dst || size > 0x100000u)
+            return;
+        memmove(dst, src, size);
+        list += 8 + size;
+    }
+}
+
+static void d3d_pushbuffer_fixup(uint32_t param) {
+    uint32_t rec, n;
+    if ((param & 0x1Fu) == 0xDu) {
+        uint32_t *dev = (uint32_t *)game_mem(D3D_G_PDEVICE_VA, 4);
+        if (!dev)
+            return;
+        rec = *dev + 0x99u * 4u + (param >> 5) * 20u;
+    } else {
+        rec = (param >> 5) | 0x80000000u;
+    }
+    for (n = 0; n < 64 && rec != 0 && rec != 0xFFFFFFFFu; n++) {
+        uint32_t *r = (uint32_t *)game_mem(rec, 20), *end, w0, next;
+        if (!r || (end = (uint32_t *)game_mem(r[2], 4)) == NULL) {
+            ngb_log("    · PGRAPH: fixup de push buffer con registro inválido 0x%08X", rec);
+            return;
+        }
+        w0 = r[0];
+        *end = (w0 & 0x0FFFFFFFu) + 1u; /* JUMP de vuelta al anillo */
+        if (w0 & 0x20000000u)
+            d3d_apply_fixups(r[3], r[4]);
+        next = r[1];
+        r[1] = 0xFFFFFFFFu;
+        if ((int32_t)w0 < 0)
+            r[0] = w0 & 0xBFFFFFFFu;
+        rec = next;
+    }
+    g_pb_fixups++;
+}
+
 static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param, int non_inc) {
     uint32_t inst = 0;
     (void)user;
@@ -896,6 +977,10 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
     if (!g_frame0_done)
         g_hist_frame0[method / 4]++;
     record(sub, method, param, non_inc);
+    if (method == 0x0100 && ((param & 0x1Fu) == 0xCu || (param & 0x1Fu) == 0xDu)) {
+        d3d_pushbuffer_fixup(param); /* NO_OPERATION con interrupción: fixup de D3D */
+        return;
+    }
     if (method == 0) { /* SET_OBJECT: el handle se busca en RAMHT; la clase está en RAMIN */
         uint8_t *obj;
         if (ramht_lookup(param, &inst) && (obj = nv2a_ramin(inst, 4)) != NULL) {
@@ -1049,9 +1134,23 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
     }
 }
 
+/* Primeros saltos/llamadas del kick en curso, para explicar un kick enorme (kick_body). */
+static struct {
+    int kind;
+    uint32_t at, word, target;
+} g_kick_ev[6];
+static int g_kick_nev;
+
 static void on_event(void *user, int kind, uint32_t at, uint32_t word, uint32_t target) {
     static const char *names[] = {"?", "JMP", "JMP antiguo", "CALL", "RETURN", "ERROR"};
     (void)user;
+    if (g_kick_nev < 6) {
+        g_kick_ev[g_kick_nev].kind = kind;
+        g_kick_ev[g_kick_nev].at = at;
+        g_kick_ev[g_kick_nev].word = word;
+        g_kick_ev[g_kick_nev].target = target;
+        g_kick_nev++;
+    }
     flush_run();
     if (logging() || kind == PB_EVENT_ERROR)
         pg_printf("   pb %s en 0x%08X (palabra 0x%08X) -> 0x%08X\n", names[kind <= 5 ? kind : 0],
@@ -1079,6 +1178,7 @@ typedef struct kick_args {
 
 static void kick_body(void *arg) {
     kick_args_t *k = (kick_args_t *)arg;
+    LONGLONG t_body = qpc();
     uint32_t dma_instance = k->dma_instance, get = k->get, put = k->put;
     uint32_t phys = 0, limit = NGB_CONTIG_SIZE - 1, end, span;
     uint8_t *base;
@@ -1097,11 +1197,31 @@ static void kick_body(void *arg) {
     g_kick_base = base;
     if (g_gl)
         pgl_kick_begin();
-    end = base ? pb_run(&g_pb, base, limit + 1, get, put, 1u << 22, &k_cb, NULL) : put;
+    {
+        uint32_t words0 = g_words;
+        LONGLONG t_pb = qpc();
+        int st_count = (int)g_pb.count, st_sub = g_pb.in_subroutine, e;
+        g_kick_nev = 0;
+        end = base ? pb_run(&g_pb, base, limit + 1, get, put, 1u << 22, &k_cb, NULL) : put;
+        g_perf.pb += qpc() - t_pb;
+        if (g_words - words0 > (1u << 20)) {
+            ngb_log("    · PGRAPH: kick enorme: al entrar count %d, subrutina %d; eventos:", st_count,
+                    st_sub);
+            for (e = 0; e < g_kick_nev; e++)
+                ngb_log("        %d en 0x%08X (palabra 0x%08X) -> 0x%08X", g_kick_ev[e].kind,
+                        g_kick_ev[e].at, g_kick_ev[e].word, g_kick_ev[e].target);
+        }
+        /* Un kick normal son miles de palabras: uno de más de un millón es un replay de un
+           push buffer viejo (el síntoma de los cuelgues de D3D_BlockOnTime). */
+        if (g_words - words0 > (1u << 20))
+            ngb_log("    · PGRAPH: kick %u enorme: %u palabras, GET 0x%08X -> PUT 0x%08X, acaba en 0x%08X",
+                    g_kicks, g_words - words0, get, put, end);
+    }
     flush_run();
     if (end != put)
         pg_printf("   pb: parada en 0x%08X sin llegar a PUT 0x%08X; se fuerza GET = PUT\n", end, put);
     fflush(g_pg);
+    g_perf.body += qpc() - t_body;
 }
 
 uint32_t pgraph_kick(uint32_t dma_instance, uint32_t get, uint32_t put) {
@@ -1111,10 +1231,15 @@ uint32_t pgraph_kick(uint32_t dma_instance, uint32_t get, uint32_t put) {
     k.get = get;
     k.put = put;
     EnterCriticalSection(&g_pg_lock);
-    if (g_gl)
-        pgl_call(kick_body, &k); /* todo GL en el hilo de render (ver pgraph_gl.c) */
-    else
-        kick_body(&k);
+    {
+        LONGLONG t_call = qpc();
+        g_perf.lockwait += t_call - t_kick;
+        if (g_gl)
+            pgl_call(kick_body, &k); /* todo GL en el hilo de render (ver pgraph_gl.c) */
+        else
+            kick_body(&k);
+        g_perf.call += qpc() - t_call;
+    }
     g_perf.kick += qpc() - t_kick;
     LeaveCriticalSection(&g_pg_lock);
     return put; /* D3D espera GET == PUT: todo lo enviado cuenta como consumido */
@@ -1193,9 +1318,10 @@ void pgraph_summary(void) {
     if (g_perf.last[0])
         ngb_log("pgraph: última medida: %s", g_perf.last);
     ngb_log("pgraph: %u kicks, %u palabras de datos, %u frames (FLIP_STALL), %u BEGIN_END, "
-            "%u DRAW_ARRAYS, %u clears (%u de color), %u semáforos, %u errores del pb",
+            "%u DRAW_ARRAYS, %u clears (%u de color), %u semáforos, %u errores del pb, "
+            "%u fixups de push buffer",
             g_kicks, g_words, g_flips, g_begin_end, g_draw_arrays, g_clears, g_color_clears,
-            g_sem_releases, g_pb.errors);
+            g_sem_releases, g_pb.errors, g_pb_fixups);
     ngb_log("pgraph: rasterizador: %u triángulos, %u píxeles escritos; %u primitivas sin dibujar "
             "(%u con posición no XYZRHW, %u sin superficie, %u puntos/líneas); %u DRAW_ARRAYS y "
             "ARRAY_ELEMENT sin dibujar",
