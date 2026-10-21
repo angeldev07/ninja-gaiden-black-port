@@ -105,7 +105,6 @@ static INIT_ONCE g_vp_once = INIT_ONCE_STATIC_INIT;
 static LARGE_INTEGER g_vp_last, g_vp_freq;
 static mix_ctx_t g_mix;      /* lectura de muestras y caché ADPCM (apu/mix.c) */
 static int g_audio = -1;     /* -1 sin abrir, 0 sin dispositivo, 1 sonando */
-static double g_audio_frac;  /* fracción de muestra de salida pendiente */
 static float g_mixbuf[4800 * 2];
 static double g_audio_sq;              /* suma de cuadrados, para el RMS del resumen */
 static float g_audio_peak;
@@ -185,11 +184,53 @@ static void vp_write(uint32_t addr, uint32_t value) {
     LeaveCriticalSection(&g_vp_lock);
 }
 
+/* Hilo de audio (modelo "pull"): mantiene ~100 ms en la cola de waveOut. Mezcla en bloques
+ * de 10 ms solo cuando la tarjeta ha consumido, así que las voces avanzan al ritmo real del
+ * dispositivo y un hilo de DPC tardío ya no produce cortes ni ráfagas. */
+static void mix_block(uint32_t frames) {
+    uint32_t i;
+    memset(g_mixbuf, 0, (size_t)frames * 2 * sizeof g_mixbuf[0]);
+    mix_render(&g_vp, &g_mix, g_mixbuf, frames);
+    audio_out_write(g_mixbuf, frames);
+    if (g_audio_wav) {
+        int16_t pcm[480 * 2];
+        for (i = 0; i < frames * 2; i++) {
+            float a = g_mixbuf[i] > 1.0f ? 1.0f : g_mixbuf[i] < -1.0f ? -1.0f : g_mixbuf[i];
+            pcm[i] = (int16_t)(a * 32767.0f);
+        }
+        fwrite(pcm, 4, frames, g_audio_wav);
+    }
+    for (i = 0; i < frames * 2; i++) {
+        float a = g_mixbuf[i] < 0 ? -g_mixbuf[i] : g_mixbuf[i];
+        g_audio_sq += (double)a * a;
+        if (a > g_audio_peak)
+            g_audio_peak = a;
+        if (a > 0.001f && (i & 1) == 0)
+            g_audio_loud++;
+    }
+    g_audio_frames += frames;
+}
+
+static DWORD WINAPI audio_pump(LPVOID unused) {
+    (void)unused;
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+    for (;;) {
+        /* TryEnter: si un hilo del juego quedó suspendido con el lock, se reintenta. */
+        if (TryEnterCriticalSection(&g_vp_lock)) {
+            while (audio_out_queued() < 4800)
+                mix_block(480);
+            LeaveCriticalSection(&g_vp_lock);
+        }
+        Sleep(5);
+    }
+}
+
 void ngb_apu_summary(void) {
-    ngb_log("apu: %u VOICE_ON, %u voces terminadas solas; audio %s, %u frames descartados",
+    ngb_log("apu: %u VOICE_ON, %u voces terminadas solas; audio %s, %u frames descartados, "
+            "%u vaciados",
             g_vp.voices_on, g_vp.voices_ended,
             g_audio == 1 ? "waveOut 48 kHz" : g_audio == 0 ? "sin dispositivo" : "sin usar",
-            audio_out_dropped());
+            audio_out_dropped(), audio_out_underruns());
     if (g_audio_wav && TryEnterCriticalSection(&g_vp_lock)) {
         wav_header(g_audio_wav, (uint32_t)(g_audio_frames * 4));
         fclose(g_audio_wav);
@@ -224,6 +265,8 @@ void ngb_apu_tick(void) {
             dt = 0.1;
         if (g_audio < 0 && g_vp.voices && !g_ngb_opts.mute) {
             g_audio = audio_out_open() == 0;
+            if (g_audio == 1)
+                CloseHandle(CreateThread(NULL, 0, audio_pump, NULL, 0, NULL));
             if (g_audio == 1 && g_ngb_opts.audio_wav) {
                 char path[MAX_PATH];
                 snprintf(path, sizeof path, "%s-audio.wav", g_ngb_opts.log_path);
@@ -231,42 +274,10 @@ void ngb_apu_tick(void) {
                     wav_header(g_audio_wav, 0);
             }
         }
-        if (g_audio == 1) {
-            /* Se mezcla justo lo que corresponde al tiempo real transcurrido. */
-            double want = dt * 48000.0 + g_audio_frac;
-            uint32_t frames = (uint32_t)want;
-            if (frames > 4800)
-                frames = 4800;
-            g_audio_frac = want - (double)frames;
-            if (g_audio_frac > 1.0)
-                g_audio_frac = 0.0;
-            memset(g_mixbuf, 0, (size_t)frames * 2 * sizeof g_mixbuf[0]);
-            mix_render(&g_vp, &g_mix, g_mixbuf, frames);
-            audio_out_write(g_mixbuf, frames);
-            if (g_audio_wav) {
-                int16_t pcm[4800 * 2];
-                uint32_t k;
-                for (k = 0; k < frames * 2; k++) {
-                    float a = g_mixbuf[k] > 1.0f ? 1.0f : g_mixbuf[k] < -1.0f ? -1.0f : g_mixbuf[k];
-                    pcm[k] = (int16_t)(a * 32767.0f);
-                }
-                fwrite(pcm, 4, frames, g_audio_wav);
-            }
-            {
-                uint32_t i;
-                for (i = 0; i < frames * 2; i++) {
-                    float a = g_mixbuf[i] < 0 ? -g_mixbuf[i] : g_mixbuf[i];
-                    g_audio_sq += (double)a * a;
-                    if (a > g_audio_peak)
-                        g_audio_peak = a;
-                    if (a > 0.001f && (i & 1) == 0)
-                        g_audio_loud++;
-                }
-                g_audio_frames += frames;
-            }
-        } else {
+        /* Con audio, el hilo de audio (audio_pump) avanza las voces al ritmo de la tarjeta;
+           sin audio, el VP avanza con el tiempo real. */
+        if (g_audio != 1)
             vp_advance(&g_vp, dt);
-        }
         g_vp_last = now;
         LeaveCriticalSection(&g_vp_lock);
     }

@@ -2,24 +2,29 @@
  * audio_out.c: salida de audio del port por waveOut (48 kHz, estéreo, 16 bits).
  *
  * El hilo de DPC mezcla en cada tick lo que corresponde al tiempo transcurrido
- * (crash.c, ngb_apu_tick) y lo entrega aquí. Hay un anillo de cabeceras WAVEHDR: si el
- * dispositivo va por detrás (más de ~150 ms en cola) o no hay cabecera libre, el bloque
- * se descarta para no acumular latencia.
+ * (crash.c, ngb_apu_tick) y lo entrega aquí. Hay un anillo de cabeceras WAVEHDR:
+ *   - arranca en pausa y empieza a sonar con 80 ms en cola, para que un tick tardío del
+ *     hilo de DPC no deje al dispositivo sin datos (un corte audible);
+ *   - si se queda sin datos, vuelve a esperar a tener 80 ms;
+ *   - si la cola pasa de 250 ms (el dispositivo va más lento que el reloj), el bloque se
+ *     descarta para no acumular latencia.
  */
 #include "apu/audio_out.h"
 
 #include <mmsystem.h>
 #include <string.h>
 
-#define AO_HEADERS 32
+#define AO_HEADERS 64
 #define AO_MAX_FRAMES 4800 /* 100 ms por bloque como máximo */
-#define AO_MAX_QUEUED 7200 /* 150 ms en cola */
+#define AO_MAX_QUEUED 12000 /* 250 ms en cola */
+#define AO_PREBUFFER 3840  /* 80 ms antes de sonar */
 
 static HWAVEOUT g_wo;
 static WAVEHDR g_hdr[AO_HEADERS];
 static int16_t g_buf[AO_HEADERS][AO_MAX_FRAMES * 2];
 static int g_next;
-static uint32_t g_dropped;
+static uint32_t g_dropped, g_underruns;
+static int g_playing;
 
 int audio_out_open(void) {
     WAVEFORMATEX f;
@@ -39,6 +44,7 @@ int audio_out_open(void) {
         memset(&g_hdr[i], 0, sizeof g_hdr[i]);
         g_hdr[i].dwFlags = WHDR_DONE; /* libre */
     }
+    waveOutPause(g_wo); /* hasta tener AO_PREBUFFER en cola */
     return 0;
 }
 
@@ -53,13 +59,19 @@ static uint32_t queued_frames(void) {
 
 void audio_out_write(const float *stereo, uint32_t frames) {
     WAVEHDR *h;
-    uint32_t i;
+    uint32_t i, queued;
     if (!g_wo || !frames)
         return;
     if (frames > AO_MAX_FRAMES)
         frames = AO_MAX_FRAMES;
     h = &g_hdr[g_next];
-    if (!(h->dwFlags & WHDR_DONE) || queued_frames() + frames > AO_MAX_QUEUED) {
+    queued = queued_frames();
+    if (g_playing && queued == 0) { /* el dispositivo se quedó sin datos */
+        waveOutPause(g_wo);
+        g_playing = 0;
+        g_underruns++;
+    }
+    if (!(h->dwFlags & WHDR_DONE) || queued + frames > AO_MAX_QUEUED) {
         g_dropped += frames;
         return;
     }
@@ -78,8 +90,20 @@ void audio_out_write(const float *stereo, uint32_t frames) {
     else
         h->dwFlags = WHDR_DONE;
     g_next = (g_next + 1) % AO_HEADERS;
+    if (!g_playing && queued + frames >= AO_PREBUFFER) {
+        waveOutRestart(g_wo);
+        g_playing = 1;
+    }
 }
 
 uint32_t audio_out_dropped(void) {
     return g_dropped;
+}
+
+uint32_t audio_out_queued(void) {
+    return g_wo ? queued_frames() : 0;
+}
+
+uint32_t audio_out_underruns(void) {
+    return g_underruns;
 }
