@@ -110,7 +110,8 @@ static float attenuation(uint32_t vol) {
     return vol >= 0xFFFu ? 0.0f : powf(10.0f, (float)vol / -1280.0f); /* 1/64 dB por paso */
 }
 
-void mix_voice_gains(const uint8_t *voice, float g[2][2]) {
+void mix_voice_gains(const uint8_t *voice, int is3d, float g[2][2]) {
+    static const uint32_t k_submix3d[4] = {0, 1, 4, 5}; /* FL, FR, BL, BR */
     uint32_t vbin = rd32(voice + 0x00), fmt = rd32(voice + VP_VOICE_CFG_FMT);
     uint32_t va = rd32(voice + 0x60), vb = rd32(voice + 0x64), vc = rd32(voice + 0x68);
     uint32_t vol[8], bin[8];
@@ -131,6 +132,9 @@ void mix_voice_gains(const uint8_t *voice, float g[2][2]) {
     bin[5] = (vbin >> 26) & 0x1F;
     bin[6] = fmt & 0x1F;
     bin[7] = (fmt >> 5) & 0x1F;
+    if (is3d)
+        for (b = 0; b < 4; b++)
+            bin[b] = k_submix3d[b];
     memset(g, 0, sizeof(float) * 4);
     for (b = 0; b < 8; b++) {
         float a = attenuation(vol[b]);
@@ -169,7 +173,7 @@ void mix_render(vp_state_t *s, mix_ctx_t *m, float *out, uint32_t frames) {
         if (!v)
             continue;
         rate = vp_voice_rate(v) / 48000.0;
-        mix_voice_gains(v, g);
+        mix_voice_gains(v, h < MIX_3D_VOICES, g);
         audible = !mix_voice_is_dsp_feed(v) && /* avanza, pero no se oye */
                   (g[0][0] > 0.0f || g[0][1] > 0.0f || g[1][0] > 0.0f || g[1][1] > 0.0f);
         stereo = (rd32(v + VP_VOICE_CFG_FMT) & (1u << 27)) != 0;

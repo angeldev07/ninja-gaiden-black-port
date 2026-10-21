@@ -46,8 +46,13 @@ void mix_adpcm_decode(const uint8_t *block, int channels, int16_t out[2][MIX_ADP
 float mix_voice_sample(mix_ctx_t *m, uint32_t handle, const uint8_t *voice, uint32_t cbo, int ch);
 
 /* Ganancias de la voz según sus volúmenes y mixbins: g[canal][0] va a la izquierda y
- * g[canal][1] a la derecha. El slot b de los 8 lleva el canal b % canales. */
-void mix_voice_gains(const uint8_t *voice, float g[2][2]);
+ * g[canal][1] a la derecha. El slot b de los 8 lleva el canal b % canales.
+ * Las voces 3D (handle < MIX_3D_VOICES) mandan sus slots 0-3 a los submixes de
+ * posicionamiento (HRTF) y no a CFG_VBIN: DirectSound pone ahí el panorama del sonido
+ * (atenuación por oído). Sin HRTF emulado se toman como frontal izq./der. y trasero
+ * izq./der. */
+#define MIX_3D_VOICES 64
+void mix_voice_gains(const uint8_t *voice, int is3d, float g[2][2]);
 
 /* 1 si la voz es una de las que DirectSound alimenta con el DSP (bucle de menos de 256
  * muestras): sin DSP emulado sería ruido, así que no se oye. */

@@ -98,10 +98,24 @@ static void test_mix(void) {
     put32(v + 0x60, (384u << 20) | (0u << 4));
     put32(v + 0x64, 0xFFFFFFFFu);
     put32(v + 0x68, 0xFFFFFFFFu);
-    mix_voice_gains(v, g);
+    mix_voice_gains(v, 0, g);
     CHECK(g[0][0] > 0.999f && g[0][0] < 1.001f, "canal 0 a la izquierda, 1 (%f)", g[0][0]);
     CHECK(g[1][1] > 0.49f && g[1][1] < 0.51f, "canal 1 a la derecha, -6 dB (%f)", g[1][1]);
     CHECK(g[0][1] == 0.0f && g[1][0] == 0.0f, "sin cruces de canal");
+    /* Voz 3D mono: el slot 0 (-6 dB) va a la izquierda aunque CFG_VBIN diga el mixbin 31,
+       y el slot 2 (0 dB) al trasero izquierdo (x0,5). El resto en silencio. */
+    put32(v + VP_VOICE_CFG_FMT, (1u << 30) | (1u << 28) | 31u | (31u << 5));
+    put32(v + 0x00, 31u | (31u << 5) | (31u << 10) | (31u << 16) | (31u << 21) | (31u << 26));
+    put32(v + 0x60, (0xFFFu << 20) | (384u << 4));
+    put32(v + 0x64, (0xFFFu << 20) | (0u << 4));
+    put32(v + 0x68, 0xFFFFFFFFu);
+    mix_voice_gains(v, 1, g);
+    CHECK(g[0][0] > 0.99f && g[0][0] < 1.01f, "3D: -6 dB + 0,5 a la izquierda (%f)", g[0][0]);
+    CHECK(g[0][1] == 0.0f, "3D: nada a la derecha (%f)", g[0][1]);
+    put32(v + VP_VOICE_CFG_FMT, (1u << 30) | (1u << 28) | (1u << 27) | (1u << 16) | 31u | (31u << 5));
+    put32(v + 0x00, (0u << 0) | (1u << 5) | (31u << 10) | (31u << 16) | (31u << 21) | (31u << 26));
+    put32(v + 0x60, (384u << 20) | (0u << 4));
+    put32(v + 0x64, 0xFFFFFFFFu);
 
     /* mix_render: 2 muestras de salida a 48 kHz recorren la voz entera y la apagan. */
     vp_init(&s);
