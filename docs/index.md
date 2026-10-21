@@ -1,0 +1,53 @@
+---
+tags: [ngb, index]
+updated: 2026-10-20
+status: current
+---
+
+# NGB Port Wiki: índice
+
+Catálogo de todas las páginas. Se empieza por [[GOAL-ngb-port]]. Las convenciones están
+en [[CLAUDE]] y la línea de tiempo en [[log]].
+
+## Raíz
+
+- [[GOAL-ngb-port]]: qué, por qué, dónde está todo, reglas y decisiones vigentes. **Punto de entrada.**
+- [[CLAUDE]]: esquema del vault, reglas de RE (anclas y etiquetas de confianza) y reglas legales.
+- [[log]]: registro cronológico, solo se agrega.
+- [[wiki-llm]]: el patrón LLM Wiki que seguimos.
+
+## Observación: ingeniería inversa (`reverse-engineering/`)
+
+- [[disco-ngb]]: imagen Redump y XISO, 249 archivos por tipo, grupos de AFS, ejecutables y videos.
+- [[xbe-default]]: cabecera, certificado, secciones, librerías del XDK e imports del kernel de `default.xbe`. _(pendiente: llega con la PR de `xbe_info`)_
+
+## Observación: formatos (`formats/`)
+
+- [[afs]]: contenedor AFS de CRI. Estructura, inventario de los 206 contenedores y magias internas. _(pendiente: llega con la PR de `afs`)_
+
+## Observación: hallazgos (`findings/`)
+
+_(todavía vacío)_
+
+## Propuesta: diseño y decisiones (`target/`)
+
+- [[roadmap]]: hitos tangibles H0 a H9+, con criterio de terminado y estado.
+- [[adr-01-enfoque-port]]: rehosting más capa de plataforma más descompilación incremental.
+- [[adr-02-herramientas-re]]: Ghidra con ghidra-xbe, herramientas propias, REA auxiliar, xemu como oráculo.
+- [[adr-03-datos-fuera-del-repo]]: los datos del juego en `NGB_DATA`, fuera del repo y de OneDrive.
+- [[adr-04-control-de-versiones]]: trunk-based, Conventional Commits, PRs con squash, revisión, puertas de CI y tags por hito.
+
+## Equipo (`team/`)
+
+- [[equipo]]: roles, reglas de coordinación, depuración e historial de despliegues.
+- [[plantilla-tarea-agente]]: brief estándar para subagentes.
+
+## Herramientas (`tools/`)
+
+- [[herramientas]]: extract-xiso y las herramientas propias (`xbe_info.py`, `afs.py`).
+
+## Fuentes externas (`sources/`)
+
+- [[opence]]: Halo CE nativo. Descompilación con símbolos y D3D8 sobre GL. Es el precedente.
+- [[rea]]: MCP de RE. Evaluación y límites (no acepta XBE; en Windows es de solo lectura).
+- [[decomp-ninja]]: intento previo abandonado y contexto oficial (código fuente perdido).
