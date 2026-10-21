@@ -51,6 +51,8 @@ typedef struct ngb_options {
     const char *symbols;     /* CSV de símbolos (opcional) */
     int window;              /* 1: abre la ventana del presentador (gfx/present.c, H7) */
     int no_pacing;           /* 1: FLIP_STALL no espera al siguiente 1/60 s (H7b) */
+    const char *input_script; /* pulsaciones automáticas (input/input.h), opcional */
+    int no_host_input;        /* 1: ni mando de PC ni teclado, solo el guion */
 } ngb_options_t;
 
 extern ngb_options_t g_ngb_opts;

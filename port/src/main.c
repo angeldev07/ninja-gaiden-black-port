@@ -2,7 +2,8 @@
  * main.c: punto de entrada de ngb-core.dll (lo llama ngb-loader.exe, ver loader_stub.c).
  *
  *   ngb-loader.exe <ruta.xbe> [--log ARCHIVO] [--max-calls N] [--timeout S] [--idle S]
- *                  [--lenient] [--echo] [--window]
+ *                  [--lenient] [--echo] [--window] [--symbols CSV]
+ *                  [--input-script GUION] [--no-host-input]
  *
  * Carga el XBE en su dirección base, enlaza el kernel thunk con los stubs, prepara el
  * primer hilo Xbox (KPCR/KTHREAD falsos, pila con TLS) y salta al entry point. El hilo
@@ -17,6 +18,7 @@
 
 #include "gpu/nv2a.h"
 #include "gfx/present.h"
+#include "input/input.h"
 #include "kernel/kernel.h"
 
 ngb_options_t g_ngb_opts;
@@ -29,6 +31,7 @@ static void usage(void) {
             "                    [--idle S] [--lenient] [--echo] [--window] [--no-pacing]\n"
             "                    [--mmio-strict] [--mmio-gpu-ram] [--pgraph-frames N]\n"
             "                    [--log-cap N] [--symbols CSV]\n"
+            "                    [--input-script GUION] [--no-host-input]\n"
             "  --log        log de la ejecución (por defecto %%NGB_DATA%%\\runs\\h6-<fecha>.log)\n"
             "  --max-calls  para tras N llamadas al kernel (por defecto 200000; 0 = sin límite)\n"
             "  --timeout    segundos máximos de ejecución (por defecto 60)\n"
@@ -41,7 +44,9 @@ static void usage(void) {
             "  --mmio-gpu-ram  NV2A como RAM trazada en vez del modelo (exploración de H6)\n"
             "  --pgraph-frames N  frames con todos los métodos en el log de PGRAPH (3)\n"
             "  --log-cap N  líneas de log por función del kernel; luego solo se cuentan (2000)\n"
-            "  --symbols CSV  nombres de funciones (CSV de Ghidra) en el log y los crashes\n");
+            "  --symbols CSV  nombres de funciones (CSV de Ghidra) en el log y los crashes\n"
+            "  --input-script  pulsaciones del mando, p. ej. \"t=3s:START,t=5s:A@500ms\"\n"
+            "  --no-host-input ni mando de PC ni teclado: solo el guion\n");
 }
 
 /* 1 si `path` (o alguna carpeta que lo contiene) está dentro de un repo git: algún ancestro
@@ -84,12 +89,14 @@ static void default_log_path(char *out, size_t outlen) {
 static int parse_args(void) {
     int argc = 0, i;
     LPWSTR *wargv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    static char argbuf[32][MAX_PATH];
+    static char argbuf[32][2048]; /* un --input-script largo no cabe en MAX_PATH */
     char *argv[32];
     if (!wargv || argc < 2 || argc > 32)
         return -1;
     for (i = 0; i < argc; i++) {
-        WideCharToMultiByte(CP_ACP, 0, wargv[i], -1, argbuf[i], MAX_PATH, NULL, NULL);
+        if (!WideCharToMultiByte(CP_ACP, 0, wargv[i], -1, argbuf[i], (int)sizeof argbuf[i], NULL,
+                                 NULL))
+            return -1; /* argumento demasiado largo: mejor fallar que truncarlo */
         argv[i] = argbuf[i];
     }
     g_ngb_opts.max_calls = 200000;
@@ -122,6 +129,10 @@ static int parse_args(void) {
             g_ngb_opts.pgraph_at = (unsigned)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--symbols") && more)
             g_ngb_opts.symbols = _strdup(argv[++i]);
+        else if (!strcmp(a, "--input-script") && more)
+            g_ngb_opts.input_script = _strdup(argv[++i]);
+        else if (!strcmp(a, "--no-host-input"))
+            g_ngb_opts.no_host_input = 1;
         else if (!strcmp(a, "--log-cap") && more)
             g_ngb_opts.log_cap = strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--window"))
@@ -220,6 +231,10 @@ __declspec(dllexport) int __cdecl ngb_main(void) {
     ngb_memory_patch_irql(&g_ngb_xbe);
     if (ngb_memory_patch_thunk(&g_ngb_xbe))
         ngb_stop(NGB_EXIT_USAGE, "el thunk importa ordinales desconocidos");
+    /* H8: el mando, por HLE de XAPI (el USB no tiene dispositivos). Antes del primer hilo. */
+    if (ngb_input_install(g_ngb_opts.symbols, g_ngb_opts.input_script,
+                          !g_ngb_opts.no_host_input) < 0)
+        ngb_stop(NGB_EXIT_USAGE, "--input-script inválido");
     tls_total = ngb_tls_total_size(&g_ngb_xbe);
     if (g_ngb_xbe.has_tls && g_ngb_xbe.tls.index_addr)
         *(int32_t *)(uintptr_t)g_ngb_xbe.tls.index_addr = -(int32_t)(tls_total / 4);
@@ -246,7 +261,10 @@ __declspec(dllexport) int __cdecl ngb_main(void) {
             ngb_stop(NGB_EXIT_OK, "ventana cerrada por el usuario");
         if (g_ngb_opts.timeout_s && now - start > g_ngb_opts.timeout_s * 1000u)
             ngb_stop(NGB_EXIT_TIMEOUT, "--timeout de %u s agotado", g_ngb_opts.timeout_s);
-        if (g_ngb_opts.idle_s && (LONG)(now - g_ngb_last_call_tick) > (LONG)(g_ngb_opts.idle_s * 1000u))
+        /* Con signo: si otro hilo apunta su llamada después de leer `now`, la resta sin signo
+         * daba ~49 días y paraba la ejecución con un falso "sin llamadas". */
+        if (g_ngb_opts.idle_s &&
+            (LONG)(now - g_ngb_last_call_tick) > (LONG)(g_ngb_opts.idle_s * 1000u))
             ngb_stop(NGB_EXIT_TIMEOUT,
                      "%u s sin llamadas al kernel (bucle de espera, hilo bloqueado o cálculo largo)",
                      g_ngb_opts.idle_s);

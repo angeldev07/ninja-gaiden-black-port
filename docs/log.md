@@ -158,3 +158,9 @@ nativa, con el NV2A emulado, un rasterizador por software y el presentador Win32
 `NtSuspendThread` mientras el hilo tiene un lock del loader, y sincronizar los eventos que D3D limpia en
 memoria. Tras unos 40 s el juego pasa a una pantalla negra que espera algo. Además, `.gitattributes` fuerza
 CRLF en los `.cmd`: con LF y UTF-8, cmd.exe entraba en bucle al volver de `call`. Detalle en [[gpu-nv2a]].
+
+## [2026-10-22] ingest | H8: el mando llega al juego, pero el bloqueo es otro
+HLE de las 8 funciones de entrada de XAPI, con un guion determinista (`--input-script`), mando XInput y
+teclado. START y A llegan al juego (comprobado en su memoria), pero la pantalla negra que sigue a los avisos no
+cambia. Hipótesis: es un vídeo de Sofdec (`movie\*.sfd`) esperando al reloj del audio, que no avanza sin APU.
+Detalle en [[entrada-xapi]].

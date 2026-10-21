@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "gpu/nv2a.h"
+#include "input/input.h"
 #include "kernel/kernel.h"
 
 static CRITICAL_SECTION g_log_lock;
@@ -123,6 +124,7 @@ __declspec(noreturn) void ngb_stop(int code, const char *fmt, ...) {
     nv2a_summary();
     ngb_thread_dump_all();
     ngb_kernel_summary();
+    ngb_input_summary();
     ngb_log("==== FIN");
     ngb_log_flush();
     fprintf(stderr, "ngb-loader: STOP %s: %s\nlog: %s\n", exit_name(code), reason,

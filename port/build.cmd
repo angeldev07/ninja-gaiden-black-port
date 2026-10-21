@@ -21,6 +21,7 @@ cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\core.pdb" /c ^
   "%SRC%\kernel\impl_ps.c" "%SRC%\kernel\impl_io.c" "%SRC%\kernel\impl_misc.c" "%SRC%\kernel\hostpath.c" ^
   "%SRC%\gpu\nv2a.c" "%SRC%\gpu\pgraph.c" "%SRC%\gpu\pushbuf.c" "%SRC%\gpu\png.c" ^
   "%SRC%\gpu\nv097_names.c" "%SRC%\gpu\raster.c" ^
+  "%SRC%\input\input.c" "%SRC%\input\xapi_hle.c" ^
   "%SRC%\gfx\present.c" || exit /b 1
 link /nologo /DLL /DEBUG /OUT:"%OUT%\ngb-core.dll" /PDB:"%OUT%\ngb-core.pdb" ^
   /BASE:0x60000000 /LARGEADDRESSAWARE ^
@@ -30,6 +31,7 @@ link /nologo /DLL /DEBUG /OUT:"%OUT%\ngb-core.dll" /PDB:"%OUT%\ngb-core.pdb" ^
   "%OUT%\obj\impl_ps.obj" "%OUT%\obj\impl_io.obj" "%OUT%\obj\impl_misc.obj" "%OUT%\obj\hostpath.obj" ^
   "%OUT%\obj\nv2a.obj" "%OUT%\obj\pgraph.obj" "%OUT%\obj\pushbuf.obj" "%OUT%\obj\png.obj" ^
   "%OUT%\obj\nv097_names.obj" "%OUT%\obj\raster.obj" ^
+  "%OUT%\obj\input.obj" "%OUT%\obj\xapi_hle.obj" ^
   "%OUT%\obj\present.obj" kernel32.lib shell32.lib user32.lib gdi32.lib || exit /b 1
 
 rem 2) ngb-loader.exe: base fija 0x10000 + BSS que reserva la imagen del XBE. Sin CRT.
@@ -46,6 +48,9 @@ cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\hostpath_test.pdb" /Fe"%OUT%\hostpath
 rem 3b) Prueba del decodificador del push buffer (buffers hechos a mano).
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\pushbuf_test.pdb" /Fe"%OUT%\pushbuf_test.exe" "%PORT%tests\pushbuf_test.c" "%SRC%\gpu\pushbuf.c" || exit /b 1
 "%OUT%\pushbuf_test.exe" || exit /b 1
+rem 3c) Prueba del mapeo de la entrada (mando de PC y teclado -> XINPUT_STATE, guion).
+cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\input_test.pdb" /Fe"%OUT%\input_test.exe" "%PORT%tests\input_test.c" "%SRC%\input\input.c" || exit /b 1
+"%OUT%\input_test.exe" || exit /b 1
 
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\shaders_test.pdb" /Fe"%OUT%\shaders_test.exe" "%PORT%tests\shaders_test.c" "%SRC%\shaders\vsh.c" "%SRC%\shaders\psh.c" "%SRC%\shaders\emit.c" && "%OUT%\shaders_test.exe" || exit /b 1
 rem 3c) Prueba del rasterizador por software (triángulo y textura 2x2 a mano).
