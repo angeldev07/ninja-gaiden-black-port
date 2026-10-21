@@ -1,4 +1,7 @@
 # Datos del juego: nunca al repo (copyright). Viven fuera, en NGB_DATA (por defecto %USERPROFILE%\ngb-data).
+# Esto es solo comodidad: en Linux .gitignore distingue mayúsculas (*.afs no cubre CMN.AFS) y
+# `git add -f` lo salta. La barrera real es la guardia (python -m ngb_tools.hygiene: hook y
+# CI), que no distingue mayúsculas, mira ruta, firma y tamaño y bloquea los comprimidos.
 *.iso
 *.xiso
 *.xbe
@@ -8,6 +11,24 @@
 *.xwb
 *.xsb
 *.aix
+*.adx
+*.bin
+*.def
+*.ins
+# Fuentes: la guardia no las bloquea por extensión (una fuente libre puede ser legítima);
+# las del juego (23 MB) las caza la regla de tamaño. Una fuente libre entra con `git add -f`.
+*.ttf
+# Formatos internos de los AFS (Team Ninja)
+*.kmd
+*.spr
+*.sty
+*.wva
+*.mtn
+*.rtm
+*.sob
+*.itm
+*.chr
+*.stg
 game/
 extracted/
 
@@ -23,3 +44,9 @@ docs/.obsidian/workspace.json
 docs/.obsidian/workspace-mobile.json
 docs/.obsidian/cache
 docs/.trash/
+
+# Entornos y cachés de herramientas
+.venv/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/

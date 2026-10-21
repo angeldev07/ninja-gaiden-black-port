@@ -1,0 +1,19 @@
+#!/bin/sh
+# Bloquea el commit si lo preparado contiene datos del juego.
+# Se activa una vez por clon con: git config core.hooksPath .githooks
+top=$(git rev-parse --show-toplevel) || exit 1
+export PYTHONPATH="$top/src"
+
+# Primer intérprete con Python >= 3.13. "py -3.13" son dos palabras: $python va sin comillas.
+for python in "py -3.13" python3 python; do
+    # shellcheck disable=SC2086
+    if $python -c 'import sys; sys.exit(sys.version_info < (3, 13))' >/dev/null 2>&1; then
+        # -P: sin el cwd en sys.path, un .py en la raíz del repo no tapa la stdlib.
+        # -X utf8: en Windows la salida por tubo (Git Bash, IDE) iría en cp1252.
+        # shellcheck disable=SC2086
+        exec $python -X utf8 -P -m ngb_tools.hygiene --staged
+    fi
+done
+
+echo "pre-commit: hace falta Python >= 3.13 (probados: py -3.13, python3, python)." >&2
+exit 1

@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ngb-tools"
+version = "0.1.0"
+description = "Herramientas de ingeniería inversa del port pedagógico de Ninja Gaiden Black (Xbox)."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["ruff==0.17.1", "mypy==2.4.0"]
+
+[project.scripts]
+ngb-hygiene = "ngb_tools.hygiene:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+ngb_tools = ["py.typed", "data/*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # orden de imports
+    "N",        # nombres PEP 8
+    "UP",       # sintaxis moderna
+    "B",        # bugbear
+    "SIM",      # simplificaciones
+    "C4",       # comprehensions
+    "PTH",      # pathlib en vez de os.path
+    "RET",      # returns coherentes
+    "PL",       # pylint (subconjunto de ruff)
+    "RUF",      # reglas propias de ruff
+]
+ignore = [
+    "PLR2004",  # números mágicos: en formatos binarios los offsets son el dato
+    "PLR0913",  # funciones de parseo con muchos campos
+    "RUF001", "RUF002", "RUF003",  # comentarios en español con caracteres no ASCII
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLR0915", "N802"]
+
+[tool.mypy]
+python_version = "3.13"
+mypy_path = "src"
+packages = ["ngb_tools"]
+strict = true
+warn_unreachable = true

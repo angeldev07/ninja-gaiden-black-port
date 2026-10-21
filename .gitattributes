@@ -1,0 +1,5 @@
+# Fin de línea LF en el repo para todos los archivos de texto, sin importar la plataforma.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
