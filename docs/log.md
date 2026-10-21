@@ -178,3 +178,9 @@ juego esperaba para siempre al hilo de las partidas guardadas. Con el arreglo, e
 reproduce su vídeo de introducción (Sofdec) en la ventana. Lo encontró un agente de investigación en Ghidra.
 Lección: ante un bloqueo, buscar primero qué espera el hilo principal antes de suponer una causa. Detalle en
 [[gpu-nv2a]].
+
+## [2026-10-22] milestone | Pantalla de título del juego
+Tras los avisos y el vídeo de introducción (congelado en su primer fotograma, se salta con START), el juego
+llega a la pantalla de título "PRESS START BUTTON". Antes hubo que implementar `XcSHAInit/Update/Final` y
+`XcHMAC`: SHA-1 propio, que el juego usa para verificar sus datos. Quedan abiertos el audio, que probablemente
+explica el vídeo congelado y los avisos repetidos, y pasar del título al menú. Detalle en [[gpu-nv2a]].

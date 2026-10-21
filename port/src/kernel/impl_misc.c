@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "kernel.h"
+#include "sha1.h"
 
 /* 8 ULONG __cdecl DbgPrint(PCSZ Format, ...): args apunta a los argumentos en pila. */
 static uint64_t DbgPrint(uint32_t *args) {
@@ -133,6 +134,33 @@ static uint64_t HalReadWritePCISpace(uint32_t *args) {
     return 0;
 }
 
+/* 335 VOID XcSHAInit(PUCHAR pbSHAContext): el contexto (116 B) es memoria del juego. */
+static uint64_t XcSHAInit(uint32_t *args) {
+    ngb_sha1_init((ngb_sha1_t *)PTR(0));
+    return 0;
+}
+
+/* 336 VOID XcSHAUpdate(PUCHAR pbSHAContext, PUCHAR pbInput, ULONG dwInputLength) */
+static uint64_t XcSHAUpdate(uint32_t *args) {
+    ngb_sha1_update((ngb_sha1_t *)PTR(0), PTR(1), ARG(2));
+    return 0;
+}
+
+/* 337 VOID XcSHAFinal(PUCHAR pbSHAContext, PUCHAR pbDigest) */
+static uint64_t XcSHAFinal(uint32_t *args) {
+    ngb_sha1_final((ngb_sha1_t *)PTR(0), (uint8_t *)PTR(1));
+    return 0;
+}
+
+/* 340 VOID XcHMAC(PBYTE pbKeyMaterial, ULONG cbKeyMaterial, PBYTE pbData, ULONG cbData,
+ *                 PBYTE pbData2, ULONG cbData2, PBYTE HmacData)
+ * Con las claves del kernel a cero (data.c), las firmas de las partidas son coherentes
+ * dentro del port, que es lo único que el juego comprueba. */
+static uint64_t XcHMAC(uint32_t *args) {
+    ngb_hmac_sha1(PTR(0), ARG(1), PTR(2), ARG(3), PTR(4), ARG(5), (uint8_t *)PTR(6));
+    return 0;
+}
+
 static const ngb_kimpl_t k_impls[] = {
     {1, AvGetSavedDataAddress},
     {2, AvSendTVEncoderOption},
@@ -147,6 +175,10 @@ static const ngb_kimpl_t k_impls[] = {
     {253, PhyInitialize},
     {327, XeLoadSection},
     {328, XeUnloadSection},
+    {335, XcSHAInit},
+    {336, XcSHAUpdate},
+    {337, XcSHAFinal},
+    {340, XcHMAC},
 };
 
 void ngb_impl_register_misc(void) {

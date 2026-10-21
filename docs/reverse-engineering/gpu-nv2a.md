@@ -117,9 +117,20 @@ desplazándose y fundiéndose. Es el código del juego ejecutándose de forma na
      sintético.
 3. Para reproducir el vídeo, el juego reinicia D3D dos veces (`AvSetDisplayMode` con pitch `0xB40`) y el pusher
    lo soporta.
+4. **El vídeo se queda en su primer fotograma** (`INFERRED`: Sofdec avanza con el reloj del audio, y la APU no
+   está emulada). Con START se salta.
+5. **Pantalla de título** ("PRESS START BUTTON", con Ryu de fondo; captura `title4-pgraph-shot-15300.png`,
+   revisada por el líder). Antes de mostrarla, el juego verifica sus datos con `XcSHAInit/Update/Final`, que
+   ahora están implementadas (SHA-1 y HMAC propios en `port/src/kernel/sha1.c`, con los vectores de FIPS 180 y
+   RFC 2202).
+
+**Rarezas abiertas:**
+- Los avisos se repiten con fundidos durante unos 2 minutos antes del vídeo. El vídeo arranca siempre hacia los
+  3,4 M de llamadas al kernel, no a un tiempo fijo. `INFERRED`: el juego espera algo (posiblemente el audio)
+  con un número máximo de reintentos.
 
 ## Siguiente
 
-1. Llegar al menú de título tras el vídeo: probar START durante el vídeo y después.
+1. Pasar de la pantalla de título al menú principal, y averiguar qué esperan los avisos y el vídeo (audio).
 2. Geometría 3D: vertex programs ([[shaders-nv2a]]) y dibujo desde arrays de vértices (`DRAW_ARRAYS`/`ARRAY_ELEMENT`)
    sobre el backend OpenGL.

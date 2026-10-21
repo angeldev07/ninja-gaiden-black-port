@@ -19,7 +19,7 @@ actualiza al cerrar cada sesión, y el detalle de cada cierre queda en [[log]].
 | **H5** Proyecto Ghidra y firmas del SDK | Proyecto Ghidra persistente; librerías del XDK identificadas por firmas; % de funciones con nombre | Métrica de cobertura en [[xbe-default]] | **hecho** (2026-10-21): 548 de 9,118 funciones con nombre; D3D8 identificable ([[adr-06-render-hibrido]]) |
 | **H6** Arranque nativo | `default.xbe` corriendo en un proceso Win32 de 32 bits hasta la primera llamada al kernel sin implementar, con log de las llamadas | Log reproducible; kernel HLE mínimo | **hecho** (2026-10-21): 285 llamadas al kernel, hasta la primera MMIO del NV2A ([[arranque-nativo]], [[adr-05-runtime-nativo]]) |
 | **H7** Primer frame | Un frame del juego (logo o pantalla de carga) en una ventana de PC | D3D8 mínimo sobre GL/Vulkan | **hecho**: la pantalla de avisos del juego se ve en una ventana a 60 fps ([[gpu-nv2a]]). Rasterizado por software ([[adr-06-render-hibrido]]) |
-| **H8** Menú jugable | Menú principal con mando, audio y video | Entrada SDL3, audio, `.sfd` | pendiente |
+| **H8** Menú jugable | Menú principal con mando, audio y video | Entrada SDL3, audio, `.sfd` | **en curso**: hay mando (HLE de XAPI, [[entrada-xapi]]) y se llega a la **pantalla de título** ("PRESS START BUTTON", [[gpu-nv2a]]). Faltan el audio, el vídeo animado y pasar del título |
 | **H9+** Descompilación y mejoras | Funciones en C con tests diferenciales; panorámico, 60+ fps interpolados, resolución alta | Por función o subsistema | pendiente |
 
 H2, H3 y H4 (assets) no dependen de H5, H6 y H7 (ejecución), así que pueden avanzar
