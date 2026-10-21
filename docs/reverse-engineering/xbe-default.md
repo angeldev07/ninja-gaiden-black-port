@@ -124,3 +124,25 @@ esta última solo para contrastar el layout (no se copió nada).
 
 - H5: proyecto Ghidra con ghidra-xbe, e identificar D3D8LTCG, DSOUND y XAPI por firmas.
 - H6: el kernel HLE parte de estas 128 funciones y 17 variables.
+
+## H5: funciones con nombre (Ghidra + XbSymbolDatabase, `VERIFIED`)
+
+El proyecto Ghidra está en `NGB_DATA\ghidra\ngb`, y se reproduce con `tools/ghidra/h5-run.ps1` ([[herramientas]]).
+El informe completo, `NGB_DATA\ghidra\reports\h5-cobertura.md`, va acompañado de las decompilaciones, que son
+código derivado del juego y **no van al repo**.
+
+- **9,118 funciones, 548 con nombre (6.0 %):** D3D8 98, DSOUND 113, XAPI 130, XONLINE 58, D3DX8 4, XGRAPHICS 2 y
+  LIBC/LIBCPMT 142 (Function ID).
+- **Por sección:** en `D3D`, 96 de 220 funciones tienen nombre (el 38 % del código). En `.text`, que es el motor
+  Kunai más CRI, solo el 0.71 % de los bytes tiene nombre, porque las firmas cubren las librerías del XDK y no el
+  código del juego.
+- **31 globales de D3D8** con nombre, por ejemplo `g_pDevice` en `0x3DAA88`, `g_RenderState` en `0x3DAA98`,
+  `g_DeferredTextureState` en `0x3D83D0` y `g_Stream` en `0x3DBA68`. También tienen nombre los 145 thunks del
+  kernel.
+- **Primera MMIO del NV2A** (`0x3D171B`, [[arranque-nativo]]): cae en `FUN_003d1715`, dentro de
+  `Direct3D_CreateDevice` → `FUN_003cf700` → `CMiniport_InitHardware`. Ahí se mapean los registros de `0xFD000000`.
+- **Espera de vblank de H7a** (`0x3CE6CF`): es `KeWaitForSingleObject(dev+0x1DBC = m_VerticalBlankEvent)`, en el
+  bucle de AvSetDisplayMode, dentro del epílogo de `D3DDevice_Swap_0`. El evento lo señala la ISR `0x3D2040` a
+  través de la DPC `0x3D2310`.
+
+Lo que esto implica para el render está en [[adr-06-render-hibrido]].

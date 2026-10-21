@@ -157,3 +157,16 @@ python -I -m ngb_tools.stage info boff
 ```
 
 - Junta las partes `<zona>_NN` de una zona; las variantes idénticas se exportan una vez. Formato: [[escenarios]].
+
+### Análisis headless de `default.xbe` (H5, `tools/ghidra/`)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\ghidra\h5-run.ps1 [-Fresh]
+```
+
+- Con `-Fresh` reimporta y reanaliza (unos 5 min). Sin `-Fresh` solo regenera los informes (unos 67 s).
+- `H5Fixup.java` convierte en funciones las etiquetas que crea XbSymbolDatabase.
+- `H5Report.java` calcula la cobertura y el escaneo NV097, y genera `symbols.csv`.
+- `H5Xtlid.java` lee `.XTLID`.
+- `H5Decomp.java` decompila puntos concretos.
+- La salida va a `NGB_DATA\ghidra\reports\`. Las decompilaciones son derivadas del juego y no se versionan.

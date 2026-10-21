@@ -124,3 +124,11 @@ el orden Euler Rz·Ry·Rx. Detalle en [[armas]].
 `ngb_tools.xpr` decodifica las 358 texturas de relieve con signo del juego, 0 fallos ([[xpr0]]). Con esto
 desaparecen los avisos de "textura sin PNG" de 8 zonas de [[escenarios]]. Pendiente: que los glTF las usen como
 `normalTexture` en lugar de color base.
+
+## [2026-10-21] milestone | H5: Ghidra y firmas del XDK. Decisión de render (ADR-06)
+Hay un proyecto Ghidra persistente de `default.xbe`: 548 de sus 9,118 funciones tienen nombre gracias a
+XbSymbolDatabase y FID. D3D8 es identificable (97 entradas, que cubren el 91.5 % de las llamadas desde `.text`).
+Pero LTCG metió unas 900 escrituras de estado inline, y `RunPushBuffer` ejecuta push buffers crudos de los assets.
+Por eso se decide un **render híbrido**: PGRAPH emulado, más HLE en Swap, KickOff, fences y vblank
+([[adr-06-render-hibrido]]). Además apareció la receta exacta del vblank que bloqueaba H7a (ISR `0x3D2040` → DPC
+`0x3D2310`). Detalle en [[xbe-default]].

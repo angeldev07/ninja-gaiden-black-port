@@ -45,6 +45,7 @@ _(todavía vacío)_
 - [[adr-02-herramientas-re]]: Ghidra con ghidra-xbe, herramientas propias, REA auxiliar, xemu como oráculo.
 - [[adr-03-datos-fuera-del-repo]]: los datos del juego en `NGB_DATA`, fuera del repo y de OneDrive.
 - [[adr-05-runtime-nativo]]: cargador con base fija, cabecera PE sombra, KPCR superpuesta en el TEB, TLS, archivos y MMIO. Opciones para H7.
+- [[adr-06-render-hibrido]]: H7b. PGRAPH emulado como base, con HLE en Swap, KickOff, fences y vblank. Decidido con los datos de Ghidra.
 - [[adr-04-control-de-versiones]]: trunk-based, Conventional Commits, PRs con squash, revisión, puertas de CI y tags por hito.
 
 ## Equipo (`team/`)
