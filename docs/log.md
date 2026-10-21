@@ -87,3 +87,13 @@ La PR #10 (`ngb_tools.kmd`, glTF) entró con una sola ronda de revisión; los me
 **H4: `ngb_tools.audio`** decodifica bgm 95/95, sse 317/317, 2,966 registros `.wva` y los 7 de `Wave.xwb`. Ningún
 ADX va cifrado. Se corrigió el layout de [[wva]]: el bit31 marca el tamaño del bloque de parámetros. Se validó
 con espectrogramas (música, voz y efectos reconocibles) y estadísticas. Detalle en [[adx]].
+
+## [2026-10-21] decision | Sesión 2: estado al retomar
+- La **PR #14** (H6, cargador nativo) salió BLOQUEANTE en su revisión por seguridad del host. El mapeo de
+  rutas del kernel HLE no validaba `..`, así que podía escribir, crear o borrar fuera de `NGB_DATA`. Con la
+  política de [[equipo]], eso sí bloquea. Se está corrigiendo.
+- Antes del límite de la sesión 1, las tres ramas en curso se guardaron como commits `wip` en origin:
+  `feat/nv2a-min` (H7a: la init de D3D pasa y llegan el primer CLEAR y el primer FLIP; se cuelga esperando el
+  vblank), `feat/kmd-anim` (`--format glb` y el parser de `.mtn`: 258 motions de Ryu) y `feat/stage-export`
+  (parser de escenarios: descriptor multiparte y HITMDL). Las notas de traspaso están en `NGB_DATA\handoff\`.
+- Se instaló **Ghidra 12.1.4 + ghidra-xbe** con aprobación del usuario ([[herramientas]]) y se lanzó H5.

@@ -117,3 +117,15 @@ python -I -m ngb_tools.audio analyze <wav...> --png-dir <dir>                   
 ```
 
 - Salida en WAV PCM16 con `_manifest.json` (loops, frecuencia, canales). Formatos: [[adx]] y [[wva]].
+
+## Ghidra 12.1.4 + ghidra-xbe (externa, instalada el 2026-10-21)
+
+- Ruta: `%GHIDRA_HOME%`, fuera del repo y de OneDrive. Usa el JDK 21 de Adoptium.
+- `ghidra_12.1.4_PUBLIC_20260921.zip`, con un sha256 `ddac49f9…d4db` que coincide con el de las notas de
+  [la release oficial](https://github.com/NationalSecurityAgency/ghidra/releases/tag/Ghidra_12.1.4_build).
+  `VERIFIED`.
+- Extensión [XboxDev/ghidra-xbe](https://github.com/XboxDev/ghidra-xbe) build `202610161023`, compilada para la
+  12.1.4. Está en `Ghidra\Extensions\ghidra-xbe` (XboxExecutableLoader: carga XBE e identifica librerías del XDK
+  con XbSymbolDatabase).
+- El proyecto de análisis vive en `%USERPROFILE%\ngb-data\ghidra\` (proyecto `ngb`), con sus scripts e informes.
+  Resultados en [[xbe-default]] (H5).

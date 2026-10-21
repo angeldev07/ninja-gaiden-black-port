@@ -50,3 +50,8 @@ docs/.trash/
 .mypy_cache/
 .ruff_cache/
 *.egg-info/
+
+# Artefactos de compilación de MSVC fuera de build/
+*.pdb
+*.ilk
+*.obj
