@@ -37,3 +37,11 @@ Se lanzaron dos analistas en paralelo para H1: `tools/xbe_info.py` y `tools/afs.
 [[adr-04-control-de-versiones]]: el repo privado `angeldev07/ninja-gaiden-black-port` es trunk-based,
 con Conventional Commits, PRs con squash, revisión publicada como comentario (GitHub no deja
 aprobar una PR propia), puertas de CI y tags por hito. Gotcha: git y gh se ejecutan fuera del sandbox.
+
+## [2026-10-20] ingest | Anatomía de default.xbe (H1)
+`ngb_tools.xbe` analiza los 5 XBE del disco ([[xbe-default]]). Lo esencial: el motor se llamaba **"Kunai"**
+(`c:\Kunai\~output\release_ltcg\Kunai.exe`, PDB con GUID `BAAFA588…`, que no está en el disco). Se compiló con
+**MSVC 13.10 (VS.NET 2003) y el XDK 5849**, en un build retail LTCG sin asserts ni RTTI propio. Usa
+**D3D8LTCG**, lo que complicará la identificación por firmas en H5. Importa 145 símbolos del kernel (128 funciones
+y 17 variables de datos), que son el alcance del kernel HLE de H6. Enlaza middleware de CRI (ADX, AIX y Sofdec), de mayo y junio de 2005.
+`NinjaTrilogy.xbe` y `NinjaTomoe.xbe` son el emulador de los Ninja Gaiden de NES (US y JP).

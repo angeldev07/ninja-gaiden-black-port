@@ -28,3 +28,16 @@ Solo stdlib de Python 3.13. Tests en `tests/` con `unittest`:
 | --- | --- | --- | --- |
 | `tools/xbe_info.py` | Parsea el XBE: cabecera, certificado, secciones, librerías del XDK, imports del kernel y strings | en construcción (H1) | [[xbe-default]] |
 | `tools/afs.py` | Lista, extrae e inventaría los contenedores AFS | en construcción (H1) | [[afs]] |
+
+### `ngb_tools.xbe`
+
+```sh
+python -I -m ngb_tools.xbe %USERPROFILE%\ngb-data\game\default.xbe --strings --json build/reports/xbe/default.json --md build/reports/xbe/default.md
+python -I -m ngb_tools.xbe %USERPROFILE%\ngb-data\game\default.xbe            # resumen Markdown por stdout
+```
+
+- Códigos de salida: 0 = OK, 1 = no es un XBE o no verifica (SHA-1 de sección o claves XOR desconocidas; en el
+  segundo caso escribe igual el informe), 2 = error de uso o de E/S.
+- La tabla de exports del kernel viene en el paquete (`ngb_tools/data/xboxkrnl_exports.tsv`, de nxdk, CC0).
+  `--exports` permite usar otra.
+- Hallazgos: [[xbe-default]].

@@ -19,7 +19,7 @@ en [[CLAUDE]] y la línea de tiempo en [[log]].
 ## Observación: ingeniería inversa (`reverse-engineering/`)
 
 - [[disco-ngb]]: imagen Redump y XISO, 249 archivos por tipo, grupos de AFS, ejecutables y videos.
-- [[xbe-default]]: cabecera, certificado, secciones, librerías del XDK e imports del kernel de `default.xbe`. _(pendiente: llega con la PR de `xbe_info`)_
+- [[xbe-default]]: anatomía de `default.xbe`. Motor "Kunai", MSVC 13.10 con el XDK 5849, D3D8LTCG, 16 secciones, 145 imports del kernel, middleware de CRI y los otros 4 XBE del disco.
 
 ## Observación: formatos (`formats/`)
 

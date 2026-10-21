@@ -15,6 +15,7 @@ dev = ["ruff==0.17.1", "mypy==2.4.0"]
 
 [project.scripts]
 ngb-hygiene = "ngb_tools.hygiene:main"
+ngb-xbe = "ngb_tools.xbe.cli:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]
