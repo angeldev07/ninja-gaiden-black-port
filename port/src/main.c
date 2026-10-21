@@ -2,7 +2,7 @@
  * main.c: punto de entrada de ngb-core.dll (lo llama ngb-loader.exe, ver loader_stub.c).
  *
  *   ngb-loader.exe <ruta.xbe> [--log ARCHIVO] [--max-calls N] [--timeout S] [--idle S]
- *                  [--lenient] [--echo]
+ *                  [--lenient] [--echo] [--window]
  *
  * Carga el XBE en su dirección base, enlaza el kernel thunk con los stubs, prepara el
  * primer hilo Xbox (KPCR/KTHREAD falsos, pila con TLS) y salta al entry point. El hilo
@@ -16,6 +16,7 @@
 #include <string.h>
 
 #include "gpu/nv2a.h"
+#include "gfx/present.h"
 #include "kernel/kernel.h"
 
 ngb_options_t g_ngb_opts;
@@ -25,13 +26,22 @@ extern volatile DWORD g_ngb_last_call_tick;
 static void usage(void) {
     fprintf(stderr,
             "uso: ngb-loader.exe <ruta.xbe> [--log ARCHIVO] [--max-calls N] [--timeout S]\n"
-            "                    [--idle S] [--lenient] [--echo]\n"
+            "                    [--idle S] [--lenient] [--echo] [--window] [--no-pacing]\n"
+            "                    [--mmio-strict] [--mmio-gpu-ram] [--pgraph-frames N]\n"
+            "                    [--log-cap N] [--symbols CSV]\n"
             "  --log        log de la ejecución (por defecto %%NGB_DATA%%\\runs\\h6-<fecha>.log)\n"
             "  --max-calls  para tras N llamadas al kernel (por defecto 200000; 0 = sin límite)\n"
             "  --timeout    segundos máximos de ejecución (por defecto 60)\n"
             "  --idle       para si pasan S segundos sin llamadas al kernel (por defecto 10)\n"
             "  --lenient    una llamada sin implementar devuelve STATUS_SUCCESS y sigue\n"
-            "  --echo       copia el log a stderr\n");
+            "  --echo       copia el log a stderr\n"
+            "  --window     abre la ventana del presentador de frames (H7; F12 = captura)\n"
+            "  --no-pacing  FLIP_STALL no espera al siguiente 1/60 s (frames tan rápido como pueda)\n"
+            "  --mmio-strict   para en el primer MMIO o E/S de puertos que no sea el NV2A modelado\n"
+            "  --mmio-gpu-ram  NV2A como RAM trazada en vez del modelo (exploración de H6)\n"
+            "  --pgraph-frames N  frames con todos los métodos en el log de PGRAPH (3)\n"
+            "  --log-cap N  líneas de log por función del kernel; luego solo se cuentan (2000)\n"
+            "  --symbols CSV  nombres de funciones (CSV de Ghidra) en el log y los crashes\n");
 }
 
 /* 1 si `path` (o alguna carpeta que lo contiene) está dentro de un repo git: algún ancestro
@@ -74,9 +84,9 @@ static void default_log_path(char *out, size_t outlen) {
 static int parse_args(void) {
     int argc = 0, i;
     LPWSTR *wargv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    static char argbuf[16][MAX_PATH];
-    char *argv[16];
-    if (!wargv || argc < 2 || argc > 16)
+    static char argbuf[32][MAX_PATH];
+    char *argv[32];
+    if (!wargv || argc < 2 || argc > 32)
         return -1;
     for (i = 0; i < argc; i++) {
         WideCharToMultiByte(CP_ACP, 0, wargv[i], -1, argbuf[i], MAX_PATH, NULL, NULL);
@@ -108,10 +118,16 @@ static int parse_args(void) {
             g_ngb_opts.gpu_ram = 1;
         else if (!strcmp(a, "--pgraph-frames") && more)
             g_ngb_opts.pgraph_frames = (unsigned)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--pgraph-at") && more)
+            g_ngb_opts.pgraph_at = (unsigned)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--symbols") && more)
             g_ngb_opts.symbols = _strdup(argv[++i]);
         else if (!strcmp(a, "--log-cap") && more)
             g_ngb_opts.log_cap = strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--window"))
+            g_ngb_opts.window = 1;
+        else if (!strcmp(a, "--no-pacing"))
+            g_ngb_opts.no_pacing = 1;
         else if (a[0] == '-' || g_ngb_opts.xbe_path)
             return -1;
         else
@@ -172,6 +188,16 @@ __declspec(dllexport) int __cdecl ngb_main(void) {
     if (g_ngb_opts.symbols && ngb_symbols_load(g_ngb_opts.symbols))
         ngb_log("símbolos: no se pudo leer %s", g_ngb_opts.symbols);
 
+    /* Ventana del presentador (H7). El enganche está en gpu/pgraph.c: en cada FLIP_STALL se
+     * presenta el búfer de color de 720 de ancho que el juego limpió o dibujó (rasterizado
+     * por software en gpu/raster.c) y se espera al siguiente 1/60 s (--no-pacing lo quita). */
+    if (g_ngb_opts.window) {
+        if (gfx_init("Ninja Gaiden Black (ngb-loader)", 720, 480, 2))
+            ngb_log("gfx: no se pudo abrir la ventana; se sigue sin ella");
+        else
+            ngb_log("gfx: ventana 720x480 x2 (4:3), F12 guarda captura en runs\\shots");
+    }
+
     /* Xbox: un solo núcleo y sin NX. */
     SetProcessAffinityMask(GetCurrentProcess(), 1);
     SetProcessDEPPolicy(0);
@@ -216,9 +242,11 @@ __declspec(dllexport) int __cdecl ngb_main(void) {
         now = GetTickCount();
         if (ngb_thread_alive_count() == 0)
             ngb_stop(NGB_EXIT_OK, "el entry point y todos los hilos Xbox terminaron");
+        if (g_ngb_opts.window && gfx_poll())
+            ngb_stop(NGB_EXIT_OK, "ventana cerrada por el usuario");
         if (g_ngb_opts.timeout_s && now - start > g_ngb_opts.timeout_s * 1000u)
             ngb_stop(NGB_EXIT_TIMEOUT, "--timeout de %u s agotado", g_ngb_opts.timeout_s);
-        if (g_ngb_opts.idle_s && now - g_ngb_last_call_tick > g_ngb_opts.idle_s * 1000u)
+        if (g_ngb_opts.idle_s && (LONG)(now - g_ngb_last_call_tick) > (LONG)(g_ngb_opts.idle_s * 1000u))
             ngb_stop(NGB_EXIT_TIMEOUT,
                      "%u s sin llamadas al kernel (bucle de espera, hilo bloqueado o cálculo largo)",
                      g_ngb_opts.idle_s);

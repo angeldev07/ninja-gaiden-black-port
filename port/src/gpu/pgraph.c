@@ -18,7 +18,9 @@
 
 #include "../ngb.h"
 #include "nv2a.h"
+#include "../gfx/present.h"
 #include "png.h"
+#include "raster.h"
 #include "pushbuf.h"
 
 #define PFIFO_RAMHT 0x002210u
@@ -53,6 +55,19 @@ static uint32_t g_tex_nseen;
 static int g_tex_png;
 static uint32_t g_tex_palette[4];
 
+/* H7b: estado para el rasterizador por software (raster.c). */
+static uint32_t g_vfmt[16];      /* SET_VERTEX_DATA_ARRAY_FORMAT por atributo */
+static uint32_t g_vconst_diffuse = 0xFFFFFFFFu; /* SET_VERTEX_DATA4UB del difuso (slot 3) */
+static uint32_t g_prim;          /* primitiva de BEGIN_END en curso (0 = ninguna) */
+static uint32_t *g_inline;       /* palabras de INLINE_ARRAY de la primitiva en curso */
+static uint32_t g_inline_n, g_inline_cap;
+static uint32_t g_blend_enable, g_sfactor = 1, g_dfactor, g_alpha_test, g_alpha_func = 0x207;
+static uint32_t g_alpha_ref, g_exec_mode;
+static uint32_t g_drawn_tris, g_drawn_pixels, g_skipped_draws, g_skip_pos, g_skip_target, g_skip_prim;
+static uint32_t g_present_offset, g_present_pitch, g_present_w, g_present_h;
+static LARGE_INTEGER g_pace_next, g_pace_freq;
+#define SHOT_EVERY 300 /* con --window, captura automática cada 300 frames presentados */
+
 /* Racha de palabras del mismo método (para no escribir 10000 líneas de INLINE_ARRAY). */
 static struct {
     int active;
@@ -72,7 +87,9 @@ static void pg_printf(const char *fmt, ...) {
 /* Frames con todos los métodos en el log (--pgraph-frames, 3 por defecto) y además el
  * primer frame que dibuja (con BEGIN_END); el resto solo se cuenta. */
 static int logging(void) {
-    return g_frame < g_ngb_opts.pgraph_frames || g_frame == g_first_draw_frame;
+    return g_frame < g_ngb_opts.pgraph_frames || g_frame == g_first_draw_frame ||
+           (g_ngb_opts.pgraph_at && g_frame >= g_ngb_opts.pgraph_at &&
+            g_frame < g_ngb_opts.pgraph_at + 3);
 }
 
 static const char *prim_name(uint32_t p) {
@@ -218,9 +235,17 @@ static void dump_png(const char *why) {
         return;
     if (!dma_object(g_dma[(0x194 - 0x180) / 4], &phys, &limit))
         phys = 0;
+    phys += g_color_offset;
+    if (g_present_offset) { /* el búfer de 720 que se presenta (H7b) */
+        phys = g_present_offset;
+        pitch = g_present_pitch;
+        w = g_present_w;
+        h = g_present_h;
+        bpp = 4;
+    }
     if (!pitch)
         pitch = w * bpp;
-    surface = nv2a_phys(phys + g_color_offset, pitch * h);
+    surface = nv2a_phys(phys, pitch * h);
     rgb = (uint8_t *)malloc((size_t)w * h * 3);
     if (!surface || !rgb) {
         free(rgb);
@@ -247,7 +272,7 @@ static void dump_png(const char *why) {
     if (!png_write_rgb(path, w, h, rgb)) {
         g_png_count++;
         ngb_log("    · PGRAPH: %s -> %s (%ux%u, %u B/píxel, física 0x%08X)", why, path, w, h, bpp,
-                phys + g_color_offset);
+                phys);
         pg_printf("== PNG %s: %s (%ux%u)\n", why, path, w, h);
     }
     free(rgb);
@@ -369,6 +394,269 @@ static void dump_active_textures(void) {
     }
 }
 
+/* Superficie de color actual como destino del rasterizador. 0 si no hay. */
+static int color_target(rs_target_t *t) {
+    uint32_t phys, limit, pitch = g_pitch & 0xFFFF, w = g_clip_h >> 16, h = g_clip_v >> 16;
+    uint32_t cf = g_format & 0xF;
+    memset(t, 0, sizeof *t);
+    if (((g_format >> 8) & 0xF) == 2 || !w || !h || !pitch) /* swizzle: no soportado */
+        return 0;
+    if (!dma_object(g_dma[(0x194 - 0x180) / 4], &phys, &limit))
+        phys = 0;
+    t->bpp = (cf == 3 || cf == 1 || cf == 2) ? 2 : 4;
+    t->width = w + (g_clip_h & 0xFFFF);
+    t->height = h + (g_clip_v & 0xFFFF);
+    /* El rasterizador escribe filas [0, height) y columnas [0, width): el búfer entero tiene
+     * que caber en la RAM de la GPU y cada fila en el pitch (datos que manda el juego). */
+    if ((uint64_t)t->width * t->bpp > pitch || (uint64_t)pitch * t->height > 0x04000000u)
+        return 0;
+    t->pixels = nv2a_phys(phys + g_color_offset, pitch * t->height);
+    if (!t->pixels)
+        return 0;
+    t->pitch = pitch;
+    t->clip_x0 = (int)(g_clip_h & 0xFFFF);
+    t->clip_y0 = (int)(g_clip_v & 0xFFFF);
+    t->clip_x1 = (int)t->width;
+    t->clip_y1 = (int)t->height;
+    if (w == 720) { /* el búfer que acabará en pantalla */
+        g_present_offset = phys + g_color_offset;
+        g_present_pitch = pitch;
+        g_present_w = w;
+        g_present_h = h;
+    }
+    return 1;
+}
+
+/* Textura de la etapa 0 para el rasterizador (formatos de dump_texture). */
+static int stage0_texture(rs_texture_t *tex) {
+    uint32_t fmt = g_tex_format[0], color = (fmt >> 8) & 0xFF, phys, limit, bpp;
+    uint64_t size;
+    uint32_t dma = g_dma[(((fmt & 3) == 2 ? 0x188u : 0x184u) - 0x180u) / 4];
+    memset(tex, 0, sizeof *tex);
+    if (!(g_tex_ctl0[0] & 0x40000000u) || !dma_object(dma, &phys, &limit))
+        return 0;
+    tex->width = 1u << ((fmt >> 20) & 0xF);
+    tex->height = 1u << ((fmt >> 24) & 0xF);
+    tex->swizzled = 1;
+    tex->normalized = 1;
+    switch (color) {
+    case 0x06: tex->format = RS_TEX_A8R8G8B8; break;
+    case 0x07: tex->format = RS_TEX_X8R8G8B8; break;
+    case 0x05: tex->format = RS_TEX_R5G6B5; break;
+    case 0x19: tex->format = RS_TEX_A8; break;
+    case 0x0B: tex->format = RS_TEX_I8; break;
+    case 0x12: case 0x1E: case 0x11: /* LU_IMAGE: lineales, coordenadas en texels */
+        tex->format = color == 0x11 ? RS_TEX_R5G6B5 : color == 0x12 ? RS_TEX_A8R8G8B8 : RS_TEX_X8R8G8B8;
+        tex->swizzled = 0;
+        tex->normalized = 0;
+        tex->width = g_tex_rect[0] >> 16;
+        tex->height = g_tex_rect[0] & 0xFFFF;
+        tex->pitch = g_tex_ctl1[0] >> 16;
+        break;
+    default:
+        return 0;
+    }
+    /* Tamaños que manda el juego: hasta 4096 de lado (como el volcado) y en 64 bits, para que
+     * un 32768x32768 no dé 0 por desbordamiento y deje leer fuera de la RAM de la GPU. */
+    if (!tex->width || !tex->height || tex->width > 4096 || tex->height > 4096)
+        return 0;
+    bpp = tex->format == RS_TEX_R5G6B5 ? 2u : tex->format >= RS_TEX_A8 ? 1u : 4u;
+    if (!tex->pitch)
+        tex->pitch = tex->width * bpp;
+    if (!tex->swizzled && tex->pitch < tex->width * bpp)
+        return 0;
+    size = tex->swizzled ? (uint64_t)tex->width * tex->height * bpp : (uint64_t)tex->pitch * tex->height;
+    if (size > 0x04000000u)
+        return 0;
+    tex->data = nv2a_phys(phys + g_tex_offset[0], (uint32_t)size);
+    if (tex->format == RS_TEX_I8) {
+        uint32_t pdma = g_dma[(((g_tex_palette[0] & 3) == 2 ? 0x188u : 0x184u) - 0x180u) / 4];
+        uint32_t pphys, plimit;
+        if (dma_object(pdma, &pphys, &plimit))
+            tex->palette = nv2a_phys(pphys + (g_tex_palette[0] & ~0x3Fu), 1024);
+    }
+    return tex->data != NULL;
+}
+
+static float word_float(uint32_t w) {
+    float f;
+    memcpy(&f, &w, 4);
+    return f;
+}
+
+static void unpack_color(uint32_t c, int ogl, rs_vertex_t *v) {
+    if (ogl) /* UB_OGL: bytes R, G, B, A en memoria */
+        c = (c & 0xFF00FF00u) | ((c & 0xFFu) << 16) | ((c >> 16) & 0xFFu);
+    v->r = (float)((c >> 16) & 0xFF) / 255.0f;
+    v->g = (float)((c >> 8) & 0xFF) / 255.0f;
+    v->b = (float)(c & 0xFF) / 255.0f;
+    v->a = (float)(c >> 24) / 255.0f;
+}
+
+/* Palabras que ocupa un atributo con este formato en INLINE_ARRAY. */
+static uint32_t attr_words(uint32_t f) {
+    uint32_t type = f & 0xF, size = (f >> 4) & 0xF;
+    if (!size)
+        return 0;
+    switch (type) {
+    case 0: case 4: case 6: return 1;           /* UB_D3D, UB_OGL (4 bytes), CMP */
+    case 1: case 5: return (size + 1) / 2;      /* S1, S32K: shorts */
+    default: return size;                       /* F: floats */
+    }
+}
+
+/* Vértices de INLINE_ARRAY (posición XYZRHW en pantalla, difuso, texcoord0) -> triángulos. */
+static void draw_inline(void) {
+    rs_target_t t;
+    rs_texture_t tex;
+    rs_state_t st;
+    rs_vertex_t *vs;
+    uint32_t per = 0, n, i, slot;
+    if (!g_prim || !g_inline_n)
+        return;
+    for (slot = 0; slot < 16; slot++)
+        per += attr_words(g_vfmt[slot]);
+    /* Posición de 4 floats = XYZRHW ya transformada; la de 3D (3 floats) necesita el
+     * intérprete de vertex programs (siguiente paso). */
+    if (!per || (g_vfmt[0] & 0xF) != 2 || ((g_vfmt[0] >> 4) & 0xF) != 4) {
+        g_skipped_draws++;
+        g_skip_pos++;
+        return;
+    }
+    if (!color_target(&t)) {
+        g_skipped_draws++;
+        g_skip_target++;
+        return;
+    }
+    n = g_inline_n / per;
+    vs = (rs_vertex_t *)calloc(n ? n : 1, sizeof *vs);
+    if (!vs)
+        return;
+    for (i = 0; i < n; i++) {
+        const uint32_t *w = g_inline + (size_t)i * per;
+        rs_vertex_t *v = &vs[i];
+        unpack_color(g_vconst_diffuse, 0, v);
+        for (slot = 0; slot < 16; slot++) {
+            uint32_t f = g_vfmt[slot], words = attr_words(f), type = f & 0xF;
+            if (!words)
+                continue;
+            if (slot == 0) {
+                v->x = word_float(w[0]);
+                v->y = word_float(w[1]);
+                v->z = word_float(w[2]);
+                v->rhw = word_float(w[3]);
+            } else if (slot == 3) {
+                if (type == 2 && words >= 4) {
+                    v->r = word_float(w[0]);
+                    v->g = word_float(w[1]);
+                    v->b = word_float(w[2]);
+                    v->a = word_float(w[3]);
+                } else {
+                    unpack_color(w[0], type == 4, v);
+                }
+            } else if (slot == 9 && type == 2) {
+                v->u = word_float(w[0]);
+                v->v = words > 1 ? word_float(w[1]) : 0.0f;
+            }
+            w += words;
+        }
+    }
+    memset(&st, 0, sizeof st);
+    st.blend = (int)g_blend_enable;
+    st.sfactor = g_sfactor;
+    st.dfactor = g_dfactor;
+    st.alpha_test = (int)g_alpha_test;
+    st.alpha_func = g_alpha_func;
+    st.alpha_ref = g_alpha_ref & 0xFF;
+    st.use_texture = stage0_texture(&tex);
+#define TRI(a, b, c)                                                                      \
+    do {                                                                                  \
+        g_drawn_pixels += rs_draw_triangle(&t, &tex, &st, &vs[a], &vs[b], &vs[c]);        \
+        g_drawn_tris++;                                                                   \
+    } while (0)
+    switch (g_prim) {
+    case 5: /* TRIANGLES */
+        for (i = 0; i + 2 < n; i += 3)
+            TRI(i, i + 1, i + 2);
+        break;
+    case 6: /* TRIANGLE_STRIP */
+        for (i = 0; i + 2 < n; i++)
+            TRI(i, i + 1, i + 2);
+        break;
+    case 7: case 10: /* TRIANGLE_FAN, POLYGON */
+        for (i = 1; i + 1 < n; i++)
+            TRI(0, i, i + 1);
+        break;
+    case 8: /* QUADS */
+        for (i = 0; i + 3 < n; i += 4) {
+            TRI(i, i + 1, i + 2);
+            TRI(i, i + 2, i + 3);
+        }
+        break;
+    case 9: /* QUAD_STRIP */
+        for (i = 0; i + 3 < n; i += 2) {
+            TRI(i, i + 1, i + 3);
+            TRI(i, i + 3, i + 2);
+        }
+        break;
+    default:
+        g_skipped_draws++; /* puntos y líneas: no se dibujan */
+        g_skip_prim++;
+        break;
+    }
+#undef TRI
+    free(vs);
+}
+
+static void inline_push(uint32_t w) {
+    if (g_inline_n == g_inline_cap) {
+        uint32_t cap = g_inline_cap ? g_inline_cap * 2 : 4096;
+        uint32_t *p = (uint32_t *)realloc(g_inline, (size_t)cap * 4);
+        if (!p || cap > (1u << 24))
+            return;
+        g_inline = p;
+        g_inline_cap = cap;
+    }
+    g_inline[g_inline_n++] = w;
+}
+
+/* FLIP_STALL: presenta el búfer de 720 de ancho en la ventana y espera al siguiente
+ * "vblank" (1/60 s de reloj) para ir a ~60 fps como la consola. */
+static void present_and_pace(void) {
+    uint8_t *fb;
+    LARGE_INTEGER now;
+    if (g_present_offset && g_ngb_opts.window) {
+        fb = nv2a_phys(g_present_offset, g_present_pitch * g_present_h);
+        if (fb) {
+            gfx_present(fb, (int)g_present_w, (int)g_present_h, (int)g_present_pitch,
+                        GFX_FMT_X8R8G8B8);
+            if (g_flips % SHOT_EVERY == 0 && g_png_base[0]) {
+                char path[MAX_PATH + 32], used[MAX_PATH + 32];
+                snprintf(path, sizeof path, "%s-shot-%05u.png", g_png_base, g_flips);
+                if (!gfx_screenshot(path, used, sizeof used))
+                    ngb_log("    · gfx: captura del frame %u -> %s (%.1f fps)", g_flips, used, gfx_fps());
+            }
+        }
+    }
+    if (g_ngb_opts.no_pacing)
+        return;
+    if (!g_pace_freq.QuadPart) {
+        QueryPerformanceFrequency(&g_pace_freq);
+        QueryPerformanceCounter(&g_pace_next);
+    }
+    g_pace_next.QuadPart += g_pace_freq.QuadPart / 60;
+    QueryPerformanceCounter(&now);
+    if (now.QuadPart > g_pace_next.QuadPart + g_pace_freq.QuadPart / 10) {
+        g_pace_next = now; /* muy atrasados: no intentar recuperar */
+        return;
+    }
+    while (now.QuadPart < g_pace_next.QuadPart) {
+        LONGLONG ms = (g_pace_next.QuadPart - now.QuadPart) * 1000 / g_pace_freq.QuadPart;
+        Sleep(ms > 1 ? (DWORD)(ms - 1) : 0);
+        QueryPerformanceCounter(&now);
+    }
+}
+
 /* CLEAR_SURFACE de color: se rellena el rectángulo de clear de la superficie. */
 static void do_clear(uint32_t flags) {
     uint32_t phys, limit, pitch = g_pitch & 0xFFFF, bpp = bytes_per_pixel(g_format & 0xF);
@@ -387,8 +675,16 @@ static void do_clear(uint32_t flags) {
     }
     if (!pitch)
         pitch = ((g_clip_h >> 16) ? (g_clip_h >> 16) : 640) * bpp;
-    if (x1 >= 4096 || y1 >= 4096 || x0 > x1 || y0 > y1)
+    /* Cada fila del rectángulo tiene que caber en el pitch: si no, la escritura pisaría la
+     * fila siguiente o saldría del búfer. */
+    if (x1 >= 4096 || y1 >= 4096 || x0 > x1 || y0 > y1 || (x1 + 1) * bpp > pitch)
         return;
+    if ((g_clip_h >> 16) == 720) {
+        g_present_offset = phys + g_color_offset;
+        g_present_pitch = pitch;
+        g_present_w = 720;
+        g_present_h = g_clip_v >> 16;
+    }
     surface = nv2a_phys(phys + g_color_offset, pitch * (y1 + 1));
     if (!surface)
         return;
@@ -445,6 +741,14 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
     case 0x1D9C: g_clear_v = param; break;
     case 0x1D94: do_clear(param); break;
     case 0x17FC:
+        if (!param) {
+            draw_inline();
+            g_prim = 0;
+            g_inline_n = 0;
+        } else {
+            g_prim = param;
+            g_inline_n = 0;
+        }
         if (param) {
             if (g_first_draw_frame == 0xFFFFFFFFu) {
                 g_first_draw_frame = g_frame;
@@ -456,6 +760,15 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
         }
         break;
     case 0x1810: g_draw_arrays++; break;
+    case 0x1818: inline_push(param); break; /* INLINE_ARRAY */
+    case 0x194C: g_vconst_diffuse = param; break; /* SET_VERTEX_DATA4UB del difuso */
+    case 0x0300: g_alpha_test = param & 1; break;
+    case 0x0304: g_blend_enable = param & 1; break;
+    case 0x033C: g_alpha_func = param; break;
+    case 0x0340: g_alpha_ref = param; break;
+    case 0x0344: g_sfactor = param; break;
+    case 0x0348: g_dfactor = param; break;
+    case 0x1E94: g_exec_mode = param; break;
     case 0x1B04: case 0x1B44: case 0x1B84: case 0x1BC4:
         g_tex_format[(method - 0x1B00) / 0x40] = param;
         break;
@@ -482,6 +795,11 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
         break;
     }
     case 0x1D6C: g_sem_offset = param; break;
+    case 0x1760: case 0x1764: case 0x1768: case 0x176C: case 0x1770: case 0x1774:
+    case 0x1778: case 0x177C: case 0x1780: case 0x1784: case 0x1788: case 0x178C:
+    case 0x1790: case 0x1794: case 0x1798: case 0x179C:
+        g_vfmt[(method - 0x1760) / 4] = param;
+        break;
     case 0x1D70: { /* BACK_END_WRITE_SEMAPHORE_RELEASE: D3D espera ver este valor */
         uint32_t phys, limit;
         uint8_t *p;
@@ -494,6 +812,7 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
     case 0x0130: /* FLIP_STALL: fin de frame */
         flush_run();
         g_flips++;
+        present_and_pace();
         if (g_flips <= PNG_FIRST_FLIPS || g_flips % 100 == 0) {
             char why[48];
             snprintf(why, sizeof why, "FLIP_STALL del frame %u", g_frame);
@@ -587,14 +906,15 @@ static void summary_hist(const uint32_t *hist, const char *title) {
 
 void pgraph_summary(void) {
     uint32_t i;
-    int tries;
+    int locked = 0, tries;
     if (!g_pg)
         return;
-    /* Se llama desde ngb_stop: un hilo suspendido podría tener el lock tomado para siempre.
-       Se intenta durante ~0.5 s y, si no se consigue, se omite el resumen en vez de colgar. */
-    for (tries = 0; !TryEnterCriticalSection(&g_pg_lock); tries++) {
+    /* Se llama desde ngb_stop con los hilos aún vivos: otro hilo puede estar a mitad de un
+       kick con el lock tomado. Se intenta ~0.5 s y, si no se consigue, se omite el resumen
+       (escribirlo sin lock correría contra el hilo que sigue ejecutando). */
+    for (tries = 0; !(locked = TryEnterCriticalSection(&g_pg_lock)); tries++) {
         if (tries >= 50) {
-            ngb_log("pgraph: resumen omitido (lock ocupado por un hilo detenido)");
+            ngb_log("pgraph: resumen omitido (lock ocupado)");
             return;
         }
         Sleep(10);
@@ -604,6 +924,11 @@ void pgraph_summary(void) {
             "%u DRAW_ARRAYS, %u clears (%u de color), %u semáforos, %u errores del pb",
             g_kicks, g_words, g_flips, g_begin_end, g_draw_arrays, g_clears, g_color_clears,
             g_sem_releases, g_pb.errors);
+    ngb_log("pgraph: rasterizador: %u triángulos, %u píxeles escritos; %u primitivas sin dibujar "
+            "(%u con posición no XYZRHW, %u sin superficie, %u puntos/líneas); %u DRAW_ARRAYS y "
+            "ARRAY_ELEMENT sin dibujar",
+            g_drawn_tris, g_drawn_pixels, g_skipped_draws, g_skip_pos, g_skip_target, g_skip_prim,
+            g_draw_arrays + g_hist[0x1800 / 4] + g_hist[0x1808 / 4]);
     ngb_log("pgraph: texturas: %u SET_TEXTURE_OFFSET, %u offsets distintos; primer frame con "
             "primitivas: %d; %d PNG", g_tex_sets, g_ntex,
             g_first_draw_frame == 0xFFFFFFFFu ? -1 : (int)g_first_draw_frame, g_png_count);
@@ -613,5 +938,6 @@ void pgraph_summary(void) {
     summary_hist(g_hist_frame0, "primer frame (hasta el primer FLIP_STALL), por método:");
     summary_hist(g_hist, "total por método:");
     fflush(g_pg);
-    LeaveCriticalSection(&g_pg_lock);
+    if (locked)
+        LeaveCriticalSection(&g_pg_lock);
 }

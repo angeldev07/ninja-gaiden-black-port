@@ -20,7 +20,8 @@ cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\core.pdb" /c ^
   "%SRC%\kernel\impl_mm.c" "%SRC%\kernel\impl_rtl.c" "%SRC%\kernel\impl_ke.c" ^
   "%SRC%\kernel\impl_ps.c" "%SRC%\kernel\impl_io.c" "%SRC%\kernel\impl_misc.c" "%SRC%\kernel\hostpath.c" ^
   "%SRC%\gpu\nv2a.c" "%SRC%\gpu\pgraph.c" "%SRC%\gpu\pushbuf.c" "%SRC%\gpu\png.c" ^
-  "%SRC%\gpu\nv097_names.c" || exit /b 1
+  "%SRC%\gpu\nv097_names.c" "%SRC%\gpu\raster.c" ^
+  "%SRC%\gfx\present.c" || exit /b 1
 link /nologo /DLL /DEBUG /OUT:"%OUT%\ngb-core.dll" /PDB:"%OUT%\ngb-core.pdb" ^
   /BASE:0x60000000 /LARGEADDRESSAWARE ^
   "%OUT%\obj\main.obj" "%OUT%\obj\symbols.obj" "%OUT%\obj\xbe.obj" "%OUT%\obj\memory.obj" "%OUT%\obj\log.obj" ^
@@ -28,8 +29,8 @@ link /nologo /DLL /DEBUG /OUT:"%OUT%\ngb-core.dll" /PDB:"%OUT%\ngb-core.pdb" ^
   "%OUT%\obj\data.obj" "%OUT%\obj\impl_mm.obj" "%OUT%\obj\impl_rtl.obj" "%OUT%\obj\impl_ke.obj" ^
   "%OUT%\obj\impl_ps.obj" "%OUT%\obj\impl_io.obj" "%OUT%\obj\impl_misc.obj" "%OUT%\obj\hostpath.obj" ^
   "%OUT%\obj\nv2a.obj" "%OUT%\obj\pgraph.obj" "%OUT%\obj\pushbuf.obj" "%OUT%\obj\png.obj" ^
-  "%OUT%\obj\nv097_names.obj" ^
-  kernel32.lib shell32.lib || exit /b 1
+  "%OUT%\obj\nv097_names.obj" "%OUT%\obj\raster.obj" ^
+  "%OUT%\obj\present.obj" kernel32.lib shell32.lib user32.lib gdi32.lib || exit /b 1
 
 rem 2) ngb-loader.exe: base fija 0x10000 + BSS que reserva la imagen del XBE. Sin CRT.
 cl /nologo /W4 /WX /O1 /GS- /Zi /utf-8 /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\stub.pdb" /c "%SRC%\loader_stub.c" || exit /b 1
@@ -47,5 +48,13 @@ cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\pushbuf_test.pdb" /Fe"%OUT%\pushbuf_t
 "%OUT%\pushbuf_test.exe" || exit /b 1
 
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\shaders_test.pdb" /Fe"%OUT%\shaders_test.exe" "%PORT%tests\shaders_test.c" "%SRC%\shaders\vsh.c" "%SRC%\shaders\psh.c" "%SRC%\shaders\emit.c" && "%OUT%\shaders_test.exe" || exit /b 1
+rem 3c) Prueba del rasterizador por software (triángulo y textura 2x2 a mano).
+cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\raster_test.pdb" /Fe"%OUT%\raster_test.exe" "%PORT%tests\raster_test.c" "%SRC%\gpu\raster.c" || exit /b 1
+"%OUT%\raster_test.exe" || exit /b 1
+
+rem 4) Prueba del presentador de frames (gfx\present.c). Abre una ventana: no se ejecuta
+rem    aquí (tests\port\test_gfx.py la lanza oculta con --frames 3 --hidden).
+cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\gfx_test.pdb" /Fe"%OUT%\gfx_test.exe" "%PORT%tests\gfx_test.c" "%SRC%\gfx\present.c" user32.lib gdi32.lib || exit /b 1
+
 echo build: %OUT%\ngb-loader.exe + ngb-core.dll
 endlocal

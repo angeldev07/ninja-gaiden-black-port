@@ -48,6 +48,72 @@ static void threads_init_once(void) {
     }
 }
 
+void ngb_kernel_enter(ngb_thread_t *t) {
+    if (t)
+        InterlockedIncrement(&t->in_kernel);
+}
+
+void ngb_kernel_leave(ngb_thread_t *t) {
+    if (!t || InterlockedDecrement(&t->in_kernel) != 0)
+        return;
+    /* Fuera ya de todo código propio: si el juego pidió suspender este hilo mientras estaba
+     * dentro, se aparca aquí hasta el NtResumeThread. El evento se resetea bajo el lock y la
+     * condición se vuelve a mirar tras despertar, así que un resume no se pierde. */
+    EnterCriticalSection(&t->susp_lock);
+    while (t->susp_park > 0 && t->in_kernel == 0) {
+        ResetEvent(t->resume_evt);
+        LeaveCriticalSection(&t->susp_lock);
+        WaitForSingleObject(t->resume_evt, INFINITE);
+        EnterCriticalSection(&t->susp_lock);
+    }
+    LeaveCriticalSection(&t->susp_lock);
+}
+
+LONG ngb_thread_suspend(ngb_thread_t *t) {
+    LONG prev;
+    CONTEXT ctx;
+    EnterCriticalSection(&t->susp_lock);
+    prev = t->susp_park + t->susp_host;
+    if (t == ngb_thread_current() || t->in_kernel > 0) {
+        t->susp_park++; /* dentro del kernel: se aparca al salir (ngb_kernel_leave) */
+    } else if (SuspendThread(t->handle) == (DWORD)-1) {
+        prev = -1;
+    } else {
+        /* SuspendThread es asíncrono: GetThreadContext espera a que el hilo pare de verdad.
+         * Si entró al kernel justo antes, se deshace y se aparca. */
+        ctx.ContextFlags = CONTEXT_CONTROL;
+        GetThreadContext(t->handle, &ctx);
+        if (t->in_kernel > 0) {
+            ResumeThread(t->handle);
+            t->susp_park++;
+        } else {
+            t->susp_host++;
+        }
+    }
+    LeaveCriticalSection(&t->susp_lock);
+    return prev;
+}
+
+LONG ngb_thread_resume(ngb_thread_t *t) {
+    LONG prev;
+    DWORD r;
+    EnterCriticalSection(&t->susp_lock);
+    prev = t->susp_park + t->susp_host;
+    if (t->susp_park > 0) {
+        if (--t->susp_park == 0)
+            SetEvent(t->resume_evt);
+    } else if (t->susp_host > 0) {
+        ResumeThread(t->handle);
+        t->susp_host--;
+    } else {
+        /* Sin suspensiones propias: el hilo se creó suspendido (PsCreateSystemThreadEx). */
+        r = ResumeThread(t->handle);
+        prev = r == (DWORD)-1 ? -1 : (LONG)r;
+    }
+    LeaveCriticalSection(&t->susp_lock);
+    return prev;
+}
+
 ngb_thread_t *ngb_thread_current(void) {
     return g_tls == TLS_OUT_OF_INDEXES ? NULL : (ngb_thread_t *)TlsGetValue(g_tls);
 }
@@ -189,7 +255,16 @@ ngb_thread_t *ngb_thread_spawn(uint32_t start_routine, uint32_t start_context,
     t = (ngb_thread_t *)calloc(1, sizeof *t);
     block = (uint8_t *)VirtualAlloc(NULL, NGB_KPCR_SIZE + NGB_KTHREAD_SIZE * 2,
                                     MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    if (!t || !block) {
+    if (t && block) {
+        t->resume_evt = CreateEventA(NULL, TRUE, FALSE, NULL);
+        InitializeCriticalSection(&t->susp_lock);
+    }
+    if (!t || !block || !t->resume_evt) {
+        if (t && block) {
+            if (t->resume_evt)
+                CloseHandle(t->resume_evt);
+            DeleteCriticalSection(&t->susp_lock);
+        }
         free(t);
         if (block)
             VirtualFree(block, 0, MEM_RELEASE);

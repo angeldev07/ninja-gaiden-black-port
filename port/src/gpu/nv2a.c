@@ -230,10 +230,12 @@ LONG nv2a_mmio_fault(EXCEPTION_RECORD *rec, CONTEXT *ctx) {
         return EXCEPTION_CONTINUE_SEARCH;
     if (g_pramin_mapped && off >= NV2A_PRAMIN && off - NV2A_PRAMIN < NV2A_PRAMIN_SIZE)
         return EXCEPTION_CONTINUE_SEARCH; /* PRAMIN es RAM: un fallo ahí es un bug real */
+    ngb_kernel_enter(ngb_thread_current()); /* hasta el paso a paso: lock tomado */
     EnterCriticalSection(&g_lock);
     if (!commit_page(page) ||
         !VirtualProtect((void *)(uintptr_t)page, 0x1000, PAGE_READWRITE, &old)) {
         LeaveCriticalSection(&g_lock);
+        ngb_kernel_leave(ngb_thread_current());
         return EXCEPTION_CONTINUE_SEARCH;
     }
     value = nv2a_value(aligned);
@@ -270,6 +272,7 @@ int nv2a_single_step(CONTEXT *ctx) {
     VirtualProtect((void *)(uintptr_t)t_page, 0x1000, PAGE_NOACCESS, &old);
     t_pending = 0;
     LeaveCriticalSection(&g_lock);
+    ngb_kernel_leave(ngb_thread_current());
     return 1;
 }
 

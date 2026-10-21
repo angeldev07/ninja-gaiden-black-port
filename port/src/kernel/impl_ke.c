@@ -38,8 +38,12 @@ static uint32_t raise_irql(uint32_t new_irql) {
     uint32_t old = t ? t->irql : 0;
     ke_init_once();
     if (t) {
-        if (new_irql >= 2 && old < 2)
+        if (new_irql >= 2 && old < 2) {
+            /* A DISPATCH_LEVEL un hilo Xbox no se suspende (la APC de suspensión llega al
+             * bajar el IRQL): mientras tenga el lock, NtSuspendThread se aplaza. */
+            ngb_kernel_enter(t);
             EnterCriticalSection(&g_dispatch_lock);
+        }
         t->irql = new_irql;
     }
     return old;
@@ -49,8 +53,12 @@ static void lower_irql(uint32_t new_irql) {
     ngb_thread_t *t = ngb_thread_current();
     if (!t)
         return;
-    if (new_irql < 2 && t->irql >= 2)
+    if (new_irql < 2 && t->irql >= 2) {
+        t->irql = new_irql;
         LeaveCriticalSection(&g_dispatch_lock);
+        ngb_kernel_leave(t);
+        return;
+    }
     t->irql = new_irql;
 }
 
@@ -250,6 +258,22 @@ static void obj_forget(uint32_t addr) {
     ReleaseSRWLockExclusive(&g_obj_lock);
 }
 
+/* El juego también limpia eventos escribiendo SignalState = 0 en memoria (D3D con su evento
+ * de vblank), sin llamar al kernel: antes de esperar, el objeto de Windows se alinea con la
+ * cabecera para no despertar con una señal ya consumida. */
+static void sync_event(uint32_t addr, HANDLE h) {
+    const uint8_t *hdr = (const uint8_t *)(uintptr_t)addr;
+    const volatile LONG *signal = (const volatile LONG *)(hdr + 4);
+    if ((hdr[0] <= 1 || hdr[0] == 8 || hdr[0] == 9) && *signal == 0) {
+        ResetEvent(h);
+        /* Si KeSetEvent (o el timer) escribió 1 y llamó a SetEvent entre la lectura y el
+         * ResetEvent, la señal se habría borrado: se relee la cabecera y se restaura. */
+        MemoryBarrier();
+        if (*signal != 0)
+            SetEvent(h);
+    }
+}
+
 static void after_wait(uint32_t addr) {
     uint8_t *hdr = (uint8_t *)(uintptr_t)addr;
     if (hdr[0] == 1 || hdr[0] == 9)
@@ -312,6 +336,7 @@ static uint64_t KeWaitForSingleObject(uint32_t *args) {
     DWORD r;
     if (!h)
         return RET32(STATUS_INVALID_HANDLE);
+    sync_event(ARG(0), h);
     r = WaitForSingleObjectEx(h, timeout_ms((const int64_t *)PTR(4)), (ARG(3) & 0xFF) != 0);
     if (r == WAIT_OBJECT_0)
         after_wait(ARG(0));
@@ -327,13 +352,21 @@ static uint64_t KeWaitForMultipleObjects(uint32_t *args) {
     DWORD r;
     if (n > MAXIMUM_WAIT_OBJECTS)
         return RET32(STATUS_INVALID_PARAMETER);
-    for (i = 0; i < n; i++)
+    for (i = 0; i < n; i++) {
         if (!(hs[i] = obj_handle(objs[i])))
             return RET32(STATUS_INVALID_HANDLE);
+        sync_event(objs[i], hs[i]);
+    }
     r = WaitForMultipleObjectsEx(n, hs, ARG(2) == 0 /* WaitAll */,
                                  timeout_ms((const int64_t *)PTR(6)), (ARG(5) & 0xFF) != 0);
-    if (r < WAIT_OBJECT_0 + n)
-        after_wait(objs[r - WAIT_OBJECT_0]);
+    if (r < WAIT_OBJECT_0 + n) {
+        if (ARG(2) == 0) { /* WaitAll: Windows consumió la señal de todos */
+            for (i = 0; i < n; i++)
+                after_wait(objs[i]);
+        } else {
+            after_wait(objs[r - WAIT_OBJECT_0]);
+        }
+    }
     return RET32(wait_status(r, WAIT_OBJECT_0));
 }
 

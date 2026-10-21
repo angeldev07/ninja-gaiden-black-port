@@ -3,3 +3,8 @@
 
 *.png binary
 *.jpg binary
+
+# Los .cmd van con CRLF: cmd.exe calcula mal los desplazamientos en archivos LF con UTF-8
+# multibyte y, al volver de un `call`, retoma a mitad de línea (bucle infinito en el build).
+*.cmd text eol=crlf
+*.bat text eol=crlf

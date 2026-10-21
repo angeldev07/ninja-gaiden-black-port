@@ -72,8 +72,11 @@ static uint64_t ObfReference(uint32_t *args) {
 
 /* 231 NTSTATUS NtSuspendThread(HANDLE, PULONG PreviousSuspendCount) */
 static uint64_t NtSuspendThread(uint32_t *args) {
-    DWORD r = SuspendThread((HANDLE)PTR(0));
-    if (r == (DWORD)-1)
+    /* Un hilo Xbox dentro del kernel emulado o del VEH puede tener locks del loader: nunca
+     * se congela ahí; se aparca al salir (ngb_thread_suspend, thread.c). */
+    ngb_thread_t *t = ngb_thread_from_handle((HANDLE)PTR(0));
+    LONG r = t ? ngb_thread_suspend(t) : (LONG)SuspendThread((HANDLE)PTR(0));
+    if (r == -1)
         return RET32(STATUS_INVALID_HANDLE);
     if (PTR(1))
         *(uint32_t *)PTR(1) = r;
@@ -82,8 +85,9 @@ static uint64_t NtSuspendThread(uint32_t *args) {
 
 /* 224 NTSTATUS NtResumeThread(HANDLE, PULONG PreviousSuspendCount) */
 static uint64_t NtResumeThread(uint32_t *args) {
-    DWORD r = ResumeThread((HANDLE)PTR(0));
-    if (r == (DWORD)-1)
+    ngb_thread_t *t = ngb_thread_from_handle((HANDLE)PTR(0));
+    LONG r = t ? ngb_thread_resume(t) : (LONG)ResumeThread((HANDLE)PTR(0));
+    if (r == -1)
         return RET32(STATUS_INVALID_HANDLE);
     if (PTR(1))
         *(uint32_t *)PTR(1) = r;

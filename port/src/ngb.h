@@ -46,8 +46,11 @@ typedef struct ngb_options {
     int mmio_strict;         /* 1: cualquier MMIO o E/S de puertos para la ejecución */
     int gpu_ram;             /* 1: el NV2A también se traza con RAM a cero (más allá de H6) */
     unsigned pgraph_frames;  /* frames con todos los métodos en el log de PGRAPH */
+    unsigned pgraph_at;      /* además, 3 frames completos a partir de este (0 = no) */
     unsigned long log_cap;   /* líneas de log por función del kernel (0 = sin límite) */
     const char *symbols;     /* CSV de símbolos (opcional) */
+    int window;              /* 1: abre la ventana del presentador (gfx/present.c, H7) */
+    int no_pacing;           /* 1: FLIP_STALL no espera al siguiente 1/60 s (H7b) */
 } ngb_options_t;
 
 extern ngb_options_t g_ngb_opts;
@@ -90,6 +93,15 @@ typedef struct ngb_thread {
     int is_entry; /* hilo que ejecuta el entry point del XBE */
     int internal; /* hilo propio del loader (DPC): no cuenta para "todos terminaron" */
     volatile LONG exited;
+    volatile LONG in_kernel; /* >0: dentro del kernel emulado o del VEH (locks propios) */
+    /* Suspensión de NtSuspendThread (ver ngb_thread_suspend). Protegido por susp_lock:
+     *   susp_park: suspensiones que se aplican aparcando el hilo en resume_evt al salir del
+     *              kernel (no se puede congelar con un lock del loader tomado);
+     *   susp_host: SuspendThread del host aplicados (el hilo estaba en código del juego).
+     * El hilo corre solo si las dos cuentas son 0. */
+    CRITICAL_SECTION susp_lock;
+    HANDLE resume_evt; /* manual: se resetea bajo susp_lock antes de esperar */
+    LONG susp_park, susp_host;
     uint32_t inflight_ordinal; /* llamada al kernel en curso (0 = ninguna) */
     uint32_t inflight_caller;
     uint32_t irql;
@@ -101,6 +113,14 @@ ngb_thread_t *ngb_thread_spawn(uint32_t start_routine, uint32_t start_context,
                                uint32_t system_routine, uint32_t stack_size,
                                uint32_t tls_size, int suspended, int is_entry);
 ngb_thread_t *ngb_thread_current(void); /* NULL si el hilo no es Xbox */
+/* Entrada y salida del código propio (kernel, VEH): la salida aplica una suspensión
+ * aplazada. Así NtSuspendThread nunca congela un hilo con un lock del loader tomado. */
+void ngb_kernel_enter(ngb_thread_t *t);
+void ngb_kernel_leave(ngb_thread_t *t);
+/* NtSuspendThread/NtResumeThread sobre un hilo Xbox. Devuelven la cuenta previa, o -1 si
+ * el host falla. */
+LONG ngb_thread_suspend(ngb_thread_t *t);
+LONG ngb_thread_resume(ngb_thread_t *t);
 ngb_thread_t *ngb_thread_from_ethread(uint32_t ethread);
 ngb_thread_t *ngb_thread_from_handle(HANDLE h);
 __declspec(noreturn) void ngb_thread_exit(uint32_t status);

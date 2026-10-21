@@ -151,3 +151,10 @@ eso Windows perdía despertares de hilos. Detalle en [[gpu-nv2a]].
 `port/src/shaders/` traduce los vertex programs (MAC+ILU de 128 bits, epílogo de screen space) y los register
 combiners a GLSL 4.00. Los 16 vertex programs que hay en `default.xbe` se decodifican. Falta emular los modos
 de textura `DOT_*`, que usan los 2 pixel shaders reales. Detalle en [[shaders-nv2a]].
+
+## [2026-10-22] milestone | H7: primer frame del juego en una ventana
+La pantalla de avisos de NGB se ve en una ventana del PC a 60 fps: el código del juego ejecutándose de forma
+nativa, con el NV2A emulado, un rasterizador por software y el presentador Win32. Hubo que aplazar
+`NtSuspendThread` mientras el hilo tiene un lock del loader, y sincronizar los eventos que D3D limpia en
+memoria. Tras unos 40 s el juego pasa a una pantalla negra que espera algo. Además, `.gitattributes` fuerza
+CRLF en los `.cmd`: con LF y UTF-8, cmd.exe entraba en bucle al volver de `call`. Detalle en [[gpu-nv2a]].

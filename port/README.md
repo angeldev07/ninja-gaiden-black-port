@@ -163,6 +163,52 @@ A8 256x64, dos búferes de 720x480). Siguiente paso: rasterizar (HLE de D3D o PG
 D3D11/Vulkan), pacing de FLIP_STALL contra el vblank y entrada del mando (XInput) para pasar
 de la pantalla de avisos.
 
+## H7b: primer frame en una ventana de PC
+
+`--window` abre la ventana del presentador (`src/gfx/present.c`: Win32 + GDI en su hilo,
+escalado entero, F12 guarda captura en `%NGB_DATA%\runs\shots`, FPS en el título).
+
+- **Enganche** (`gpu/pgraph.c`): en cada `FLIP_STALL` se presenta el búfer de color de 720 de
+  ancho que el juego limpió o dibujó en ese frame (A8R8G8B8, pitch de `SET_SURFACE_PITCH`).
+  Cada 300 frames presentados se guarda una captura automática (`<log>-pgraph-shot-NNNNN.png`).
+- **Pacing**: `FLIP_STALL` espera al siguiente 1/60 s de reloj (un vblank de 60 Hz virtual)
+  antes de devolver GET; `--no-pacing` lo quita. Se hace en el propio pusher (dentro del VEH,
+  con el lock del NV2A tomado como mucho 16 ms), así que el resto del juego sigue al ritmo.
+- **Rasterizador de referencia** (`gpu/raster.c`, puro, probado en `tests/raster_test.c`):
+  triángulos con posición ya en pantalla (XYZRHW: 4 floats en el atributo 0), difuso
+  (atributo 3, `UB_D3D`/`UB_OGL`/float, o la constante de `SET_VERTEX_DATA4UB`), coordenadas
+  de la etapa 0 (atributo 9), muestreo por punto (A8R8G8B8/X8R8G8B8/R5G6B5, A8, I8 con paleta;
+  swizzle o lineales con coordenadas en texels), combinador mínimo textura x difuso, prueba de
+  alfa y mezcla con los factores GL del NV2A, interpolación con 1/w. Recorta al clip de la
+  superficie. Primitivas: TRIANGLES, TRIANGLE_STRIP, TRIANGLE_FAN, QUADS, QUAD_STRIP, POLYGON.
+- **Métodos NV097 nuevos**: `SET_VERTEX_DATA_ARRAY_FORMAT[16]`, `SET_BEGIN_END` (dibuja al
+  cerrar), `INLINE_ARRAY`, `SET_VERTEX_DATA4UB` (difuso), `SET_ALPHA_TEST_ENABLE`,
+  `SET_ALPHA_FUNC`, `SET_ALPHA_REF`, `SET_BLEND_ENABLE`, `SET_BLEND_FUNC_SFACTOR/DFACTOR`,
+  `SET_TRANSFORM_EXECUTION_MODE` (registrado), y la etapa de textura 0 ya leída en H7a
+  (`OFFSET`, `FORMAT`, `CONTROL0/1`, `IMAGE_RECT`, `PALETTE`).
+- Lo que no se dibuja se cuenta en el resumen: posiciones de 3 floats (geometría 3D, que
+  necesita el intérprete de vertex programs), puntos y líneas, `DRAW_ARRAYS`/`ARRAY_ELEMENT*`
+  (vértices en memoria) y superficies swizzle.
+
+Además, para pasar de la pantalla de avisos sin colgarse:
+
+- **Suspensiones seguras**: el juego planifica sus hilos con SuspendThread/ResumeThread.
+  Suspender un hilo con un lock del loader tomado (kernel emulado, VEH del NV2A o IRQL >=
+  DISPATCH) colgaba al resto: ahora NtSuspendThread se aplaza hasta que el hilo sale de
+  ese código (`ngb_kernel_enter`/`ngb_kernel_leave`), como la APC de suspensión del kernel real.
+- **Eventos limpiados en memoria**: D3D pone a 0 el `SignalState` de su evento de vblank sin
+  llamar al kernel; `KeWaitFor*` alinea antes el objeto de Windows con la cabecera.
+- `--pgraph-at N` vuelca al log de PGRAPH los frames N..N+2; tras `--log-cap`, el log del
+  kernel guarda una muestra cada 100 000 llamadas; el vigilante de inactividad ya no confunde
+  una carrera entre hilos con 15 s sin llamadas.
+
+Resultado (`--window`, 75 s de `default.xbe`): la ventana muestra la pantalla de avisos
+completa ("Warnings" y el texto que se desplaza y se funde) a 60 fps; capturas automáticas en
+`%NGB_DATA%\runs\<log>-pgraph-shot-NNNNN.png`. Tras ~40 s el juego deja los avisos, abre
+`spr.afs` y pasa a una pantalla que solo limpia a negro (no hay geometría nueva que dibujar).
+Siguiente paso: averiguar qué espera ahí (mando conectado, carga de datos o vídeo) e
+interpretar los vertex programs para la geometría 3D.
+
 ## Deuda conocida
 
 - 106 de las 128 funciones que importa `default.xbe` tienen implementación (119 exports

@@ -68,7 +68,18 @@ static void format_args(char *out, size_t outlen, const ngb_kexport_t *e, const 
         snprintf(out + pos, outlen - pos, ", ...");
 }
 
+static uint64_t kcall(uint32_t ordinal, uint32_t *args, uint32_t caller);
+
 uint64_t ngb_kcall(uint32_t ordinal, uint32_t *args, uint32_t caller) {
+    ngb_thread_t *t = ngb_thread_current();
+    uint64_t ret;
+    ngb_kernel_enter(t);
+    ret = kcall(ordinal, args, caller);
+    ngb_kernel_leave(t);
+    return ret;
+}
+
+static uint64_t kcall(uint32_t ordinal, uint32_t *args, uint32_t caller) {
     const ngb_kexport_t *e = ngb_kexport(ordinal);
     ngb_thread_t *t = ngb_thread_current();
     uint32_t prev_ord = 0, prev_caller = 0;
@@ -104,7 +115,8 @@ uint64_t ngb_kcall(uint32_t ordinal, uint32_t *args, uint32_t caller) {
         t->inflight_caller = prev_caller;
     }
     if (g_ngb_opts.log_cap && ordinal <= NGB_MAX_ORDINAL &&
-        (unsigned long)g_counts[ordinal] > g_ngb_opts.log_cap) {
+        (unsigned long)g_counts[ordinal] > g_ngb_opts.log_cap &&
+        g_counts[ordinal] % 100000 != 0) { /* tras el tope, una muestra cada 100000 */
         if ((unsigned long)g_counts[ordinal] == g_ngb_opts.log_cap + 1)
             ngb_log("    · %s: más de %lu llamadas; a partir de aquí solo se cuentan", e->name,
                     g_ngb_opts.log_cap);

@@ -34,6 +34,7 @@ LOADER = Path(os.environ.get("NGB_LOADER", REPO_ROOT / "build" / "port" / "ngb-l
 EXIT_OK, EXIT_UNIMPLEMENTED, EXIT_CRASH = 0, 2, 3
 HOSTPATH_TEST = LOADER.parent / "hostpath_test.exe"
 PUSHBUF_TEST = LOADER.parent / "pushbuf_test.exe"
+RASTER_TEST = LOADER.parent / "raster_test.exe"
 
 
 @unittest.skipUnless(os.name == "nt" and LOADER.is_file(), "requiere Windows y el loader compilado")
@@ -149,6 +150,17 @@ class PushBufferTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("pushbuf_test: OK", result.stdout)
+
+
+@unittest.skipUnless(os.name == "nt" and RASTER_TEST.is_file(), "requiere el test C compilado")
+class RasterTest(unittest.TestCase):
+    def test_software_rasterizer(self) -> None:
+        """raster_test.exe: cobertura de un triángulo, textura 2x2, paleta, mezcla y alfa."""
+        result = subprocess.run(
+            [str(RASTER_TEST)], capture_output=True, text=True, timeout=30, check=False
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("raster_test: OK", result.stdout)
 
 
 if __name__ == "__main__":

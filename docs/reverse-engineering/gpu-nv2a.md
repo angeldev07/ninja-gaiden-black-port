@@ -4,7 +4,7 @@ updated: 2026-10-21
 status: current
 ---
 
-# GPU NV2A en el runtime nativo (H7a): hasta la pantalla de avisos
+# GPU NV2A en el runtime nativo (H7): la pantalla de avisos en una ventana
 
 El cargador nativo ([[arranque-nativo]], [[adr-05-runtime-nativo]]) ya **emula un mínimo de registros del NV2A** y
 decodifica el push buffer. Con eso, `default.xbe` pasa la inicialización de D3D8, envía frames y llega a la
@@ -64,9 +64,53 @@ Todo lo que sigue es `VERIFIED` por esos logs.
   - los dos búferes de 720x480 que se usan como textura.
 - El búfer de color está **negro**: todavía no se rasteriza, y el CLEAR es 0.
 
+## H7b: el primer frame visible (`VERIFIED`)
+
+**La pantalla de avisos se ve en una ventana del PC a 60 fps**: el rótulo "Warnings" con su brillo y el texto
+desplazándose y fundiéndose. Es el código del juego ejecutándose de forma nativa.
+
+- Comando: `build\port\ngb-loader.exe <default.xbe> --window`.
+- Capturas: el loader guarda una cada 300 frames (`<log>-pgraph-shot-NNNNN.png`); el líder revisó la de
+  `h7b-int-pgraph-shot-00600.png`.
+
+### Cómo se dibuja
+
+- **Rasterizador por software** (`port/src/gpu/raster.c`, código puro con 23 pruebas hechas a mano):
+  - triángulos con la posición ya en pantalla (XYZRHW), color difuso y texcoord0;
+  - muestreo por punto de A8R8G8B8, X8R8G8B8, R5G6B5, A8 e I8 con paleta, con o sin swizzle;
+  - textura × difuso, alpha test, blend con los factores GL del NV2A y corrección de perspectiva;
+  - las primitivas TRIANGLES, TRIANGLE_STRIP, TRIANGLE_FAN, QUADS, QUAD_STRIP y POLYGON.
+- **Métodos NV097 nuevos:**
+  - `SET_VERTEX_DATA_ARRAY_FORMAT`;
+  - `SET_BEGIN_END`: se dibuja al cerrar;
+  - `INLINE_ARRAY` y `SET_VERTEX_DATA4UB`;
+  - alpha test y blend.
+- **Presentador** (`port/src/gfx/present.c`, Win32/GDI): en cada `FLIP_STALL` copia el búfer de color de 720x480
+  a la ventana. Después espera al siguiente 1/60 s, lo que fija el ritmo (*pacing*). Con `--no-pacing` vuelve a
+  ir sin límite: unos 1 300 fps.
+- **Para el render acelerado** ya hay traductores de shaders ([[shaders-nv2a]]) y un backend OpenGL 4.6 en
+  `feat/gl-backend`. El rasterizador por software basta para los avisos, que son 2D.
+
+### Lo que hubo que arreglar en el kernel emulado
+
+- **`NtSuspendThread` aplazado.** El juego reparte trabajo entre hilos con Suspend/Resume, y podía congelar un
+  hilo que tenía tomado un lock del loader (kernel emulado, VEH del NV2A o IRQL ≥ DISPATCH). Ahora la suspensión
+  espera a que el hilo salga de ese código.
+- **Eventos limpiados en memoria.** D3D pone a 0 el `SignalState` de su evento de vblank directamente, sin
+  pasar por el kernel. `KeWaitFor*` ahora sincroniza el evento de Windows con la cabecera. Antes,
+  `BlockUntilVerticalBlank` volvía al instante unas 50 000 veces por segundo.
+- **Vigilante de inactividad:** una carrera hacía saltar "15 s sin llamadas" a los 5 s.
+
+### Hasta dónde llega
+
+1. La pantalla de avisos completa, unos 40 s.
+2. Después abre `spr.afs`, `zppln_*.afs` y los datos de guardado en `U:`.
+3. Pasa a una **pantalla en negro**: solo limpia y usa el back buffer como textura. No hay crash y los hilos
+   siguen vivos. `INFERRED`: espera algo, como entrada del mando, una carga o un vídeo.
+
 ## Siguiente
 
-1. **Rasterizar (H7b):** interpretar los métodos NV097 sobre OpenGL, con el traductor de shaders
-   (`feat/nv2a-shaders`) y el presentador en ventana (`feat/gfx-present`).
-2. Hacer que `FLIP_STALL` espere al vblank (pacing).
-3. Entrada del mando (XInput/XPP): sin ella no se sale de la pantalla de avisos.
+1. **Entrada del mando** (`feat/xinput-hle`): las pulsaciones ya llegan al juego. Toca probarla junto con el
+   pacing de H7b en la pantalla negra.
+2. Geometría 3D: vertex programs ([[shaders-nv2a]]) y dibujo desde arrays de vértices (`DRAW_ARRAYS`/`ARRAY_ELEMENT`)
+   sobre el backend OpenGL.
