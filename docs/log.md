@@ -184,3 +184,10 @@ Tras los avisos y el vídeo de introducción (congelado en su primer fotograma, 
 llega a la pantalla de título "PRESS START BUTTON". Antes hubo que implementar `XcSHAInit/Update/Final` y
 `XcHMAC`: SHA-1 propio, que el juego usa para verificar sus datos. Quedan abiertos el audio, que probablemente
 explica el vídeo congelado y los avisos repetidos, y pasar del título al menú. Detalle en [[gpu-nv2a]].
+
+## [2026-10-22] ingest | El vídeo de introducción se reproduce entero
+DirectSound lee la posición de cada voz en una tabla en RAM que en la Xbox avanza el hardware (el procesador de
+voces de la APU), y Sofdec sincroniza el vídeo con ella. Un VP mínimo (`port/src/apu/vp.c`) que interpreta los
+métodos PIO y avanza las voces activas con el tiempo real basta para que el vídeo avance y, al terminar, el juego
+siga solo. Todavía sin sonido. El líder hizo este trabajo en paralelo al agente de render GL. Detalle en
+[[audio-apu]].

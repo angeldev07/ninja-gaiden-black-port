@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "apu/vp.h"
 #include "gpu/nv2a.h"
 #include "kernel/kernel.h"
 
@@ -88,9 +89,47 @@ static const char *where(uint32_t eip) {
 #define MMIO_LOG_MAX 400
 
 static volatile LONG g_mmio_count;
-static __declspec(thread) uint32_t t_mmio_page, t_mmio_addr;
+static __declspec(thread) uint32_t t_mmio_page, t_mmio_addr, t_mmio_write;
 
 static volatile uint32_t g_apu_gpsaddr; /* NV_PAPU_GPSADDR: lista SG de la memoria del GP DSP */
+
+/* Procesador de voces (apu/vp.c): los métodos PIO llegan desde el hilo del juego que los
+ * escribe y el avance desde el hilo de DPC. El tick usa TryEnter: un hilo del juego
+ * suspendido con el lock tomado no puede colgar al hilo de DPC. */
+static vp_state_t g_vp;
+static CRITICAL_SECTION g_vp_lock;
+static INIT_ONCE g_vp_once = INIT_ONCE_STATIC_INIT;
+static LARGE_INTEGER g_vp_last, g_vp_freq;
+
+static BOOL CALLBACK vp_init_once(PINIT_ONCE once, PVOID param, PVOID *ctx) {
+    (void)once;
+    (void)param;
+    (void)ctx;
+    InitializeCriticalSection(&g_vp_lock);
+    vp_init(&g_vp);
+    QueryPerformanceFrequency(&g_vp_freq);
+    return TRUE;
+}
+
+static void vp_write(uint32_t addr, uint32_t value) {
+    InitOnceExecuteOnce(&g_vp_once, vp_init_once, NULL, NULL);
+    EnterCriticalSection(&g_vp_lock);
+    if (addr == 0xFE80202Cu) { /* NV_PAPU_VPVADDR: dirección física de la tabla de voces */
+        uint32_t phys = value & 0x07FFFF00u;
+        g_vp.voices = phys + VP_MAX_VOICES * VP_VOICE_SIZE <= NGB_CONTIG_SIZE
+                          ? (uint8_t *)(uintptr_t)(NGB_CONTIG_BASE + phys)
+                          : NULL;
+        ngb_log("    · APU: tabla de voces en 0x%08X (física 0x%08X)",
+                (uint32_t)(uintptr_t)g_vp.voices, phys);
+    } else {
+        vp_method(&g_vp, addr - 0xFE820000u, value);
+    }
+    LeaveCriticalSection(&g_vp_lock);
+}
+
+void ngb_apu_summary(void) {
+    ngb_log("apu: %u VOICE_ON, %u voces terminadas solas", g_vp.voices_on, g_vp.voices_ended);
+}
 
 /*
  * DSP falso (H7a, atajo): DSOUND arranca el GP DSP de la APU con su microcódigo y espera a
@@ -102,6 +141,18 @@ void ngb_apu_tick(void) {
     static int logged;
     uint32_t sg = g_apu_gpsaddr & ~3u, page;
     volatile uint32_t *mbox;
+    LARGE_INTEGER now;
+    InitOnceExecuteOnce(&g_vp_once, vp_init_once, NULL, NULL);
+    QueryPerformanceCounter(&now);
+    if (TryEnterCriticalSection(&g_vp_lock)) {
+        /* Tiempo real transcurrido; un salto grande (depurador, parada) se acota a 100 ms. */
+        double dt = g_vp_last.QuadPart
+                        ? (double)(now.QuadPart - g_vp_last.QuadPart) / (double)g_vp_freq.QuadPart
+                        : 0.0;
+        vp_advance(&g_vp, dt > 0.1 ? 0.1 : dt);
+        g_vp_last = now;
+        LeaveCriticalSection(&g_vp_lock);
+    }
     if (!sg || sg >= NGB_CONTIG_SIZE)
         return;
     page = *(volatile uint32_t *)(uintptr_t)(NGB_CONTIG_BASE + sg) & 0x07FFF000u;
@@ -116,9 +167,13 @@ void ngb_apu_tick(void) {
 }
 
 /* AC97: el bit RR (1) de los registros de control x_CR se limpia solo tras el reset. */
-static void mmio_after_step(uint32_t addr) {
-    if ((addr & ~3u) == 0xFE802040u)
+static void mmio_after_step(uint32_t addr, int write) {
+    uint32_t reg = addr & ~3u;
+    if (reg == 0xFE802040u)
         g_apu_gpsaddr = *(volatile uint32_t *)(uintptr_t)0xFE802040u;
+    /* Métodos PIO del procesador de voces y la base de su tabla. */
+    if (write && (reg == 0xFE80202Cu || (reg >= 0xFE820100u && reg < 0xFE820400u)))
+        vp_write(reg, *(volatile uint32_t *)(uintptr_t)reg);
     if (addr == 0xFEC0010Bu || addr == 0xFEC0011Bu || addr == 0xFEC0012Bu || addr == 0xFEC0017Bu)
         *(volatile uint8_t *)(uintptr_t)addr &= 0xFDu;
 }
@@ -174,6 +229,7 @@ static LONG mmio_access(EXCEPTION_RECORD *rec, CONTEXT *c) {
     }
     t_mmio_page = page;
     t_mmio_addr = addr;
+    t_mmio_write = rec->ExceptionInformation[0] != 0;
     c->EFlags |= 0x100; /* TF: una instrucción y vuelta aquí para cerrar la página */
     return EXCEPTION_CONTINUE_EXECUTION;
 }
@@ -241,7 +297,7 @@ static LONG CALLBACK on_exception(EXCEPTION_POINTERS *info) {
     if (rec->ExceptionCode == EXCEPTION_SINGLE_STEP && t_mmio_page) {
         c->EFlags &= ~0x100u;
         DWORD old;
-        mmio_after_step(t_mmio_addr);
+        mmio_after_step(t_mmio_addr, (int)t_mmio_write);
         VirtualProtect((void *)(uintptr_t)t_mmio_page, 0x1000, PAGE_NOACCESS, &old);
         t_mmio_page = 0;
         return EXCEPTION_CONTINUE_EXECUTION;

@@ -125,6 +125,7 @@ __declspec(noreturn) void ngb_stop(int code, const char *fmt, ...) {
     ngb_thread_dump_all();
     ngb_kernel_summary();
     ngb_input_summary();
+    ngb_apu_summary();
     ngb_log("==== FIN");
     ngb_log_flush();
     fprintf(stderr, "ngb-loader: STOP %s: %s\nlog: %s\n", exit_name(code), reason,

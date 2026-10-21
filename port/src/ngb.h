@@ -132,7 +132,8 @@ uint32_t ngb_tls_total_size(const xbe_t *xbe);
 
 /* crash.c */
 void ngb_crash_install(void);
-void ngb_apu_tick(void); /* DSP falso de la APU (lo llama el hilo de DPC) */
+void ngb_apu_tick(void);    /* DSP falso y procesador de voces (lo llama el hilo de DPC) */
+void ngb_apu_summary(void); /* contadores del procesador de voces, al log */
 
 /* symbols.c: nombres de funciones del XBE (--symbols, CSV de Ghidra en NGB_DATA) */
 int ngb_symbols_load(const char *path);
