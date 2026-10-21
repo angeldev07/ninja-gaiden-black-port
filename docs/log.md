@@ -110,3 +110,8 @@ observación en [[arranque-nativo]]. Próxima decisión, H7: emulación mínima 
 resuelve la FK del tronco y la IK de 2 huesos de los miembros. `ryu_anim.glb` incluye idle, andar, correr, salto,
 guardia con katana y tajo con giro, todo revisado en `anim_preview.png`. El formato está en [[mtn]]: 44 pistas,
 claves de 20 bits con signo, unidades de 1e-4 y los miembros por objetivo de IK.
+## [2026-10-21] ingest | Los 17 escenarios del juego en 3D
+`ngb_tools.stage` exporta las 17 zonas a `.glb`. Los KMD de escenario usan un **descriptor multiparte**, con los
+vértices ya en mundo y sin jerarquía; la misma variante explica que no se exportara el cuerpo de Doku. La colisión
+HITMDL también está descifrada. Renders revisados: Boff (ciudad de Tairon y fortaleza), la aldea Hayabusa y la
+catedral. La colocación de props está en el bytecode `.sty`, pendiente. Detalle en [[escenarios]].

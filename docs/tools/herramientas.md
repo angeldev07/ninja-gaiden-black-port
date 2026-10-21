@@ -44,6 +44,7 @@ git config core.hooksPath .githooks              # activa la guardia pre-commit
 | `ngb_tools.xpr` | Exporta las texturas de un XPR0 (suelto o dentro de un KMD) a PNG: DXT1/3/5, P8, A8, ARGB, des-swizzle | `python -I -m ngb_tools.xpr list|export <archivo> [--kmd]` | [[xpr0]] |
 | `ngb_tools.kmd` | Exporta modelos KMD a glTF 2.0 u OBJ, con jerarquía, materiales y texturas | `python -I -m ngb_tools.kmd info|export <kmd>` | [[kmd]] |
 | `ngb_tools.audio` | Decodifica ADX, Xbox ADPCM (.wva) y XWB a WAV; análisis con espectrograma | `python -I -m ngb_tools.audio adx|wva|xwb|analyze …` | [[adx]] |
+| `ngb_tools.stage` | Exporta escenarios completos (todas las partes de una zona) a glTF/GLB, con colisión opcional | `python -I -m ngb_tools.stage export <zona>` | [[escenarios]] |
 | `ngb_tools.hygiene` | Guardia que impide versionar datos del juego (hook y CI) | `python -m ngb_tools.hygiene [--staged]` | [[adr-03-datos-fuera-del-repo]] |
 
 ### `ngb_tools.afs`
@@ -144,3 +145,14 @@ python tools\gen_kernel_stubs.py [--check]                           :: regenera
 - Códigos de salida: 0 OK, 2 llamada sin implementar, 3 crash o MMIO, 4 `--max-calls`, 5 timeout o inactividad,
   6 el juego pidió apagar.
 - Diseño: [[adr-05-runtime-nativo]]. Lo que hace el juego al arrancar: [[arranque-nativo]].
+
+### `ngb_tools.stage`
+
+```sh
+python -I -m ngb_tools.stage export boff                    # → NGB_DATA/extracted/stages/boff/boff.glb (todas las partes)
+python -I -m ngb_tools.stage export ssato --parts 01,02,03,04,05
+python -I -m ngb_tools.stage export boff --collision        # añade la colisión HITMDL como malla translúcida
+python -I -m ngb_tools.stage info boff
+```
+
+- Junta las partes `<zona>_NN` de una zona; las variantes idénticas se exportan una vez. Formato: [[escenarios]].

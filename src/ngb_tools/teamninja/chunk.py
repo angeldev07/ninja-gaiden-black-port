@@ -101,6 +101,8 @@ def _read_offsets(data: bytes, table_pos: int, n_slots: int) -> list[int]:
 def _slots_from_offsets(offsets: list[int], limit: int) -> tuple[ChunkSlot, ...]:
     """Cada slot ocupado llega hasta el siguiente offset mayor; el último, hasta `limit`."""
     used = sorted({offset for offset in offsets if offset})
+    if not used:  # chunk sin slots ocupados (HITMDL de un escenario sin colisión)
+        return ()
     ends = dict(zip(used, [*used[1:], limit], strict=True))
     return tuple(
         ChunkSlot(index, offset, ends[offset]) for index, offset in enumerate(offsets) if offset

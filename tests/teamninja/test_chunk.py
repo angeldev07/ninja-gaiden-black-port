@@ -53,6 +53,11 @@ class ParseChunkTests(unittest.TestCase):
         self.assertEqual(chunk.size, 0x40)
         self.assertEqual(chunk.slots[-1].end, len(data))
 
+    def test_chunk_without_used_slots_has_no_slots(self) -> None:
+        # Como el HITMDL de los escenarios sin colisión: tabla entera a 0.
+        chunk = parse_chunk(build_chunk(b"HITMDL", [None, None]))
+        self.assertEqual((chunk.n_slots, chunk.n_used, chunk.slots), (2, 0, ()))
+
     def test_truncated_header_is_a_format_error(self) -> None:
         with self.assertRaises(ChunkFormatError):
             parse_chunk(b"KMD\0" + bytes(8))
