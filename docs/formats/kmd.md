@@ -140,4 +140,4 @@ La espada de Ryu no está en `ryu.kmd`.
 - R ≠ 0 (orden de rotación desconocido).
 - Semántica de los pesos del skin.
 - Estados de material: blend aditivo, alfa de las DXT5 y etapas extra.
-- MORPH y animaciones (`chr_dat`/`.mtn`, [[chunk-teamninja]]).
+- MORPH (las animaciones ya están: [[mtn]]).

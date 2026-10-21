@@ -97,6 +97,8 @@ python -I -m ngb_tools.kmd info   %USERPROFILE%\ngb-data\extracted\chr_ryu\0000_
 python -I -m ngb_tools.kmd export %USERPROFILE%\ngb-data\extracted\chr_ryu\0000_ryu.kmd             # → NGB_DATA\extracted\models\0000_ryu\
 python -I -m ngb_tools.kmd export <kmd> --format obj      # OBJ + MTL (posiciones de mundo)
 python -I -m ngb_tools.kmd export <kmd> --skin --all-groups
+python -I -m ngb_tools.kmd export <kmd> --format glb     # un solo archivo con texturas incrustadas
+python -I -m ngb_tools.kmd export <ryu.kmd> --format glb --motions <ryu.mtn>:1,3,90,36 --motions <rm_kt.mot>:141,151
 ```
 
 - glTF 2.0 (`.gltf` + `.bin`): un nodo por hueso de HIERARC, una malla por objeto y una primitiva por submalla en

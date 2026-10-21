@@ -10,13 +10,17 @@ sin darse cuenta. Lo que revisa:
 - conteos iguales en los atributos de una primitiva;
 - índices de triángulos múltiplos de 3 y menores que el número de vértices;
 - un árbol de nodos sin ciclos ni hijos con dos padres;
-- skins con una matriz por joint.
+- skins con una matriz por joint;
+- imágenes incrustadas (GLB) con bufferView y mimeType;
+- animaciones: samplers con tiempos crecientes y conteos iguales, y canales hacia nodos
+  existentes con salida del tipo de su ruta.
 
 `read_accessor` decodifica un accessor y lo reutiliza el render de validación.
 """
 
 from __future__ import annotations
 
+import itertools
 import json
 import struct
 from collections.abc import Sequence
@@ -169,10 +173,63 @@ def _check_materials(gltf: dict[str, Any], base: Path | None, errors: list[str])
             _check_ref(
                 errors, f"textures[{i}].sampler", texture["sampler"], gltf.get("samplers", [])
             )
-    if base is not None:
-        for i, image in enumerate(images):
-            if not (base / unquote(image["uri"])).is_file():
-                errors.append(f"images[{i}]: no existe {image['uri']}")
+    for i, image in enumerate(images):
+        if "bufferView" in image:
+            _check_ref(errors, f"images[{i}].bufferView", image["bufferView"], gltf["bufferViews"])
+            if image.get("mimeType") != "image/png" or "uri" in image:
+                errors.append(f"images[{i}]: incrustada sin mimeType PNG o con uri")
+        elif base is not None and not (base / unquote(image["uri"])).is_file():
+            errors.append(f"images[{i}]: no existe {image['uri']}")
+
+
+PATH_TYPES = {"translation": "VEC3", "rotation": "VEC4", "scale": "VEC3"}
+
+
+def _check_animations(gltf: dict[str, Any], data: bytes, errors: list[str]) -> None:
+    accessors, nodes = gltf.get("accessors", []), gltf.get("nodes", [])
+    for a, animation in enumerate(gltf.get("animations", [])):
+        samplers = animation.get("samplers", [])
+        for s, sampler in enumerate(samplers):
+            where = f"animations[{a}].samplers[{s}]"
+            refs = (sampler.get("input"), sampler.get("output"))
+            if not all(_check_ref(errors, where, r, accessors) for r in refs):
+                continue
+            source, output = (accessors[r] for r in refs)
+            if source["count"] != output["count"] or "min" not in source:
+                errors.append(f"{where}: input/output con conteos distintos o sin min/max")
+            times = [v[0] for v in read_accessor(gltf, data, sampler["input"])]
+            if any(b <= a for a, b in itertools.pairwise(times)):
+                errors.append(f"{where}: tiempos no crecientes")
+            if sampler.get("interpolation", "LINEAR") not in ("LINEAR", "STEP", "CUBICSPLINE"):
+                errors.append(f"{where}: interpolación inválida")
+        for c, channel in enumerate(animation.get("channels", [])):
+            where = f"animations[{a}].channels[{c}]"
+            target = channel.get("target", {})
+            ok = _check_ref(errors, f"{where}.sampler", channel.get("sampler"), samplers)
+            ok &= _check_ref(errors, f"{where}.node", target.get("node"), nodes)
+            path = target.get("path")
+            if path not in PATH_TYPES:
+                errors.append(f"{where}: path {path!r} inválido")
+            elif ok:
+                output = accessors[samplers[channel["sampler"]]["output"]]
+                if output["type"] != PATH_TYPES[path]:
+                    errors.append(f"{where}: salida {output['type']} para {path}")
+
+
+def load_glb(blob: bytes) -> tuple[dict[str, Any], bytes]:
+    """JSON y chunk BIN de un GLB, comprobando cabecera, tipos de chunk y alineación."""
+    magic, version, total = struct.unpack_from("<4sII", blob, 0)
+    if magic != b"glTF" or version != 2 or total != len(blob):
+        raise ValueError(f"cabecera GLB inválida: {magic!r} v{version} {total}/{len(blob)}")
+    json_len, json_type = struct.unpack_from("<II", blob, 12)
+    bin_at = 20 + json_len
+    bin_len, bin_type = struct.unpack_from("<II", blob, bin_at)
+    if json_type != 0x4E4F534A or bin_type != 0x004E4942 or json_len % 4 or bin_len % 4:
+        raise ValueError("chunks GLB con tipo o alineación inválidos")
+    if bin_at + 8 + bin_len != total:
+        raise ValueError("el chunk BIN no llega al final del GLB")
+    gltf = json.loads(blob[20:bin_at].decode("utf-8"))
+    return gltf, blob[bin_at + 8 : bin_at + 8 + bin_len]
 
 
 def _check_skins(gltf: dict[str, Any], errors: list[str]) -> None:
@@ -201,4 +258,5 @@ def validate(gltf: dict[str, Any], data: bytes, base: Path | None = None) -> lis
     _check_nodes(gltf, errors)
     _check_materials(gltf, base, errors)
     _check_skins(gltf, errors)
+    _check_animations(gltf, data, errors)
     return errors

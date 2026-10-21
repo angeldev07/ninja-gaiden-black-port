@@ -104,3 +104,9 @@ crea su hilo, inicializa XAPI, monta las unidades, escribe metadatos en U:, form
 dispositivos USB y arranca D3D8, hasta la primera lectura de la GPU (`0xFD001804`, NV_PBUS, en `EIP 0x003D171B`).
 Son 285 llamadas al kernel. El líder lo reprodujo de forma independiente. Decisiones en [[adr-05-runtime-nativo]];
 observación en [[arranque-nativo]]. Próxima decisión, H7: emulación mínima del NV2A frente a HLE de D3D8.
+
+## [2026-10-21] ingest | Ryu animado: formato MTN descifrado
+`ngb_tools.kmd` exporta animaciones: `--motions banco[:ids]` sobre `--format glb`, con un rig humanoide que
+resuelve la FK del tronco y la IK de 2 huesos de los miembros. `ryu_anim.glb` incluye idle, andar, correr, salto,
+guardia con katana y tajo con giro, todo revisado en `anim_preview.png`. El formato está en [[mtn]]: 44 pistas,
+claves de 20 bits con signo, unidades de 1e-4 y los miembros por objetivo de IK.

@@ -1,4 +1,4 @@
-"""Exportación a glTF 2.0 (`.gltf` JSON + `.bin`) con la stdlib.
+"""Exportación a glTF 2.0 (`.gltf` JSON + `.bin`, o un `.glb` autocontenido) con la stdlib.
 
 - **Nodos:** uno por objeto exportado y por cada antepasado suyo en HIERARC (aunque no se
   exporte su malla), con su traslación local de OBJINFO y su escala si no es 1. Una escala 0
@@ -23,6 +23,11 @@
   semántica INFERRED. Las matrices inversas de bind son traslaciones a -mundo(joint). Sin
   skin, cada pieza va rígida en su nodo padre, igual que en el spike.
 
+- **Animaciones (`animations`, opcional):** clips de `ngb_tools.kmd.animation` (los genera
+  `ngb_tools.kmd.rig` a partir de las motions). Cada canal da un sampler LINEAR con su
+  traslación o rotación por instante, y todos los samplers de un clip comparten la misma
+  entrada de tiempos.
+
 Grupos: por defecto solo detalle (1) y skin (4). LOD, sombra y efecto (`groups=None`)
 salen como objetos aparte que se solapan con el cuerpo.
 """
@@ -38,6 +43,7 @@ from typing import Any, Final
 from urllib.parse import quote
 
 from ngb_tools._paths import atomic_write_bytes, ensure_outside_repos
+from ngb_tools.kmd.animation import ROTATION, AnimationClip
 from ngb_tools.kmd.model import KmdModel
 from ngb_tools.kmd.objinfo import ObjectGroup, Vec3, group_name
 from ngb_tools.kmd.vertices import VertexData
@@ -59,10 +65,11 @@ type Json = dict[str, Any]
 
 @dataclass(frozen=True, slots=True)
 class ExportOptions:
-    """Qué exportar: grupos de OBJINFO (`None` = todos) y si se crea la skin."""
+    """Qué exportar: grupos de OBJINFO (`None` = todos), si se crea la skin y los clips."""
 
     groups: frozenset[int] | None = DEFAULT_GROUPS
     skin: bool = False
+    animations: tuple[AnimationClip, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +82,7 @@ class ExportStats:
     primitives: int
     materials: int
     warnings: tuple[str, ...]
+    animations: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +199,7 @@ class _GltfWriter:
         self.textures: list[Json] = []
         self.texture_index: dict[int, int] = {}
         self.joint_slot: dict[int, int] = {}
+        self.animation_count = 0
         self.warnings: list[str] = []
         self.vertices = self.triangles = self.primitives = 0
 
@@ -383,8 +392,44 @@ class _GltfWriter:
         }
         if joints:
             gltf["skins"] = [self._skin(joints, node_of)]
+        animations = [self._animation(clip, node_of) for clip in options.animations]
+        if animations:
+            gltf["animations"] = animations
         self._finish(gltf)
         return gltf
+
+    def _animation(self, clip: AnimationClip, node_of: Mapping[int, int]) -> Json:
+        """Un clip: un sampler LINEAR por canal, todos con la misma entrada de tiempos."""
+        times = clip.times
+        bounds = ([_f32(times[0])], [_f32(times[-1])]) if times else None
+        source = self.buffer.add(
+            _floats(times), component=FLOAT, count=len(times), kind="SCALAR", target=None,
+            bounds=bounds,
+        )  # fmt: skip
+        samplers: list[Json] = []
+        channels: list[Json] = []
+        for channel in clip.channels:
+            if channel.obj not in node_of or len(channel.values) != len(times):
+                self.warnings.append(f"{clip.name}: canal de obj{channel.obj} sin nodo, saltado")
+                continue
+            kind = "VEC4" if channel.path == ROTATION else "VEC3"
+            output = self.buffer.add(
+                _floats(v for value in channel.values for v in value),
+                component=FLOAT,
+                count=len(channel.values),
+                kind=kind,
+                target=None,
+            )
+            samplers.append({"input": source, "output": output, "interpolation": "LINEAR"})
+            target = {"node": node_of[channel.obj], "path": channel.path}
+            channels.append({"sampler": len(samplers) - 1, "target": target})
+        self.animation_count += 1
+        return {
+            "name": clip.name,
+            "channels": channels,
+            "samplers": samplers,
+            "extras": dict(clip.extras),
+        }
 
     def _node(
         self, obj: int, node_of: Mapping[int, int], needed: set[int], with_mesh: bool
@@ -442,6 +487,11 @@ class _GltfWriter:
             gltf["accessors"] = self.buffer.accessors
             gltf["bufferViews"] = self.buffer.views
 
+    def image_files(self) -> list[Path]:
+        """PNG de cada imagen, en el orden de `images`."""
+        by_slot = sorted(self.texture_index.items(), key=lambda item: item[1])
+        return [self.files[ordinal] for ordinal, _ in by_slot]
+
     def stats(self) -> ExportStats:
         objects = sum(1 for node in self.nodes if "mesh" in node)
         return ExportStats(
@@ -451,6 +501,7 @@ class _GltfWriter:
             primitives=self.primitives,
             materials=len(self.materials),
             warnings=tuple(self.warnings),
+            animations=self.animation_count,
         )
 
 
@@ -486,3 +537,62 @@ def write_gltf(
     # El .gltf da por buena la exportación: va el último y con fsync.
     atomic_write_bytes(gltf_path, text.encode("utf-8"), fsync=True)
     return (gltf_path, bin_path), stats
+
+
+GLB_MAGIC: Final = b"glTF"
+GLB_VERSION: Final = 2
+GLB_JSON: Final = 0x4E4F534A
+GLB_BIN: Final = 0x004E4942
+
+
+def pack_glb(gltf: Json, data: bytes) -> bytes:
+    """Contenedor GLB: cabecera de 12 bytes, chunk JSON (relleno con espacios) y chunk BIN."""
+    text = json.dumps(gltf, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    text += b" " * (-len(text) % 4)
+    binary = data + bytes(-len(data) % 4)
+    total = 12 + 8 + len(text) + 8 + len(binary)
+    return (
+        struct.pack("<4sII", GLB_MAGIC, GLB_VERSION, total)
+        + struct.pack("<II", len(text), GLB_JSON)
+        + text
+        + struct.pack("<II", len(binary), GLB_BIN)
+        + binary
+    )
+
+
+def build_glb(
+    model: KmdModel, texture_files: Mapping[int, Path], options: ExportOptions
+) -> tuple[bytes, ExportStats]:
+    """GLB autocontenido: el buffer y los PNG van incrustados (bufferView + mimeType)."""
+    writer = _GltfWriter(model, texture_files, Path.cwd(), options)
+    gltf = writer.build()
+    data = bytearray(writer.buffer.data)
+    views = gltf.setdefault("bufferViews", [])
+    for image, path in zip(gltf.get("images", []), writer.image_files(), strict=True):
+        png = path.read_bytes()
+        data += bytes(-len(data) % 4)
+        views.append({"buffer": 0, "byteOffset": len(data), "byteLength": len(png)})
+        data += png
+        image.pop("uri", None)
+        image["bufferView"] = len(views) - 1
+        image["mimeType"] = "image/png"
+    if not views:
+        del gltf["bufferViews"]
+    gltf["buffers"] = [{"byteLength": len(data)}]
+    return pack_glb(gltf, bytes(data)), writer.stats()
+
+
+def write_glb(
+    model: KmdModel,
+    out_dir: Path,
+    stem: str,
+    texture_files: Mapping[int, Path],
+    options: ExportOptions,
+) -> tuple[Path, ExportStats]:
+    """Escribe `<stem>.glb` (atómico, con fsync) fuera de los repos."""
+    out = ensure_outside_repos(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    glb_path = out / f"{stem}.glb"
+    blob, stats = build_glb(model, texture_files, options)
+    atomic_write_bytes(glb_path, blob, fsync=True)
+    return glb_path, stats
