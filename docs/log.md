@@ -164,3 +164,9 @@ HLE de las 8 funciones de entrada de XAPI, con un guion determinista (`--input-s
 teclado. START y A llegan al juego (comprobado en su memoria), pero la pantalla negra que sigue a los avisos no
 cambia. Hipótesis: es un vídeo de Sofdec (`movie\*.sfd`) esperando al reloj del audio, que no avanza sin APU.
 Detalle en [[entrada-xapi]].
+
+## [2026-10-22] ingest | Backend OpenGL y validación de los shaders
+Con un backend OpenGL 4.6 propio (WGL, sin dependencias), los 18 shaders reales del juego traducidos por
+`port/src/shaders/` compilan y enlazan en el driver. `texconv` convierte las texturas del NV2A (swizzle, P8,
+DXT, con signo, cube) igual que `ngb_tools.xpr`, y `glstate` traduce el estado NV097. Aún no está enganchado al
+runtime. Detalle en [[shaders-nv2a]].

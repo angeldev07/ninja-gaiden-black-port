@@ -50,8 +50,9 @@ copiar código GPL y sin tocar el XDK.
 ## Pruebas
 
 - `port/tests/shaders_test.c`: 219 comprobaciones, con instrucciones codificadas a mano palabra a palabra.
-- **El GLSL todavía no se ha compilado nunca**: no hay glslangValidator, así que de momento solo se valida el texto.
-  Se validará al compilarlo en el backend de OpenGL.
+- **Compilado con el driver real (`VERIFIED`)**: los **18 shaders reales** (16 vertex programs y 2 pixel shaders)
+  compilan y enlazan en OpenGL 4.6 (AMD RX 6600), sin tocar el emisor. Lo mismo las 62 variantes del modo
+  `--stress` de `gl_test`, que cubre cada operación, cada mapeo y cada modo de textura. Solo se ha probado en AMD.
 
 ## Pendiente
 
@@ -59,3 +60,26 @@ copiar código GPL y sin tocar el XDK.
 - Niebla no lineal, oB0/oB1 según la cara y el offset de medio píxel.
 - Alpha test, color key y alpha kill.
 - Juntar los programas que llegan por push buffer (`0x0B00` + LOAD/START) en el intérprete PGRAPH.
+
+## Backend OpenGL (`port/src/gl/`)
+
+Todavía no está enganchado al intérprete PGRAPH: es la base para el render acelerado de la geometría 3D.
+
+- **`glbackend`:**
+  - contexto GL 4.x por WGL, con un loader propio (`wglGetProcAddress`, sin dependencias);
+  - render offscreen en un FBO de 720x480;
+  - atributos en los formatos de `SET_VERTEX_DATA_ARRAY_FORMAT` (float, D3DCOLOR, short normalizado y CMP
+    11:11:10) y dibujo indexado.
+- **`texconv`:** convierte las texturas del NV2A a GL.
+  - Formatos empaquetados (con swizzle y lineales), P8 con paleta y DXT1/3/5. Los DXT se suben comprimidos con
+    S3TC si el driver lo admite.
+  - Con signo: V8U8 y L6V5U5. También cube maps y mipmaps.
+  - **Coincide byte a byte con `ngb_tools.xpr` en 28 vectores sintéticos** (`texconv_test`).
+- **`glstate`:** traduce a GL el estado de los métodos NV097 (blend, depth, stencil, cull, color mask, scissor,
+  alpha test y fog). La cara frontal se invierte porque el VS traducido invierte la Y.
+- **Prueba visual:** `gl_test` dibuja en `NGB_DATA\runs\shots\gl_test.png`:
+  - un triángulo con microcódigo NV2A codificado a mano;
+  - un tablero;
+  - un quad DXT1 y otro P8 con swizzle;
+  - una banda translúcida.
+  El líder revisó la captura.

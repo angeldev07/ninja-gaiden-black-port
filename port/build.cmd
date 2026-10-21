@@ -61,5 +61,7 @@ rem 4) Prueba del presentador de frames (gfx\present.c). Abre una ventana: no se
 rem    aquí (tests\port\test_gfx.py la lanza oculta con --frames 3 --hidden).
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\gfx_test.pdb" /Fe"%OUT%\gfx_test.exe" "%PORT%tests\gfx_test.c" "%SRC%\gfx\present.c" user32.lib gdi32.lib || exit /b 1
 
+cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\gl_test.pdb" /Fe"%OUT%\gl_test.exe" "%PORT%tests\gl_test.c" "%SRC%\gl\glbackend.c" "%SRC%\gl\glload.c" "%SRC%\gl\glpng.c" "%SRC%\gl\texconv.c" "%SRC%\gl\glstate.c" "%SRC%\shaders\vsh.c" "%SRC%\shaders\psh.c" "%SRC%\shaders\emit.c" opengl32.lib user32.lib gdi32.lib || exit /b 1
+cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\texconv_test.pdb" /Fe"%OUT%\texconv_test.exe" "%PORT%tests\texconv_test.c" "%SRC%\gl\texconv.c" "%SRC%\gl\glstate.c" "%SRC%\gl\glbackend.c" "%SRC%\gl\glload.c" opengl32.lib user32.lib gdi32.lib && "%OUT%\texconv_test.exe" || exit /b 1
 echo build: %OUT%\ngb-loader.exe + ngb-core.dll
 endlocal

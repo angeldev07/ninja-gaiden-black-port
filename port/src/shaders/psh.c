@@ -458,7 +458,24 @@ int nv2a_psh_to_glsl(const psh_program *p, char *out, size_t outlen) {
               "uniform vec4 psC0[%d];\nuniform vec4 psC1[%d];\n"
               "uniform vec4 psFinalC0;\nuniform vec4 psFinalC1;\nuniform vec4 fogColor;\n"
               "uniform mat2 bumpMat[%d];\nuniform float bumpScale[%d];\n"
-              "uniform float bumpOffset[%d];\nout vec4 fragColor;\n\nvoid main() {\n",
+              "uniform float bumpOffset[%d];\nuniform int alphaTest;\nuniform int alphaFunc;\n"
+              "uniform float alphaRef;\nout vec4 fragColor;\n\n"
+              "/* Alpha test (estado fijo del NV2A, ver port/src/gl/glstate.c): alphaFunc es\n"
+              " * GL_NEVER + n y se compara en 8 bits, como el hardware. */\n"
+              "bool nv_alpha_pass(float a) {\n"
+              "    int ia = int(clamp(a, 0.0, 1.0) * 255.0 + 0.5);\n"
+              "    int ir = int(clamp(alphaRef, 0.0, 1.0) * 255.0 + 0.5);\n"
+              "    switch (alphaFunc - 0x200) {\n"
+              "    case 0: return false;\n"
+              "    case 1: return ia < ir;\n"
+              "    case 2: return ia == ir;\n"
+              "    case 3: return ia <= ir;\n"
+              "    case 4: return ia > ir;\n"
+              "    case 5: return ia != ir;\n"
+              "    case 6: return ia >= ir;\n"
+              "    default: return true;\n"
+              "    }\n"
+              "}\n\nvoid main() {\n",
               PSH_MAX_STAGES, PSH_MAX_STAGES, PSH_TEXTURES, PSH_TEXTURES, PSH_TEXTURES);
     for (i = 0; i < PSH_TEXTURES; i++) {
         emit_texture(&b, p, i);
@@ -472,7 +489,7 @@ int nv2a_psh_to_glsl(const psh_program *p, char *out, size_t outlen) {
         emit_stage(&b, p, i);
     }
     emit_final(&b, &p->final);
-    glsl_emit(&b, "}\n");
+    glsl_emit(&b, "    if (alphaTest != 0 && !nv_alpha_pass(fragColor.a)) discard;\n}\n");
     result = glsl_buf_result(&b);
     if (result < 0) {
         if (outlen) {
