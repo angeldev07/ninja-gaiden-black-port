@@ -59,6 +59,9 @@ void vp_method(vp_state_t *s, uint32_t method, uint32_t value) {
     case VP_PIO_SET_CURRENT_VOICE:
         s->current = (uint16_t)handle;
         return;
+    case VP_PIO_SET_CURRENT_INBUF_SGE:
+        s->inbuf_sge = value;
+        return;
     default:
         break;
     }
@@ -67,6 +70,10 @@ void vp_method(vp_state_t *s, uint32_t method, uint32_t value) {
         return;
     if (method >= VP_PIO_SET_VOICE_CFG_VBIN && method <= VP_PIO_SET_VOICE_CFG_MISC && !(method & 3)) {
         *word(v, method - VP_PIO_SET_VOICE_CFG_VBIN) = value;
+        return;
+    }
+    if (method >= VP_PIO_SET_VOICE_TAR_VOLA && method <= VP_PIO_SET_VOICE_TAR_VOLC && !(method & 3)) {
+        *word(v, 0x60 + (method - VP_PIO_SET_VOICE_TAR_VOLA)) = value;
         return;
     }
     switch (method) {
@@ -103,38 +110,51 @@ void vp_advance(vp_state_t *s, double seconds) {
         return;
     for (h = 0; h < VP_MAX_VOICES; h++) {
         uint8_t *v;
-        uint32_t state, cbo, ebo, lbo, step;
         double total;
-        if (!s->active[h])
-            continue;
-        v = voice_at(s, h);
-        state = *word(v, VP_VOICE_PAR_STATE);
-        if (!(state & VP_STATE_ACTIVE)) { /* DirectSound la apagó escribiendo en la tabla */
-            s->active[h] = 0;
-            continue;
-        }
-        /* El hardware empieza a procesar la voz: deja de ser nueva y su posición es válida. */
-        state &= ~VP_STATE_NEW_VOICE;
-        *word(v, VP_VOICE_PAR_STATE) = state;
-        if (state & VP_STATE_PAUSED)
+        uint32_t step;
+        if ((v = vp_voice_begin(s, h)) == NULL)
             continue;
         total = s->frac[h] + seconds * vp_voice_rate(v);
         step = (uint32_t)floor(total + 1e-7); /* 99,9999999 muestras son 100 */
         s->frac[h] = total > step ? total - step : 0.0;
-        cbo = *word(v, VP_VOICE_PAR_OFFSET) & VP_OFFSET_MASK;
-        ebo = *word(v, VP_VOICE_PAR_NEXT) & VP_OFFSET_MASK;
-        lbo = *word(v, VP_VOICE_CUR_PSH_SAMPLE) & VP_OFFSET_MASK;
-        cbo += step;
-        if (cbo > ebo) {
-            if ((*word(v, VP_VOICE_CFG_FMT) & VP_FMT_LOOP) && lbo <= ebo) {
-                cbo = lbo + (cbo - ebo - 1) % (ebo - lbo + 1);
-            } else { /* fin del búfer: la voz se apaga sola */
-                cbo = ebo;
-                *word(v, VP_VOICE_PAR_STATE) = state & ~VP_STATE_ACTIVE;
-                s->active[h] = 0;
-                s->voices_ended++;
-            }
-        }
-        set_low24(v, VP_VOICE_PAR_OFFSET, cbo);
+        vp_voice_move(s, h, v, step);
     }
+}
+
+uint8_t *vp_voice_begin(vp_state_t *s, uint32_t h) {
+    uint8_t *v;
+    uint32_t state;
+    if (!s->voices || h >= VP_MAX_VOICES || !s->active[h])
+        return NULL;
+    v = voice_at(s, h);
+    state = *word(v, VP_VOICE_PAR_STATE);
+    if (!(state & VP_STATE_ACTIVE)) { /* DirectSound la apagó escribiendo en la tabla */
+        s->active[h] = 0;
+        return NULL;
+    }
+    /* El hardware empieza a procesar la voz: deja de ser nueva y su posición es válida. */
+    state &= ~VP_STATE_NEW_VOICE;
+    *word(v, VP_VOICE_PAR_STATE) = state;
+    return (state & VP_STATE_PAUSED) ? NULL : v;
+}
+
+int vp_voice_move(vp_state_t *s, uint32_t h, uint8_t *v, uint32_t step) {
+    uint32_t cbo = *word(v, VP_VOICE_PAR_OFFSET) & VP_OFFSET_MASK;
+    uint32_t ebo = *word(v, VP_VOICE_PAR_NEXT) & VP_OFFSET_MASK;
+    uint32_t lbo = *word(v, VP_VOICE_CUR_PSH_SAMPLE) & VP_OFFSET_MASK;
+    int alive = 1;
+    cbo += step;
+    if (cbo > ebo) {
+        if ((*word(v, VP_VOICE_CFG_FMT) & VP_FMT_LOOP) && lbo <= ebo) {
+            cbo = lbo + (cbo - ebo - 1) % (ebo - lbo + 1);
+        } else { /* fin del búfer: la voz se apaga sola */
+            cbo = ebo;
+            *word(v, VP_VOICE_PAR_STATE) &= ~VP_STATE_ACTIVE;
+            s->active[h] = 0;
+            s->voices_ended++;
+            alive = 0;
+        }
+    }
+    set_low24(v, VP_VOICE_PAR_OFFSET, cbo);
+    return alive;
 }

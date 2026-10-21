@@ -41,10 +41,38 @@ El código está en `port/src/apu/vp.c`.
 **El vídeo de introducción se reproduce entero** (el mar tormentoso y después las montañas al amanecer) y al
 terminar el juego sigue solo. El líder revisó las capturas `vp2-pgraph-shot-09900.png` y `-10200.png`.
 
+## Sonido real (`port/src/apu/mix.c` y `audio_out.c`)
+
+- **Lectura de muestras:**
+  - la dirección es `BA + CBO · tamaño_de_bloque`, en un espacio lineal de páginas de 4 KB;
+  - cada página se traduce con la tabla SGE (`NV_PAPU_VPSGEADDR`, entradas de 8 bytes con la página física);
+  - formatos: U8, S16, S24 y S32, y ADPCM de Xbox (IMA, 36 bytes y 64 muestras por canal y bloque).
+- **La tabla SGE no la escribe DirectSound en RAM:** la programa por PIO, con `SET_CURRENT_INBUF_SGE` (`0x804`)
+  para elegir la entrada y `SET_CURRENT_INBUF_SGE_OFFSET` (`0x808`) para escribir la página. Sin esto se leía
+  basura.
+- **Direcciones físicas fuera de la RAM contigua:** el búfer de audio de Sofdec vive en memoria normal del proceso,
+  y `MmGetPhysicalAddress` devuelve la identidad para esa memoria (issue #31). El lector de la APU acepta esas
+  direcciones si están mapeadas.
+- **Volúmenes:**
+  - DirectSound los fija por PIO (`SET_VOICE_TAR_VOLA/B/C`, `0x360-0x368`): 8 atenuaciones de 12 bits, de 1/64 dB
+    por paso, y `0xFFF` es silencio;
+  - el slot b lleva el canal `b % canales` al mixbin que diga `CFG_VBIN`/`CFG_FMT`;
+  - mixbins 0 y 1, frontales; 2, central; 4 y 5, traseros (se mezclan a estéreo).
+- **Voces internas de DirectSound** (en NGB, las 64-67, en bucle sobre 32 muestras): en la Xbox las rellena el DSP
+  con la mezcla de efectos. Sin DSP serían ruido a volumen máximo, así que avanzan pero no se oyen.
+- **Salida:**
+  - `waveOut` a 48 kHz, estéreo y 16 bits;
+  - el hilo de DPC mezcla en cada tick lo que corresponde al tiempo real, y se descarta lo que pase de 150 ms de
+    cola;
+  - `--mute` quita el sonido;
+  - `--audio-wav` guarda la mezcla en `<log>-audio.wav`.
+- **Verificado:** el audio del vídeo de introducción suena entre los 40 y los 58 s, con un nivel que varía segundo a
+  segundo (RMS de 600 a 4 500) y una autocorrelación de 0,93-0,99, propia de una señal real. El ruido daría ~0. El
+  WAV es `NGB_DATA\runs\aud9.log-audio.wav`.
+
 ## Pendiente
 
-- **Sonido real:** leer las muestras de cada voz (PCM o ADPCM de Xbox; ver [[adx]] y [[wva]] para los formatos
-  de los datos), mezclarlas con su volumen y sacarlas por WASAPI.
-- Las notificaciones de fin de voz que DirectSound espera para los sonidos de una sola vez.
-- Los avisos se repiten en bucle unos 2 minutos antes del vídeo. **No depende del VP**: el vídeo sigue empezando
-  hacia los 3,4 M de llamadas al kernel.
+- La reverberación y los efectos (el DSP GP/EP no se emula).
+- Las voces de stream (SSL) y las notificaciones de fin de voz.
+- Las voces 3D (HRTF).
+- Comprobar de oído la música del menú y los efectos del juego.

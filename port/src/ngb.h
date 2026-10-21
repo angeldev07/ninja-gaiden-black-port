@@ -55,6 +55,8 @@ typedef struct ngb_options {
     const char *input_script; /* pulsaciones automáticas (input/input.h), opcional */
     int no_host_input;        /* 1: ni mando de PC ni teclado, solo el guion */
     const char *watch;        /* --watch: direcciones del juego a vigilar (watch.c) */
+    int mute;                 /* --mute: sin salida de audio (el VP sigue avanzando) */
+    int audio_wav;            /* --audio-wav: guarda la mezcla en <log>-audio.wav */
 } ngb_options_t;
 
 /* --renderer: AUTO = OpenGL si hay ventana y contexto 4.x; si no, el rasterizador. */

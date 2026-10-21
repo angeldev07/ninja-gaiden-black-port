@@ -5,9 +5,12 @@
  */
 #include "ngb.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
+#include "apu/audio_out.h"
+#include "apu/mix.h"
 #include "apu/vp.h"
 #include "gpu/nv2a.h"
 #include "kernel/kernel.h"
@@ -100,6 +103,45 @@ static vp_state_t g_vp;
 static CRITICAL_SECTION g_vp_lock;
 static INIT_ONCE g_vp_once = INIT_ONCE_STATIC_INIT;
 static LARGE_INTEGER g_vp_last, g_vp_freq;
+static mix_ctx_t g_mix;      /* lectura de muestras y caché ADPCM (apu/mix.c) */
+static int g_audio = -1;     /* -1 sin abrir, 0 sin dispositivo, 1 sonando */
+static double g_audio_frac;  /* fracción de muestra de salida pendiente */
+static float g_mixbuf[4800 * 2];
+static double g_audio_sq;              /* suma de cuadrados, para el RMS del resumen */
+static float g_audio_peak;
+static uint64_t g_audio_frames, g_audio_loud; /* frames mezclados y frames con señal */
+static FILE *g_audio_wav; /* --audio-wav: la mezcla en <log>-audio.wav (16 bits, 48 kHz) */
+
+static void wav_header(FILE *f, uint32_t data_bytes) {
+    uint32_t h[11] = {0x46464952u, 36 + data_bytes, 0x45564157u, 0x20746D66u, 16,
+                      0x00020001u, 48000, 48000 * 4, 0x00100004u, 0x61746164u, data_bytes};
+    fseek(f, 0, SEEK_SET);
+    fwrite(h, 4, 11, f);
+    fseek(f, 0, SEEK_END);
+}
+
+/* Física de la Xbox -> host. La RAM contigua (64 MB) está en NGB_CONTIG_BASE; el resto
+ * de "direcciones físicas" son las que da MmGetPhysicalAddress para memoria normal del
+ * proceso, que hoy es la identidad (impl_mm.c): así llegan, por ejemplo, los búferes de
+ * audio de Sofdec a la tabla SGE. Esas solo se aceptan si están mapeadas y se pueden leer;
+ * la última región comprobada se guarda para no llamar a VirtualQuery en cada muestra. */
+static const uint8_t *apu_phys(uint32_t phys, uint32_t len) {
+    static uint32_t ok_lo, ok_hi; /* región host legible ya comprobada [ok_lo, ok_hi) */
+    MEMORY_BASIC_INFORMATION mbi;
+    if (phys < NGB_CONTIG_SIZE)
+        return len <= NGB_CONTIG_SIZE - phys ? (const uint8_t *)(uintptr_t)(NGB_CONTIG_BASE + phys)
+                                             : NULL;
+    if (len > 0x1000u || phys > 0xFFFFFFFFu - len)
+        return NULL;
+    if (phys >= ok_lo && phys + len <= ok_hi)
+        return (const uint8_t *)(uintptr_t)phys;
+    if (!VirtualQuery((const void *)(uintptr_t)phys, &mbi, sizeof mbi) || mbi.State != MEM_COMMIT ||
+        (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) || !(mbi.Protect & 0xEEu))
+        return NULL;
+    ok_lo = (uint32_t)(uintptr_t)mbi.BaseAddress;
+    ok_hi = ok_lo + (uint32_t)mbi.RegionSize;
+    return phys + len <= ok_hi ? (const uint8_t *)(uintptr_t)phys : NULL;
+}
 
 static BOOL CALLBACK vp_init_once(PINIT_ONCE once, PVOID param, PVOID *ctx) {
     (void)once;
@@ -107,6 +149,7 @@ static BOOL CALLBACK vp_init_once(PINIT_ONCE once, PVOID param, PVOID *ctx) {
     (void)ctx;
     InitializeCriticalSection(&g_vp_lock);
     vp_init(&g_vp);
+    g_mix.phys = apu_phys;
     QueryPerformanceFrequency(&g_vp_freq);
     return TRUE;
 }
@@ -121,14 +164,42 @@ static void vp_write(uint32_t addr, uint32_t value) {
                           : NULL;
         ngb_log("    · APU: tabla de voces en 0x%08X (física 0x%08X)",
                 (uint32_t)(uintptr_t)g_vp.voices, phys);
+    } else if (addr == 0xFE802030u) { /* NV_PAPU_VPSGEADDR: tabla SGE de los búferes */
+        g_mix.sge_phys = value;
+    } else if (addr == 0xFE820000u + VP_PIO_SET_CURRENT_INBUF_SGE_OFFSET) {
+        /* DirectSound programa la tabla SGE por PIO: entrada `inbuf_sge` = página física. */
+        uint32_t entry = g_mix.sge_phys + g_vp.inbuf_sge * 8u;
+        if (g_vp.inbuf_sge < 0x10000u && entry + 8u <= NGB_CONTIG_SIZE)
+            *(volatile uint32_t *)(uintptr_t)(NGB_CONTIG_BASE + entry) = value & 0xFFFFF000u;
     } else {
         vp_method(&g_vp, addr - 0xFE820000u, value);
+        if (addr == 0xFE820124u && g_vp.voices && (value & 0xFFFFu) < VP_MAX_VOICES &&
+            g_vp.voices_on <= 64) {
+            const uint32_t *w = (const uint32_t *)(g_vp.voices + (value & 0xFFFFu) * VP_VOICE_SIZE);
+            ngb_log("    · APU: VOICE_ON %u: vbin %08X fmt %08X ba %06X lbo %06X cbo %06X ebo %06X "
+                    "pitch %04X vol %08X %08X %08X sge %08X", value & 0xFFFFu, w[0], w[1],
+                    w[8] & 0xFFFFFF, w[9] & 0xFFFFFF, w[22] & 0xFFFFFF, w[23] & 0xFFFFFF,
+                    w[31] >> 16, w[24], w[25], w[26], g_mix.sge_phys);
+        }
     }
     LeaveCriticalSection(&g_vp_lock);
 }
 
 void ngb_apu_summary(void) {
-    ngb_log("apu: %u VOICE_ON, %u voces terminadas solas", g_vp.voices_on, g_vp.voices_ended);
+    ngb_log("apu: %u VOICE_ON, %u voces terminadas solas; audio %s, %u frames descartados",
+            g_vp.voices_on, g_vp.voices_ended,
+            g_audio == 1 ? "waveOut 48 kHz" : g_audio == 0 ? "sin dispositivo" : "sin usar",
+            audio_out_dropped());
+    if (g_audio_wav && TryEnterCriticalSection(&g_vp_lock)) {
+        wav_header(g_audio_wav, (uint32_t)(g_audio_frames * 4));
+        fclose(g_audio_wav);
+        g_audio_wav = NULL;
+        LeaveCriticalSection(&g_vp_lock);
+    }
+    if (g_audio_frames)
+        ngb_log("apu: %.1f s mezclados, %.1f s con señal; pico %.3f, RMS %.4f",
+                g_audio_frames / 48000.0, g_audio_loud / 48000.0, g_audio_peak,
+                sqrt(g_audio_sq / (2.0 * (double)g_audio_frames)));
 }
 
 /*
@@ -149,7 +220,53 @@ void ngb_apu_tick(void) {
         double dt = g_vp_last.QuadPart
                         ? (double)(now.QuadPart - g_vp_last.QuadPart) / (double)g_vp_freq.QuadPart
                         : 0.0;
-        vp_advance(&g_vp, dt > 0.1 ? 0.1 : dt);
+        if (dt > 0.1)
+            dt = 0.1;
+        if (g_audio < 0 && g_vp.voices && !g_ngb_opts.mute) {
+            g_audio = audio_out_open() == 0;
+            if (g_audio == 1 && g_ngb_opts.audio_wav) {
+                char path[MAX_PATH];
+                snprintf(path, sizeof path, "%s-audio.wav", g_ngb_opts.log_path);
+                if (fopen_s(&g_audio_wav, path, "wb") == 0 && g_audio_wav)
+                    wav_header(g_audio_wav, 0);
+            }
+        }
+        if (g_audio == 1) {
+            /* Se mezcla justo lo que corresponde al tiempo real transcurrido. */
+            double want = dt * 48000.0 + g_audio_frac;
+            uint32_t frames = (uint32_t)want;
+            if (frames > 4800)
+                frames = 4800;
+            g_audio_frac = want - (double)frames;
+            if (g_audio_frac > 1.0)
+                g_audio_frac = 0.0;
+            memset(g_mixbuf, 0, (size_t)frames * 2 * sizeof g_mixbuf[0]);
+            mix_render(&g_vp, &g_mix, g_mixbuf, frames);
+            audio_out_write(g_mixbuf, frames);
+            if (g_audio_wav) {
+                int16_t pcm[4800 * 2];
+                uint32_t k;
+                for (k = 0; k < frames * 2; k++) {
+                    float a = g_mixbuf[k] > 1.0f ? 1.0f : g_mixbuf[k] < -1.0f ? -1.0f : g_mixbuf[k];
+                    pcm[k] = (int16_t)(a * 32767.0f);
+                }
+                fwrite(pcm, 4, frames, g_audio_wav);
+            }
+            {
+                uint32_t i;
+                for (i = 0; i < frames * 2; i++) {
+                    float a = g_mixbuf[i] < 0 ? -g_mixbuf[i] : g_mixbuf[i];
+                    g_audio_sq += (double)a * a;
+                    if (a > g_audio_peak)
+                        g_audio_peak = a;
+                    if (a > 0.001f && (i & 1) == 0)
+                        g_audio_loud++;
+                }
+                g_audio_frames += frames;
+            }
+        } else {
+            vp_advance(&g_vp, dt);
+        }
         g_vp_last = now;
         LeaveCriticalSection(&g_vp_lock);
     }
@@ -172,7 +289,9 @@ static void mmio_after_step(uint32_t addr, int write) {
     if (reg == 0xFE802040u)
         g_apu_gpsaddr = *(volatile uint32_t *)(uintptr_t)0xFE802040u;
     /* Métodos PIO del procesador de voces y la base de su tabla. */
-    if (write && (reg == 0xFE80202Cu || (reg >= 0xFE820100u && reg < 0xFE820400u)))
+    if (write && (reg == 0xFE80202Cu || reg == 0xFE802030u ||
+                  (reg >= 0xFE820100u && reg < 0xFE820400u) ||
+                  reg == 0xFE820804u || reg == 0xFE820808u))
         vp_write(reg, *(volatile uint32_t *)(uintptr_t)reg);
     if (addr == 0xFEC0010Bu || addr == 0xFEC0011Bu || addr == 0xFEC0012Bu || addr == 0xFEC0017Bu)
         *(volatile uint8_t *)(uintptr_t)addr &= 0xFDu;

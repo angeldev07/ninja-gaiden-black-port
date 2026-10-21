@@ -204,3 +204,11 @@ PGRAPH dibuja con OpenGL (RX 6600): el título y el menú pasan de 16 a 60 fps, 
 diseño. El "parpadeo" tras los avisos era el NV2A emulado haciendo kick con el pusher parado: reproducía el push
 buffer que D3D acababa de liberar. Arreglado, aparecen el vídeo, el logo de Team NINJA y el título. Detalle en
 [[gpu-nv2a]].
+
+## [2026-10-22] milestone | El juego suena
+Hay mezcla real de las voces de la APU y salida por `waveOut`: el audio del vídeo de introducción suena. Faltaban
+tres piezas:
+- la tabla SGE, que DirectSound programa por PIO (`0x804`/`0x808`);
+- los volúmenes, que también llegan por PIO (`0x360-0x368`);
+- aceptar las direcciones "físicas" identidad que da nuestro `MmGetPhysicalAddress`.
+Las 4 voces internas que alimenta el DSP se silencian, porque sin DSP serían ruido. Detalle en [[audio-apu]].

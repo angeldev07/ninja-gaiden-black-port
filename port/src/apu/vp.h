@@ -30,11 +30,15 @@
 #define VP_PIO_VOICE_LOCK 0x2FC
 #define VP_PIO_SET_VOICE_CFG_VBIN 0x300 /* 0x300-0x318: palabras 0x00-0x18 de la voz */
 #define VP_PIO_SET_VOICE_CFG_MISC 0x318
+#define VP_PIO_SET_VOICE_TAR_VOLA 0x360 /* 0x360-0x368: palabras 0x60-0x68 (volúmenes) */
+#define VP_PIO_SET_VOICE_TAR_VOLC 0x368
 #define VP_PIO_SET_VOICE_TAR_PITCH 0x37C
 #define VP_PIO_SET_VOICE_CFG_BUF_BASE 0x3A0
 #define VP_PIO_SET_VOICE_CFG_BUF_LBO 0x3A4
 #define VP_PIO_SET_VOICE_BUF_CBO 0x3D8
 #define VP_PIO_SET_VOICE_CFG_BUF_EBO 0x3DC
+#define VP_PIO_SET_CURRENT_INBUF_SGE 0x804        /* entrada de la tabla SGE a escribir */
+#define VP_PIO_SET_CURRENT_INBUF_SGE_OFFSET 0x808 /* su página física (crash.c la escribe) */
 
 /* Estructura de una voz (NV_PAVS_*) */
 #define VP_VOICE_CFG_FMT 0x04
@@ -53,6 +57,7 @@
 typedef struct vp_state {
     uint8_t *voices;  /* tabla de voces (NULL hasta que el juego fija VPVADDR) */
     uint16_t current; /* SET_CURRENT_VOICE */
+    uint32_t inbuf_sge; /* SET_CURRENT_INBUF_SGE */
     uint8_t active[VP_MAX_VOICES];
     double frac[VP_MAX_VOICES]; /* fracción de muestra acumulada */
     uint32_t voices_on, voices_ended; /* contadores para el resumen */
@@ -66,5 +71,10 @@ void vp_method(vp_state_t *s, uint32_t method, uint32_t value);
 void vp_advance(vp_state_t *s, double seconds);
 /* Muestras por segundo de una voz según su pitch (48000 · 2^(pitch/4096)). */
 double vp_voice_rate(const uint8_t *voice);
+/* Piezas de vp_advance que reutiliza el mezclador (mix.c):
+ *   vp_voice_begin: la voz `h` si está activa y no pausada (limpia NEW_VOICE), o NULL;
+ *   vp_voice_move: avanza su CBO `step` muestras con bucle o fin; 0 si la voz terminó. */
+uint8_t *vp_voice_begin(vp_state_t *s, uint32_t h);
+int vp_voice_move(vp_state_t *s, uint32_t h, uint8_t *v, uint32_t step);
 
 #endif
