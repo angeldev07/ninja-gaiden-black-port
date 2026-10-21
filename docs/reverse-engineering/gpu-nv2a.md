@@ -240,6 +240,39 @@ input. Los agentes tienen que limpiar sus capturas y buscar antes el caso de pru
 **Probado y descartado:** sustituir el traspaso por eventos al hilo de render por una espera activa. En esta CPU
 (Ryzen 7 5700G) añadía ~17 ms por frame, así que se queda el traspaso por eventos (~1,6 ms por frame en total).
 
+## Pipeline fijo con iluminación y mapas de sombra (`VERIFIED` en la demo)
+
+En un frame de la demo, **la mitad de los dibujos usan el pipeline fijo** (`SET_TRANSFORM_EXECUTION_MODE` `0x4`;
+el `0x6` es vertex program), casi todos con la iluminación activa: 1 396 cambios de luces, 812 matrices model-view
+y 372 matrices de textura por frame. Antes, el modo fijo solo transformaba la posición y copiaba el color del
+vértice.
+
+**Ahora, `k_ff_vs` en `pgraph_gl.c`:**
+- normales con la model-view inversa (`0x0580`);
+- 8 luces (infinitas, locales y focos sin cono) con atenuación y rango;
+- color material (`0x0298`: emisión, ambiente, difusa y especular, desde el material o el vértice);
+- especular, texgen por etapa (lineal de ojo y de objeto, mapa esférico, normal y de reflexión) y matrices de
+  textura;
+- uniforms con hash de los registros, que no se resuben si no cambian.
+
+**Resultado:** los arcos, muros y columnas del escenario y los enemigos aparecen iluminados y con textura.
+
+**Mapas de sombra:**
+- 46 dibujos por frame (vertex program con blend) usaban una textura de formato `0x2E`: la profundidad Z24S8
+  de una superficie de 128x128 que el juego pinta al empezar el frame desde la luz. No se podía convertir y el
+  dibujo se descartaba.
+- Ahora la etapa enlaza la textura GL de esa superficie Z (render-to-texture). `psh` compara, como el NV2A,
+  `profundidad · máx` con la z proyectada (`0xFFFFFF` en 24 bits, `0xFFFF` en 16) usando la función de
+  `0x1E6C`.
+
+**Aproximaciones:** potencia especular fija (16) en vez de `SET_SPECULAR_PARAMS`, focos sin cono y sin skinning
+en el modo fijo.
+
+**Abierto:**
+- **El cielo** sigue siendo el color de borrado (`0xFFA1A5E8`, lavanda) y **falta el suelo**.
+- Con el culling desactivado aparecen grandes polígonos oscuros que cubren la vista. Puede ser una cúpula de cielo
+  vista por dentro o geometría de volúmenes de sombra (hay stencil con INVERT); hay que aislar qué dibujo es.
+
 ## Siguiente
 
 1. Pasar de la pantalla de título al menú principal, y averiguar qué esperan los avisos y el vídeo (audio).

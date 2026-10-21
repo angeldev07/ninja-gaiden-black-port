@@ -167,6 +167,9 @@ static int decode_textures(const psh_registers *r, psh_program *p) {
         }
         p->tex_mode[i] = mode;
         p->compare[i] = (uint8_t)((r->compare_mode >> (4 * i)) & 0xFu);
+        if ((r->shadow >> i) & 1u && (mode == PSH_TEX_PROJECT2D || mode == PSH_TEX_PROJECT3D))
+            p->shadow[i] = (r->shadow >> (4 + i)) & 1u ? 24 : 16;
+        p->shadow_func = (uint8_t)((r->shadow >> 8) & 7u);
         if (i == 2) {
             p->tex_source[i] = (uint8_t)((r->other_stage_input >> 16) & 0xFu);
         } else if (i == 3) {
@@ -366,6 +369,24 @@ static void emit_texture(glsl_buf *b, const psh_program *p, int i) {
     uint8_t mode = p->tex_mode[i];
     int src = p->tex_source[i];
     int k;
+    if (p->shadow[i]) {
+        /* Mapa de sombras (como el NV2A): la profundidad guardada, en unidades del búfer Z,
+         * se compara con la z proyectada (PROJECT3D) o con 0 (PROJECT2D). */
+        static const char *const ops[8] = {NULL, "<", "==", "<=", ">", "!=", ">=", NULL};
+        const char *max = p->shadow[i] == 24 ? "16777215.0" : "65535.0";
+        if (p->shadow_func == 0 || p->shadow_func == 7) {
+            glsl_emit(b, "    vec4 t%d = vec4(%s);\n", i, p->shadow_func ? "1.0" : "0.0");
+            return;
+        }
+        glsl_emit(b, "    float d%d = texture(tex%d, oT%d.xy / oT%d.w * texScale[%d]).x * %s;\n", i, i,
+                  i, i, i, max);
+        if (mode == PSH_TEX_PROJECT3D)
+            glsl_emit(b, "    vec4 t%d = vec4(d%d %s clamp(oT%d.z / oT%d.w, 0.0, %s) ? 1.0 : 0.0);\n", i,
+                      i, ops[p->shadow_func], i, i, max);
+        else
+            glsl_emit(b, "    vec4 t%d = vec4(d%d %s 0.0 ? 1.0 : 0.0);\n", i, i, ops[p->shadow_func]);
+        return;
+    }
     switch (mode) {
     case PSH_TEX_NONE:
         glsl_emit(b, "    vec4 t%d = vec4(0.0);\n", i);
@@ -450,7 +471,7 @@ int nv2a_psh_to_glsl(const psh_program *p, char *out, size_t outlen) {
               "in vec4 oT0;\nin vec4 oT1;\nin vec4 oT2;\nin vec4 oT3;\n",
               p->n_stages);
     for (i = 0; i < PSH_TEXTURES; i++) {
-        const char *type = sampler_type(p->tex_mode[i]);
+        const char *type = p->shadow[i] ? "sampler2D" : sampler_type(p->tex_mode[i]);
         if (type) {
             glsl_emit(&b, "uniform %s tex%d;\n", type, i);
         }

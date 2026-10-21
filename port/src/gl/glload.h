@@ -76,6 +76,7 @@ typedef ptrdiff_t GLsizeiptr;
     X(void, glUseProgram, (GLuint))                                                       \
     X(GLint, glGetUniformLocation, (GLuint, const GLchar *))                              \
     X(void, glUniform1i, (GLint, GLint))                                                  \
+    X(void, glUniform1iv, (GLint, GLsizei, const GLint *))                                \
     X(void, glUniform3i, (GLint, GLint, GLint, GLint))                                    \
     X(void, glUniform1fv, (GLint, GLsizei, const GLfloat *))                              \
     X(void, glUniform2fv, (GLint, GLsizei, const GLfloat *))                              \

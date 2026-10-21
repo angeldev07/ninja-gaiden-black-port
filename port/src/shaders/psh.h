@@ -29,6 +29,13 @@ typedef struct psh_registers {
     uint32_t other_stage_input;    /* 0x1E78 SET_SHADER_OTHER_STAGE_INPUT */
     uint32_t compare_mode;         /* 0x17F8 SET_SHADER_CLIP_PLANE_MODE: 4 bits por etapa */
     uint32_t dot_mapping;          /* 0x1E74 SET_DOT_RGBMAPPING (sin uso: modos DOT_*) */
+    /* Mapas de sombra (no es un registro: lo compone el llamador a partir del formato de la
+     * textura de cada etapa y de la función de comparación de sombras):
+     *   bits 0-3: la etapa i tiene una textura de profundidad (mapa de sombras);
+     *   bits 4-7: esa profundidad es de 24 bits (si no, de 16);
+     *   bits 8-10: función de comparación (0 NEVER, 1 LESS, 2 EQUAL, 3 LEQUAL, 4 GREATER,
+     *              5 NOTEQUAL, 6 GEQUAL, 7 ALWAYS). */
+    uint32_t shadow;
 } psh_registers;
 
 /* Registros de los combiners (4 bits). */
@@ -131,6 +138,8 @@ typedef struct psh_program {
     uint8_t tex_mode[PSH_TEXTURES];   /* psh_tex_mode */
     uint8_t tex_source[PSH_TEXTURES]; /* etapa de la que lee un modo dependiente */
     uint8_t compare[PSH_TEXTURES];    /* CLIPPLANE: bit k = descarta si coord k >= 0 */
+    uint8_t shadow[PSH_TEXTURES];     /* 0 normal, 16 o 24: mapa de sombras de esos bits */
+    uint8_t shadow_func;              /* función de comparación (ver psh_registers.shadow) */
     uint8_t unsupported_tex;          /* bit i = el modo de la etapa i no se emula */
 } psh_program;
 

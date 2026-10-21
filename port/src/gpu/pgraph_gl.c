@@ -55,6 +55,7 @@ typedef struct gl_prog {
     GLuint prog;
     int failed;
     GLint u_c, u_surface, u_clip, u_ffmat;
+    GLint u_ffmv, u_ffinv, u_fftm, u_ffplane, u_ffl, u_ffm, u_ffi; /* pipeline fijo */
     GLint u_psc0, u_psc1, u_fc0, u_fc1, u_fog, u_bump, u_bscale, u_boff;
     GLint u_atest, u_afunc, u_aref, u_texscale, u_tex[4], u_fogcfg, u_fogparam;
     uint32_t const_serial; /* constantes subidas por última vez (+1; 0 = nunca) */
@@ -592,7 +593,12 @@ static GLuint stage_texture(const pgl_regs *r, int i, GLenum *target, float scal
         return 0;
     phys = base + M(r, mb);
     derr = texconv_describe(fmt, M(r, mb + 0x10), M(r, mb + 0x1C), glb_has_s3tc(), &d);
-    s = rc_surface_find(&R.surf, RC_COLOR, phys);
+    {
+        uint32_t c = (fmt >> 8) & 0xFFu;
+        /* Textura de profundidad (mapa de sombras): la superficie Z que el juego dibujó antes
+           en este frame ya es una textura GL; no hay nada que convertir de la memoria. */
+        s = rc_surface_find(&R.surf, c >= 0x2A && c <= 0x31 ? RC_ZETA : RC_COLOR, phys);
+    }
     if (s && s->gl_tex && !(R.has_color && s->addr == R.color_addr) &&
         cpu_wrote(s->addr, s->bytes, s->drawn_frame) && surface_sig(s) != s->mem_sig) {
         /* La CPU ha escrito otra cosa en la memoria de la superficie (una textura cargada
@@ -732,18 +738,37 @@ static void bind_textures(const pgl_regs *r, float tex_scale[8]) {
     "    return f;\n" \
     "}\n"
 
+/*
+ * Pipeline fijo del NV2A (transform & lighting de D3D sin vertex program). Registros
+ * (nv2a_regs.h de xemu como referencia; código propio):
+ *   - posición: matriz compuesta 0x0680 (ya incluye proyección y viewport); ojo: model-view
+ *     0x0480, normales con la model-view inversa 0x0580;
+ *   - luces 0..7 en 0x1000 + i·0x80 (ambiente, difusa, especular, rango, half vector, dirección
+ *     infinita, posición local, atenuación) y el modo de cada una en 0x03BC (2 bits: 1
+ *     infinita, 2 local, 3 foco, tratado como local);
+ *   - material: ambiente de escena 0x0A10, emisión 0x03A8, alfa 0x03B4, color material 0x0298
+ *     (2 bits por término: emisión, ambiente, difusa, especular; 0 material, 1 difusa del
+ *     vértice, 2 especular del vértice); especular activado 0x03B8;
+ *   - texgen S/T/R/Q por etapa en 0x03C0 + e·0x10 y sus planos en 0x0840 + e·0x40; matrices de
+ *     textura en 0x06C0 + e·0x40, activadas en 0x0420 + e·4.
+ * D3D ya multiplica el material en los colores de las luces; con color material se
+ * multiplica por el color del vértice. Aproximaciones: potencia especular fija (16) en lugar
+ * de SET_SPECULAR_PARAMS, focos sin cono y mapa esférico en convención de OpenGL.
+ */
 static const char k_ff_vs[] =
     "#version 400\n"
-    "/* Transformación fija del NV2A (ngb, pgraph_gl.c): matriz compuesta 0x0680, que ya\n"
-    " * incluye el viewport, sin luces ni generación de coordenadas. */\n"
-    "layout(location = 0) in vec4 v0;\nlayout(location = 3) in vec4 v3;\n"
-    "layout(location = 4) in vec4 v4;\nlayout(location = 9) in vec4 v9;\n"
-    "layout(location = 10) in vec4 v10;\nlayout(location = 11) in vec4 v11;\n"
-    "layout(location = 12) in vec4 v12;\nlayout(location = 5) in vec4 v5;\n"
+    "layout(location = 0) in vec4 v0;\nlayout(location = 2) in vec4 v2;\n"
+    "layout(location = 3) in vec4 v3;\nlayout(location = 4) in vec4 v4;\n"
+    "layout(location = 9) in vec4 v9;\nlayout(location = 10) in vec4 v10;\n"
+    "layout(location = 11) in vec4 v11;\nlayout(location = 12) in vec4 v12;\n"
+    "layout(location = 5) in vec4 v5;\n"
     "uniform vec4 ffMat[4];\nuniform vec2 surfaceSize;\nuniform vec2 clipRange;\n"
+    "uniform vec4 ffMV[4];\nuniform vec4 ffInv[4];\nuniform vec4 ffTM[16];\nuniform vec4 ffPlane[16];\n"
+    "uniform vec4 ffL[64];\nuniform vec4 ffM[3];\nuniform int ffI[32];\n"
     FOG_GLSL
     "out vec4 oD0;\nout vec4 oD1;\nout vec4 oB0;\nout vec4 oB1;\nout vec4 oFog;\nout vec4 oPts;\n"
     "out vec4 oT0;\nout vec4 oT1;\nout vec4 oT2;\nout vec4 oT3;\n"
+    "vec3 cmSource(int sel, vec3 mat) { return sel == 1 ? v3.rgb : sel == 2 ? v4.rgb : mat; }\n"
     "void main() {\n"
     "    vec4 p = vec4(dot(ffMat[0], v0), dot(ffMat[1], v0), dot(ffMat[2], v0), dot(ffMat[3], v0));\n"
     "    float w = p.w < 0.0 ? clamp(p.w, -1.84467e19, -5.42101e-20) : clamp(p.w, 5.42101e-20, 1.84467e19);\n"
@@ -751,11 +776,70 @@ static const char k_ff_vs[] =
     "    vec3 n = vec3(s.x * (2.0 / surfaceSize.x) - 1.0, s.y * (2.0 / surfaceSize.y) - 1.0, s.z);\n"
     "    if (clipRange.y != clipRange.x) n.z = (s.z - clipRange.x) * (2.0 / (clipRange.y - clipRange.x)) - 1.0;\n"
     "    gl_Position = vec4(n * w, w);\n"
+    "    vec4 pe = vec4(dot(ffMV[0], v0), dot(ffMV[1], v0), dot(ffMV[2], v0), dot(ffMV[3], v0));\n"
+    "    vec3 eyeP = pe.xyz / (pe.w != 0.0 ? pe.w : 1.0);\n"
+    "    vec3 ne = v2.x * ffInv[0].xyz + v2.y * ffInv[1].xyz + v2.z * ffInv[2].xyz;\n"
+    "    ne = dot(ne, ne) > 0.0 ? normalize(ne) : vec3(0.0, 0.0, 1.0);\n"
+    "    oD0 = v3; oD1 = v4;\n"
+    "    if (ffI[0] != 0) {\n"
+    "        vec3 amb = vec3(0.0), dif = vec3(0.0), spe = vec3(0.0);\n"
+    "        for (int i = 0; i < 8; i++) {\n"
+    "            int mode = (ffI[1] >> (2 * i)) & 3;\n"
+    "            if (mode == 0) continue;\n"
+    "            vec3 L, H;\n"
+    "            float att = 1.0;\n"
+    "            if (mode == 1) {\n"
+    "                L = normalize(ffL[i * 8 + 3].xyz);\n"
+    "                H = normalize(ffL[i * 8 + 4].xyz);\n"
+    "            } else {\n"
+    "                vec3 d = ffL[i * 8 + 5].xyz - eyeP;\n"
+    "                float dist = length(d);\n"
+    "                L = dist > 0.0 ? d / dist : vec3(0.0, 0.0, 1.0);\n"
+    "                vec3 a = ffL[i * 8 + 6].xyz;\n"
+    "                float den = a.x + a.y * dist + a.z * dist * dist;\n"
+    "                att = den > 0.0 ? 1.0 / den : 1.0;\n"
+    "                if (ffL[i * 8 + 6].w > 0.0 && dist > ffL[i * 8 + 6].w) att = 0.0;\n"
+    "                H = normalize(L + vec3(0.0, 0.0, 1.0));\n"
+    "            }\n"
+    "            float nl = max(dot(ne, L), 0.0);\n"
+    "            amb += ffL[i * 8].rgb * att;\n"
+    "            dif += ffL[i * 8 + 1].rgb * nl * att;\n"
+    "            if (nl > 0.0) spe += ffL[i * 8 + 2].rgb * pow(max(dot(ne, H), 0.0), 16.0) * att;\n"
+    "        }\n"
+    "        int cm = ffI[2];\n"
+    "        vec3 emi = cmSource(cm & 3, vec3(0.0));\n"
+    "        vec3 col = ffM[0].rgb + ffM[1].rgb + emi + amb * cmSource((cm >> 2) & 3, vec3(1.0))\n"
+    "                 + dif * cmSource((cm >> 4) & 3, vec3(1.0));\n"
+    "        float a = ((cm >> 4) & 3) == 1 ? v3.a : ((cm >> 4) & 3) == 2 ? v4.a : ffM[1].w;\n"
+    "        oD0 = vec4(clamp(col, 0.0, 1.0), clamp(a, 0.0, 1.0));\n"
+    "        oD1 = ffI[3] != 0 ? vec4(clamp(spe * cmSource((cm >> 6) & 3, vec3(1.0)), 0.0, 1.0), 1.0)\n"
+    "                         : vec4(0.0, 0.0, 0.0, 1.0);\n"
+    "    }\n"
+    "    vec4 tin[4] = vec4[4](v9, v10, v11, v12);\n"
+    "    vec4 tout[4];\n"
+    "    for (int e = 0; e < 4; e++) {\n"
+    "        vec4 t = tin[e];\n"
+    "        for (int c = 0; c < 4; c++) {\n"
+    "            int g = ffI[9 + e * 4 + c];\n"
+    "            if (g == 0) continue;\n"
+    "            if (g == 1) t[c] = dot(ffPlane[e * 4 + c], pe);\n"
+    "            else if (g == 2) t[c] = dot(ffPlane[e * 4 + c], v0);\n"
+    "            else if (g == 3) {\n"
+    "                vec3 r = reflect(normalize(eyeP), ne);\n"
+    "                float m = 2.0 * sqrt(r.x * r.x + r.y * r.y + (r.z + 1.0) * (r.z + 1.0));\n"
+    "                t[c] = c == 0 ? r.x / m + 0.5 : c == 1 ? r.y / m + 0.5 : c == 3 ? 1.0 : 0.0;\n"
+    "            } else if (g == 4) t[c] = c < 3 ? ne[c] : 1.0;\n"
+    "            else { vec3 r = reflect(normalize(eyeP), ne); t[c] = c < 3 ? r[c] : 1.0; }\n"
+    "        }\n"
+    "        if (ffI[5 + e] != 0)\n"
+    "            t = vec4(dot(ffTM[e * 4], t), dot(ffTM[e * 4 + 1], t), dot(ffTM[e * 4 + 2], t), dot(ffTM[e * 4 + 3], t));\n"
+    "        tout[e] = t;\n"
+    "    }\n"
     "    /* Distancia de niebla (SET_FOG_GEN_MODE): alfa especular, FOG_X (atributo 5) o, en los\n"
-    "     * modos de ojo, la w de recorte (profundidad del ojo en perspectiva; aproximación). */\n"
-    "    float fogd = fogCfg.z == 0 ? v4.a : fogCfg.z == 6 ? v5.x : abs(p.w);\n"
-    "    oD0 = v3; oD1 = v4; oB0 = v3; oB1 = v4; oFog = vec4(ngbFog(fogd)); oPts = vec4(1.0);\n"
-    "    oT0 = v9; oT1 = v10; oT2 = v11; oT3 = v12;\n"
+    "     * modos de ojo, la distancia en el espacio del ojo. */\n"
+    "    float fogd = ffI[25] == 0 ? v4.a : ffI[25] == 6 ? v5.x : ffI[25] == 1 ? length(eyeP) : abs(eyeP.z);\n"
+    "    oB0 = oD0; oB1 = oD1; oFog = vec4(ngbFog(fogd)); oPts = vec4(1.0);\n"
+    "    oT0 = tout[0]; oT1 = tout[1]; oT2 = tout[2]; oT3 = tout[3];\n"
     "}\n";
 
 static const char k_fallback_fs[] =
@@ -780,6 +864,18 @@ static void psh_regs_from(const pgl_regs *r, psh_registers *p) {
     p->other_stage_input = M(r, 0x1E78);
     p->compare_mode = M(r, 0x17F8);
     p->dot_mapping = M(r, 0x1E74);
+    /* Mapas de sombra: etapas activas con una textura de profundidad (formatos de color
+     * 0x2A-0x31; los X8_Y24 son 0x2A, 0x2B, 0x2E y 0x2F) y la función de comparación
+     * (0x1E6C SET_SHADOW_DEPTH_FUNC). */
+    for (i = 0; i < 4; i++) {
+        uint32_t c = (M(r, 0x1B04 + 0x40 * (uint32_t)i) >> 8) & 0xFFu;
+        if (!(M(r, 0x1B0C + 0x40 * (uint32_t)i) & 0x40000000u) || c < 0x2A || c > 0x31)
+            continue;
+        p->shadow |= 1u << i;
+        if (c == 0x2A || c == 0x2B || c == 0x2E || c == 0x2F)
+            p->shadow |= 1u << (4 + i);
+    }
+    p->shadow |= (M(r, 0x1E6C) & 7u) << 8;
 }
 
 /* El GLSL de vsh.c pasa la Y a la convención de OpenGL; aquí la fila 0 es la de arriba, así
@@ -811,6 +907,13 @@ static void link_uniforms(gl_prog *p) {
     p->u_surface = ngl_glGetUniformLocation(g, "surfaceSize");
     p->u_clip = ngl_glGetUniformLocation(g, "clipRange");
     p->u_ffmat = ngl_glGetUniformLocation(g, "ffMat");
+    p->u_ffmv = ngl_glGetUniformLocation(g, "ffMV");
+    p->u_ffinv = ngl_glGetUniformLocation(g, "ffInv");
+    p->u_fftm = ngl_glGetUniformLocation(g, "ffTM");
+    p->u_ffplane = ngl_glGetUniformLocation(g, "ffPlane");
+    p->u_ffl = ngl_glGetUniformLocation(g, "ffL");
+    p->u_ffm = ngl_glGetUniformLocation(g, "ffM");
+    p->u_ffi = ngl_glGetUniformLocation(g, "ffI");
     p->u_psc0 = ngl_glGetUniformLocation(g, "psC0");
     p->u_psc1 = ngl_glGetUniformLocation(g, "psC1");
     p->u_fc0 = ngl_glGetUniformLocation(g, "psFinalC0");
@@ -903,6 +1006,75 @@ static gl_prog *get_program(const pgl_regs *r) {
     return p;
 }
 
+/* Texgen: valor del registro -> código del shader (0 nada, 1 ojo, 2 objeto, 3 esfera,
+ * 4 normal, 5 reflexión). */
+static int texgen_code(uint32_t mode) {
+    switch (mode) {
+    case 0x2400: return 1;
+    case 0x2401: return 2;
+    case 0x2402: return 3;
+    case 0x8511: return 4;
+    case 0x8512: return 5;
+    default: return 0;
+    }
+}
+
+/* Uniforms del pipeline fijo (ver k_ff_vs). */
+static void set_ff_uniforms(const pgl_regs *r, gl_prog *p) {
+    static float l[64 * 4], big[16 * 4];
+    GLint ints[32];
+    float m[3 * 4];
+    int i, k, e, c;
+    for (i = 0; i < 16; i++)
+        big[i] = as_float(M(r, 0x0480 + 4 * i));
+    if (p->u_ffmv >= 0)
+        ngl_glUniform4fv(p->u_ffmv, 4, big);
+    for (i = 0; i < 16; i++)
+        big[i] = as_float(M(r, 0x0580 + 4 * i));
+    if (p->u_ffinv >= 0)
+        ngl_glUniform4fv(p->u_ffinv, 4, big);
+    for (i = 0; i < 64; i++)
+        big[i] = as_float(M(r, 0x06C0 + 4 * i));
+    if (p->u_fftm >= 0)
+        ngl_glUniform4fv(p->u_fftm, 16, big);
+    for (i = 0; i < 64; i++)
+        big[i] = as_float(M(r, 0x0840 + 4 * i));
+    if (p->u_ffplane >= 0)
+        ngl_glUniform4fv(p->u_ffplane, 16, big);
+    memset(l, 0, sizeof l);
+    for (i = 0; i < 8; i++) {
+        uint32_t b = 0x1000 + 0x80 * (uint32_t)i;
+        static const uint32_t src[7] = {0x00, 0x0C, 0x18, 0x34, 0x28, 0x5C, 0x68};
+        for (k = 0; k < 7; k++)
+            for (c = 0; c < 3; c++)
+                l[(i * 8 + k) * 4 + c] = as_float(M(r, b + src[k] + 4 * (uint32_t)c));
+        l[(i * 8 + 6) * 4 + 3] = as_float(M(r, b + 0x24)); /* rango de la luz local */
+    }
+    ngl_glUniform4fv(p->u_ffl, 64, l);
+    memset(m, 0, sizeof m);
+    for (c = 0; c < 3; c++) {
+        m[c] = as_float(M(r, 0x0A10 + 4 * (uint32_t)c));
+        m[4 + c] = as_float(M(r, 0x03A8 + 4 * (uint32_t)c));
+    }
+    m[7] = as_float(M(r, 0x03B4));
+    if (p->u_ffm >= 0)
+        ngl_glUniform4fv(p->u_ffm, 3, m);
+    memset(ints, 0, sizeof ints);
+    ints[0] = (GLint)(M(r, 0x0314) & 1u);
+    ints[1] = (GLint)(M(r, 0x03BC) & 0xFFFFu);
+    ints[2] = (GLint)(M(r, 0x0298) & 0xFFu);
+    ints[3] = (GLint)(M(r, 0x03B8) & 1u);
+    ints[4] = (GLint)M(r, 0x0294);
+    for (e = 0; e < 4; e++) {
+        ints[5 + e] = (GLint)(M(r, 0x0420 + 4 * (uint32_t)e) & 1u);
+        for (c = 0; c < 4; c++)
+            ints[9 + e * 4 + c] = texgen_code(M(r, 0x03C0 + 0x10 * (uint32_t)e + 4 * (uint32_t)c));
+    }
+    ints[25] = (GLint)M(r, 0x02A0);
+    if (p->u_ffi >= 0)
+        ngl_glUniform1iv(p->u_ffi, 32, ints);
+}
+
 static void set_uniforms(const pgl_regs *r, gl_prog *p, const gl_state *st, const float tex_scale[8]) {
     float v[16 * 4], surf[2], clip[2];
     uint32_t src[24];
@@ -940,6 +1112,16 @@ static void set_uniforms(const pgl_regs *r, gl_prog *p, const gl_state *st, cons
     h = rc_hash(&r->m[0x0680 / 4], 16 * 4, h);      /* matriz compuesta */
     h = rc_hash(&r->m[0x0A60 / 4], 16 * 4, h);      /* psC0 y psC1 */
     h = rc_hash(&r->m[0x1B00 / 4], 0x100, h);       /* bump de las 4 etapas */
+    if (p->u_ffl >= 0) { /* pipeline fijo: luces, material, matrices y texgen */
+        h = rc_hash(&r->m[0x0280 / 4], 0x0180, h); /* 0x0280-0x03FF: control, material, texgen */
+        h = rc_hash(&r->m[0x0420 / 4], 0x0010, h); /* activación de matrices de textura */
+        h = rc_hash(&r->m[0x0480 / 4], 0x0040, h); /* model-view 0 */
+        h = rc_hash(&r->m[0x0580 / 4], 0x0040, h); /* inversa */
+        h = rc_hash(&r->m[0x06C0 / 4], 0x0100, h); /* matrices de textura */
+        h = rc_hash(&r->m[0x0840 / 4], 0x0100, h); /* planos de texgen */
+        h = rc_hash(&r->m[0x0A10 / 4], 0x0010, h); /* ambiente de escena */
+        h = rc_hash(&r->m[0x1000 / 4], 0x0400, h); /* 8 luces */
+    }
     if (p->unif_hash == (h | 1u))
         return;
     p->unif_hash = h | 1u;
@@ -957,6 +1139,8 @@ static void set_uniforms(const pgl_regs *r, gl_prog *p, const gl_state *st, cons
             v[i] = as_float(M(r, 0x0680 + 4 * i));
         ngl_glUniform4fv(p->u_ffmat, 4, v);
     }
+    if (p->u_ffl >= 0)
+        set_ff_uniforms(r, p);
     if (p->u_psc0 >= 0) {
         for (i = 0; i < 8; i++)
             argb_to_vec4(M(r, 0x0A60 + 4 * i), &v[4 * i]);

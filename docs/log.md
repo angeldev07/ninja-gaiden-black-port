@@ -225,3 +225,9 @@ puede reescribir; en la Xbox, la GPU se detiene y la rutina de interrupción lo 
 emulada daba vueltas por push buffers viejos (hasta 400 M palabras), pisaba el fence y colgaba el juego al
 empezar la demo. Con el HLE del parcheo, la demo va a 55-60 fps sin cuelgues. Lo diagnosticó el líder con
 `--watch`, trazas de kicks y Ghidra. Detalle en [[gpu-nv2a]].
+
+## [2026-10-22] ingest | Pipeline fijo con luces y mapas de sombra
+La mitad de los dibujos del 3D usan el pipeline fijo con iluminación, que el render GL no implementaba. Ahora hay
+luces, color material, texgen y matrices de textura, y el escenario de la demo aparece iluminado. Los mapas de
+sombra (texturas de profundidad `0x2E`) se enlazan como render-to-texture y se comparan en el shader: los 46
+dibujos que se descartaban ya se ejecutan. Siguen pendientes el cielo y el suelo. Detalle en [[gpu-nv2a]].
