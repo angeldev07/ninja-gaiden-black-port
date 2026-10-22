@@ -1,0 +1,91 @@
+name: Bug report
+description: Something crashes, looks wrong or does not work
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. This project needs your own copy of the game: never attach game
+        files, extracted assets or links to them. For security problems use a private advisory
+        (see SECURITY.md), not an issue.
+  - type: input
+    id: version
+    attributes:
+      label: Release version or commit
+      description: Shown in the launcher footer, or the output of `git rev-parse --short HEAD`.
+      placeholder: v0.2.0
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 23H2
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and driver version
+      placeholder: NVIDIA GeForce RTX 3060, 560.94
+    validations:
+      required: true
+  - type: dropdown
+    id: renderer
+    attributes:
+      label: Renderer
+      options:
+        - OpenGL
+        - Software
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: resolution
+    attributes:
+      label: Internal resolution
+      description: The setting in the launcher (match the screen, or a multiplier).
+      placeholder: Match screen (1920x1080)
+  - type: input
+    id: location
+    attributes:
+      label: Chapter and location
+      placeholder: Chapter 3, first courtyard
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and session info
+      description: |
+        Attach the log from the launcher (Advanced > Debugging) and paste the output of
+        "Copy session info". A screenshot of a rendering glitch is fine in an issue (it is never
+        committed to the repository); do not attach game files, extracted assets, saves or links to them.
+  - type: checkboxes
+    id: legal
+    attributes:
+      label: Legal
+      options:
+        - label: I am not attaching any game files, extracted assets or links to them
+          required: true

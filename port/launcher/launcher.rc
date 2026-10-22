@@ -18,11 +18,13 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "FileDescription", "Ninja Gaiden Black - native port launcher"
+            VALUE "FileDescription", "Unofficial Ninja Gaiden Black native port launcher"
             VALUE "FileVersion", NGB_VERSION_STR
             VALUE "InternalName", "ngb-launcher.exe"
             VALUE "OriginalFilename", "ngb-launcher.exe"
-            VALUE "ProductName", "Ninja Gaiden Black native port"
+            VALUE "ProductName", "Ninja Gaiden Black native port (unofficial fan project)"
+            VALUE "LegalCopyright", "(c) 2026 angeldev07 and contributors. GPL-3.0-or-later"
+            VALUE "Comments", "Not affiliated with Koei Tecmo, Team Ninja or Microsoft. No game data included."
             VALUE "ProductVersion", NGB_VERSION_STR
         END
     END

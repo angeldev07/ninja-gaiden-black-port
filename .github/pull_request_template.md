@@ -17,3 +17,5 @@
 - [ ] `python -m unittest discover -s tests -v` is green
 - [ ] Vault updated: affected pages, `docs/index.md` if there is a new page, an entry in `docs/log.md`
 - [ ] RE claims carry an anchor and a `VERIFIED` / `INFERRED` / `UNVERIFIED` tag
+- [ ] Every commit is signed off (`git commit -s`, see CONTRIBUTING.md)
+- [ ] No game data, XDK material or keys; third-party code listed in THIRD_PARTY.md

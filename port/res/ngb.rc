@@ -7,11 +7,11 @@
 
 #ifdef NGB_RC_LOADER
 #define NGB_RC_FILE "ngb-loader.exe"
-#define NGB_RC_DESC "Ninja Gaiden Black - native port (loader)"
+#define NGB_RC_DESC "Unofficial Ninja Gaiden Black native port (loader)"
 #define NGB_RC_TYPE VFT_APP
 #else
 #define NGB_RC_FILE "ngb-core.dll"
-#define NGB_RC_DESC "Ninja Gaiden Black - native port (core)"
+#define NGB_RC_DESC "Unofficial Ninja Gaiden Black native port (core)"
 #define NGB_RC_TYPE VFT_DLL
 #endif
 
@@ -34,7 +34,9 @@ BEGIN
             VALUE "FileVersion", NGB_VERSION_STR
             VALUE "InternalName", NGB_RC_FILE
             VALUE "OriginalFilename", NGB_RC_FILE
-            VALUE "ProductName", "Ninja Gaiden Black native port"
+            VALUE "ProductName", "Ninja Gaiden Black native port (unofficial fan project)"
+            VALUE "LegalCopyright", "(c) 2026 angeldev07 and contributors. GPL-3.0-or-later"
+            VALUE "Comments", "Not affiliated with Koei Tecmo, Team Ninja or Microsoft. No game data included."
             VALUE "ProductVersion", NGB_VERSION_STR
         END
     END

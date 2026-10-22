@@ -8,7 +8,7 @@
  *   - xapi_hle.c (loader): patches the game's XAPI functions with a JMP to ours
  *     and reads the real input (xinput1_4.dll / xinput9_1_0.dll and GetAsyncKeyState).
  *
- * Xbox layout (public XDK; nxdk lib/usb/libusbohci_xbox/xid_driver.h for the order of
+ * Xbox layout (nxdk lib/usb/libusbohci_xbox/xid_driver.h for the structures and the order of
  * the analog buttons and the sticks; XboxDevWiki "Xbox Input Devices" for the bits):
  *
  *   XINPUT_GAMEPAD (18 bytes)            XINPUT_STATE (22 bytes)

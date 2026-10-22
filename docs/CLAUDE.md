@@ -79,8 +79,8 @@ Obsidian resolves `[[links]]` by file name across the whole vault. That is why
 
 ## Page conventions
 
-- **Frontmatter** YAML on every page. There are two exceptions: [[log]], which is an
-  append-only record, and [[wiki-llm]], which is a verbatim copy of an external source:
+- **Frontmatter** YAML on every page. The one exception is [[log]], which is an
+  append-only record:
   ```yaml
   ---
   tags: [ngb, <area>]

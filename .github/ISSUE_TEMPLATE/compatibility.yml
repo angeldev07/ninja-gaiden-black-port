@@ -1,0 +1,63 @@
+name: Compatibility report
+description: Tell us how far the game got on your hardware
+labels: [compatibility]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Reports like this help track what works. Never attach game files, extracted assets or
+        links to them.
+  - type: input
+    id: version
+    attributes:
+      label: Release version or commit
+      placeholder: v0.2.0
+    validations:
+      required: true
+  - type: dropdown
+    id: progress
+    attributes:
+      label: How far did the game get?
+      options:
+        - Does not start
+        - Starts but does not reach the title screen
+        - Title screen
+        - In game, with major problems
+        - In game, with minor problems
+        - Plays fine
+    validations:
+      required: true
+  - type: input
+    id: chapter
+    attributes:
+      label: Furthest chapter reached
+      placeholder: Chapter 6
+    validations:
+      required: true
+  - type: input
+    id: fps
+    attributes:
+      label: Typical fps
+      description: Note any places where it drops.
+      placeholder: 60, about 45 in some cutscenes
+    validations:
+      required: true
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware and settings
+      description: Windows version, CPU, GPU and driver version, renderer, internal resolution, gamepad or keyboard.
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Visual, audio or input problems you noticed, and where.
+  - type: checkboxes
+    id: legal
+    attributes:
+      label: Legal
+      options:
+        - label: I am not attaching any game files, extracted assets or links to them
+          required: true

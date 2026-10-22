@@ -10,7 +10,7 @@
  * the address must also match the one in the Ghidra CSV (H5). If anything does not
  * add up, that function is left alone (another XBE, another version) and a warning is logged.
  *
- *   function                VA         ret   prototype (public XDK)
+ *   function                VA         ret   prototype (nxdk, XboxDevWiki)
  *   XGetDevices             0x3DCC99   4     DWORD (PXPP_DEVICE_TYPE)
  *   XGetDeviceChanges       0x3DCCBB   0xC   BOOL (PXPP_DEVICE_TYPE, PDWORD ins, PDWORD rem)
  *   XPeekDevices            0x3DCC58   0xC   DWORD (PXPP_DEVICE_TYPE, PDWORD ins, PDWORD rem)

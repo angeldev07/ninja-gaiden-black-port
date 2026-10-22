@@ -17,8 +17,13 @@ standard**. The remote is the GitHub repo `github.com/angeldev07/ninja-gaiden-bl
 - **Trunk-based:** `main` is always green. Branches are short-lived, named
   `<type>/<slug>`, where the type is `feat`, `fix`, `docs`, `ci`, `refactor`, `test` or `chore`.
 - **Conventional Commits.** The type and the description are in English:
-  `feat(afs): container inventory`. Each commit ends with
+  `feat(afs): container inventory`. Commits made by the agent team end with
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- **DCO sign-off (since 2026-10-22, before going public).** Every commit carries `Signed-off-by:` (`git commit -s`):
+  its author certifies the Developer Certificate of Origin 1.1 and that nothing comes from the game or the XDK. The
+  `dco.yml` workflow ("DCO sign-off") fails a PR with an unsigned commit. The maintainer's public identity is
+  `angeldev07` with the GitHub noreply email. Contributor rules: `CONTRIBUTING.md`; third-party code:
+  `THIRD_PARTY.md`.
 - **One PR per coherent unit.** Each includes code, tests and the vault update that
   corresponds to it: an undocumented change is not considered finished.
 - **Merge:** squash and delete the branch. The PR title becomes the commit on `main`.

@@ -65,8 +65,9 @@ New contributors should start with [`docs/GOAL-ngb-port.md`](docs/GOAL-ngb-port.
 
 ## License
 
-[GPL-3.0-or-later](LICENSE). Parts of the renderer and the pusher follow xemu
-(GPL-2.0-or-later). `port/third_party/renderdoc/renderdoc_app.h` is MIT (Baldur Karlsson).
+[GPL-3.0-or-later](LICENSE). Parts of the renderer and the pusher follow xemu.
+[THIRD_PARTY.md](THIRD_PARTY.md) lists every third-party file, the code that follows another project, and the
+references.
 
 ## Legal
 

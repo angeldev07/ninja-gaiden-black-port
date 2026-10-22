@@ -1,0 +1,39 @@
+name: dco
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  dco:
+    name: DCO sign-off
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check Signed-off-by on every commit
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -u
+          missing=0
+          # Merge commits (for example "Update branch") are skipped: they carry no authored change.
+          for sha in $(git rev-list --no-merges "$BASE_SHA..$HEAD_SHA"); do
+            if ! git show -s --format=%B "$sha" | grep -Eq '^Signed-off-by: .+ <.+>[[:space:]]*$'; then
+              echo "Missing Signed-off-by: $(git show -s --format='%h %s (%an)' "$sha")"
+              missing=$((missing + 1))
+            fi
+          done
+          if [ "$missing" -gt 0 ]; then
+            echo
+            echo "$missing commit(s) lack a Signed-off-by trailer."
+            echo "Fix with: git rebase --signoff <base> and force-push, or amend with git commit --amend -s."
+            echo "See CONTRIBUTING.md (Developer Certificate of Origin)."
+            exit 1
+          fi
+          echo "All commits are signed off."

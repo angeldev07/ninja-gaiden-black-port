@@ -14,7 +14,7 @@ in [[CLAUDE]] and the timeline in [[log]].
 - [[GOAL-ngb-port]]: what, why, where everything is, rules and current decisions. **Entry point.**
 - [[CLAUDE]]: vault schema, RE rules (anchors and confidence tags) and legal rules.
 - [[log]]: chronological record, append-only.
-- [[wiki-llm]]: the LLM Wiki pattern we follow.
+- [[wiki-llm]]: the LLM Wiki pattern we follow (our summary of Karpathy's idea file).
 
 ## Observation: reverse engineering (`reverse-engineering/`)
 
