@@ -259,7 +259,7 @@ __declspec(dllexport) int __cdecl ngb_main(void) {
     if (g_ngb_opts.window) {
         gfx_config_t cfg;
         memset(&cfg, 0, sizeof cfg);
-        cfg.title = "Ninja Gaiden Black (ngb-loader)";
+        cfg.title = "Ninja Gaiden Black · native port"; /* UTF-8: gfx_init_ex lo pasa a UTF-16 */
         cfg.width = 720;
         cfg.height = 480;
         cfg.scale = 2;

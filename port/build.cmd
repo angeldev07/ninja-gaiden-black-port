@@ -13,6 +13,11 @@ where cl >nul 2>nul || (echo build: no se encuentra cl.exe; revisa VCVARSALL & e
 
 set "CFLAGS=/nologo /W4 /WX /O2 /Zi /MT /GS /utf-8 /D_CRT_SECURE_NO_WARNINGS /I"%SRC%""
 
+rem 0) Recursos (icono y versión) de ngb-core.dll y ngb-loader.exe: res\ngb.rc, ver res\make_icon.py.
+where rc >nul 2>nul || (echo build: no se encuentra rc.exe; revisa VCVARSALL & exit /b 1)
+rc /nologo /DNGB_RC_CORE /I"%PORT%res" /fo"%OUT%\obj\core.res" "%PORT%res\ngb.rc" || exit /b 1
+rc /nologo /DNGB_RC_LOADER /I"%PORT%res" /fo"%OUT%\obj\loader.res" "%PORT%res\ngb.rc" || exit /b 1
+
 rem 1) ngb-core.dll: el loader, el kernel emulado y los stubs generados.
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\core.pdb" /c ^
   "%SRC%\main.c" "%SRC%\symbols.c" "%SRC%\xbe.c" "%SRC%\memory.c" "%SRC%\log.c" "%SRC%\watch.c" "%SRC%\thread.c" "%SRC%\crash.c" ^
@@ -36,7 +41,7 @@ link /nologo /DLL /DEBUG /OUT:"%OUT%\ngb-core.dll" /PDB:"%OUT%\ngb-core.pdb" ^
   "%OUT%\obj\glbackend.obj" "%OUT%\obj\glload.obj" "%OUT%\obj\glstate.obj" "%OUT%\obj\texconv.obj" ^
   "%OUT%\obj\vsh.obj" "%OUT%\obj\psh.obj" "%OUT%\obj\emit.obj" ^
   "%OUT%\obj\input.obj" "%OUT%\obj\xapi_hle.obj" ^
-  "%OUT%\obj\present.obj" kernel32.lib shell32.lib user32.lib gdi32.lib winmm.lib opengl32.lib || exit /b 1
+  "%OUT%\obj\present.obj" "%OUT%\obj\core.res" kernel32.lib shell32.lib user32.lib gdi32.lib winmm.lib opengl32.lib || exit /b 1
 
 rem 2) ngb-loader.exe: base fija 0x10000 + BSS que reserva la imagen del XBE. Sin CRT.
 cl /nologo /W4 /WX /O1 /GS- /Zi /utf-8 /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\stub.pdb" /c "%SRC%\loader_stub.c" || exit /b 1
@@ -44,7 +49,7 @@ link /nologo /DEBUG /OUT:"%OUT%\ngb-loader.exe" /PDB:"%OUT%\ngb-loader.pdb" ^
   /NODEFAULTLIB /ENTRY:ngb_stub_entry /SUBSYSTEM:CONSOLE ^
   /BASE:0x10000 /FIXED /DYNAMICBASE:NO /NXCOMPAT:NO /SAFESEH:NO /LARGEADDRESSAWARE ^
   /SECTION:.xbox,RWE ^
-  "%OUT%\obj\loader_stub.obj" kernel32.lib || exit /b 1
+  "%OUT%\obj\loader_stub.obj" "%OUT%\obj\loader.res" kernel32.lib || exit /b 1
 
 rem 3a) Prueba del confinamiento de rutas (hostpath.c), sin datos del juego.
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\hostpath_test.pdb" /Fe"%OUT%\hostpath_test.exe" "%PORT%tests\hostpath_test.c" "%SRC%\kernel\hostpath.c" || exit /b 1
@@ -79,5 +84,10 @@ cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\gfx_test.pdb" /Fe"%OUT%\gfx_test.exe"
 
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\gl_test.pdb" /Fe"%OUT%\gl_test.exe" "%PORT%tests\gl_test.c" "%SRC%\gl\glbackend.c" "%SRC%\gl\glload.c" "%SRC%\gl\glpng.c" "%SRC%\gl\texconv.c" "%SRC%\gl\glstate.c" "%SRC%\shaders\vsh.c" "%SRC%\shaders\psh.c" "%SRC%\shaders\emit.c" opengl32.lib user32.lib gdi32.lib || exit /b 1
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\texconv_test.pdb" /Fe"%OUT%\texconv_test.exe" "%PORT%tests\texconv_test.c" "%SRC%\gl\texconv.c" "%SRC%\gl\glstate.c" "%SRC%\gl\glbackend.c" "%SRC%\gl\glload.c" opengl32.lib user32.lib gdi32.lib && "%OUT%\texconv_test.exe" || exit /b 1
-echo build: %OUT%\ngb-loader.exe + ngb-core.dll
+
+rem 5) ngb-launcher.exe: el launcher gráfico (Win32 + GDI, sin dependencias). Ver launcher\launcher.c.
+rc /nologo /I"%PORT%res" /I"%PORT%launcher" /fo"%OUT%\obj\launcher.res" "%PORT%launcher\launcher.rc" || exit /b 1
+cl %CFLAGS% /I"%PORT%res" /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\launcher.pdb" /Fe"%OUT%\ngb-launcher.exe" "%PORT%launcher\launcher.c" "%OUT%\obj\launcher.res" ^
+  /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib shell32.lib comdlg32.lib advapi32.lib || exit /b 1
+echo build: %OUT%\ngb-loader.exe + ngb-core.dll + ngb-launcher.exe
 endlocal

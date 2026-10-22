@@ -405,7 +405,7 @@ static void update_title(HWND hwnd) {
     EnterCriticalSection(&g.lock);
     fps = g.fps;
     LeaveCriticalSection(&g.lock);
-    swprintf(text, sizeof text / sizeof text[0], L"%ls - %.1f fps - F12: captura", g.title, fps);
+    swprintf(text, sizeof text / sizeof text[0], L"%ls  ·  %.1f fps  ·  F12: captura", g.title, fps);
     SetWindowTextW(hwnd, text);
 }
 
@@ -452,10 +452,52 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
     return DefWindowProcW(hwnd, msg, wparam, lparam);
 }
 
+/* Icono de la ventana: el recurso 1 de ngb-core.dll (res\ngb.rc), en el tamaño que pide el
+ * sistema (grande para la barra de tareas y Alt+Tab, pequeño para el título). La DLL, y no
+ * el exe: cuando el XBE ocupa 0x10000 el exe pierde su cabecera PE. Sin recurso (el
+ * presentador enlazado a mano en los tests) devuelve NULL y la ventana usa el icono por
+ * defecto. */
+static HICON load_app_icon(int big) {
+    HMODULE mod = NULL;
+    int cx = GetSystemMetrics(big ? SM_CXICON : SM_CXSMICON);
+    int cy = GetSystemMetrics(big ? SM_CYICON : SM_CYSMICON);
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            (LPCWSTR)&g, &mod) ||
+        !mod)
+        return NULL;
+    return (HICON)LoadImageW(mod, MAKEINTRESOURCEW(1), IMAGE_ICON, cx, cy, LR_DEFAULTCOLOR);
+}
+
+/* Esquina superior izquierda para que una ventana de `w` x `h` (borde incluido) quede
+ * centrada en el área de trabajo del monitor donde está el cursor (el del usuario que acaba
+ * de lanzar el juego). Si no se puede saber, deja que Windows elija (CW_USEDEFAULT). */
+static void centered_origin(int w, int h, int *x, int *y) {
+    POINT cursor;
+    MONITORINFO mi;
+    HMONITOR mon;
+    *x = CW_USEDEFAULT;
+    *y = CW_USEDEFAULT;
+    if (!GetCursorPos(&cursor))
+        return;
+    mon = MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY);
+    memset(&mi, 0, sizeof mi);
+    mi.cbSize = sizeof mi;
+    if (!mon || !GetMonitorInfoW(mon, &mi))
+        return;
+    *x = mi.rcWork.left + (mi.rcWork.right - mi.rcWork.left - w) / 2;
+    *y = mi.rcWork.top + (mi.rcWork.bottom - mi.rcWork.top - h) / 2;
+    if (*x < mi.rcWork.left) /* ventana mayor que el monitor: que se vea al menos la esquina */
+        *x = mi.rcWork.left;
+    if (*y < mi.rcWork.top)
+        *y = mi.rcWork.top;
+}
+
 static DWORD WINAPI window_thread(LPVOID param) {
     WNDCLASSEXW wc;
     RECT r;
     MSG msg;
+    int ox, oy;
     HINSTANCE inst = GetModuleHandleW(NULL);
     int ch = g.cfg.height * g.cfg.scale, cw = (int)(ch * aspect_ratio() + 0.5);
     (void)param;
@@ -465,13 +507,15 @@ static DWORD WINAPI window_thread(LPVOID param) {
     wc.lpfnWndProc = window_proc;
     wc.hInstance = inst;
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hIcon = load_app_icon(1);
+    wc.hIconSm = load_app_icon(0);
     wc.lpszClassName = GFX_CLASS;
     RegisterClassExW(&wc); /* si ya existía (segunda ventana tras un shutdown), sirve igual */
     SetRect(&r, 0, 0, cw, ch);
     AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
-    g.hwnd = CreateWindowExW(0, GFX_CLASS, g.title, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
-                             CW_USEDEFAULT, r.right - r.left, r.bottom - r.top, NULL, NULL, inst,
-                             NULL);
+    centered_origin(r.right - r.left, r.bottom - r.top, &ox, &oy);
+    g.hwnd = CreateWindowExW(0, GFX_CLASS, g.title, WS_OVERLAPPEDWINDOW, ox, oy,
+                             r.right - r.left, r.bottom - r.top, NULL, NULL, inst, NULL);
     g.init_ok = g.hwnd != NULL;
     if (g.hwnd)
         ShowWindow(g.hwnd, g.cfg.hidden ? SW_HIDE : SW_SHOWNORMAL);

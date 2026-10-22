@@ -372,3 +372,18 @@ Detalle en [[audio-apu]].
 - Tag `v0.1.0` sobre `7796960`, con una release en GitHub que adjunta `ngb-loader.exe` y `ngb-core.dll`
   compilados desde el tag (sin datos del juego).
 - Punto de retorno antes de tocar el pusher (el congelamiento) y la iluminación: `git checkout v0.1.0`.
+
+## [2026-10-22] feat | Launcher, icono y ventana centrada
+- **`ngb-launcher.exe`** (`port/launcher/launcher.c`, Win32 + GDI sin dependencias): tema oscuro inspirado en
+  el launcher del port de Bloodborne.
+  - Secciones Jugar (ruta al XBE y estado), Gráficos (`--renderer`, `--no-pacing`), Audio (`--mute`,
+    `--audio-wav`), Controles (mapeo, solo lectura), Avanzado (`--rdoc-key`, `--lenient`, `--log-cap`) y Log
+    (cola del último log de `runs`).
+  - PLAY lanza `ngb-loader.exe` sin consola y Stop lo termina. Los ajustes van en `ngb.ini`, junto al exe.
+- **Icono original** (shuriken): `port/res/make_icon.py` (stdlib), embebido en los tres binarios. La ventana lo
+  carga de `ngb-core.dll`, porque el exe pierde su cabecera PE cuando el XBE se carga en `0x10000`.
+- **La ventana del juego** se abre centrada en el monitor del cursor, con icono y el título
+  "Ninja Gaiden Black · native port".
+- **Pendientes:** escalado DPI distinto del 100 %, navegación por teclado en el launcher, y que cerrar el launcher
+  con el juego abierto no registre la sesión.
+- Lo hizo un subagente (Sonnet) en un worktree; lo revisó e integró el líder.

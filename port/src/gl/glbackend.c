@@ -55,14 +55,30 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcA(hwnd, msg, wp, lp);
 }
 
+/* Icono del recurso 1 de este módulo (ngb-core.dll, res\ngb.rc); NULL si no lo tiene. */
+static HICON load_icon(void) {
+    HMODULE mod = NULL;
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            (LPCSTR)&g, &mod) ||
+        !mod) {
+        return NULL;
+    }
+    return (HICON)LoadImageA(mod, MAKEINTRESOURCEA(1), IMAGE_ICON, GetSystemMetrics(SM_CXICON),
+                             GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR);
+}
+
 static int create_window(int width, int height) {
     WNDCLASSA wc;
     RECT rect;
+    POINT cursor;
+    int x, y;
     HINSTANCE instance = GetModuleHandleA(NULL);
     memset(&wc, 0, sizeof wc);
     wc.style = CS_OWNDC;
     wc.lpfnWndProc = window_proc;
     wc.hInstance = instance;
+    wc.hIcon = load_icon();
     wc.hCursor = LoadCursorA(NULL, (LPCSTR)IDC_ARROW);
     wc.lpszClassName = WINDOW_CLASS;
     if (!RegisterClassA(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
@@ -73,9 +89,28 @@ static int create_window(int width, int height) {
     rect.right = width;
     rect.bottom = height;
     AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
-    g.hwnd = CreateWindowExA(0, WINDOW_CLASS, "ngb - OpenGL", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
-                             CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top, NULL,
-                             NULL, instance, NULL);
+    /* Centrada en el área de trabajo del monitor donde está el cursor. */
+    x = CW_USEDEFAULT;
+    y = CW_USEDEFAULT;
+    if (GetCursorPos(&cursor)) {
+        MONITORINFO mi;
+        HMONITOR mon = MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY);
+        memset(&mi, 0, sizeof mi);
+        mi.cbSize = sizeof mi;
+        if (mon && GetMonitorInfoA(mon, &mi)) {
+            x = mi.rcWork.left + (mi.rcWork.right - mi.rcWork.left - (rect.right - rect.left)) / 2;
+            y = mi.rcWork.top + (mi.rcWork.bottom - mi.rcWork.top - (rect.bottom - rect.top)) / 2;
+            if (x < mi.rcWork.left) {
+                x = mi.rcWork.left;
+            }
+            if (y < mi.rcWork.top) {
+                y = mi.rcWork.top;
+            }
+        }
+    }
+    g.hwnd = CreateWindowExA(0, WINDOW_CLASS, "Ninja Gaiden Black - native port",
+                             WS_OVERLAPPEDWINDOW, x, y, rect.right - rect.left,
+                             rect.bottom - rect.top, NULL, NULL, instance, NULL);
     if (!g.hwnd) {
         return GLB_ERR_WINDOW;
     }
