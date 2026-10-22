@@ -103,3 +103,47 @@ terminar el juego sigue solo. El líder revisó las capturas `vp2-pgraph-shot-09
   - la demo sigue con su montaje de cinemáticas y llega al menos al frame 10500;
   - en 200 s, 993 `VOICE_ON` frente a 46, porque DirectSound ya recupera las voces libres;
   - 986 avisos entregados y ninguno perdido.
+
+## Música a trozos: el hilo vsync de CRI sin su prioridad (`VERIFIED`)
+
+- **Síntoma:** con sonido, la música se oía a trozos aunque la salida no se vaciaba nunca (0 vaciados y 0 frames
+  descartados), y el gameplay caía a 40-58 fps. Los efectos de sonido iban bien.
+- **Medida:**
+  - La música es la voz 68: PCM de 16 bits estéreo a 44,1 kHz (pitch `0xFE0B`), en un anillo de 16 384 muestras
+    (unos 0,37 s) que CRI rellena.
+  - Se compararon los hashes de cada tramo de 1 024 muestras con los de la vuelta anterior. Entre el 20 y el 30 %
+    de los tramos sonaban sin haberse reescrito, o sea repetidos.
+  - CRI escribía unas 2 560 muestras cada 80 ms (unas 32 000 por segundo) para una voz que consume 44 100.
+- **Cadena (Ghidra):**
+  - La capa `mwSnd` de CRI tiene una tabla de funciones en `0x433A00`. La posición la da `+0x38`
+    (`IDirectSoundBuffer_GetCurrentPosition`) y la escritura `+0x6C` (`Lock`, copia y `Unlock`).
+  - El servidor ADX lo mueve el hilo vsync de ADXM (`0x335710`): `D3DDevice_BlockUntilVerticalBlank`, servidores
+    y `ResumeThread` del hilo principal de CRI (`0x3353B0`), que decodifica y se suspende.
+  - Ese hilo daba unas 13 vueltas por segundo en vez de 60 (contador del propio CRI en `0x489E38`).
+- **Causas:**
+  1. **Prioridades ignoradas.** `KeSetBasePriorityThread` era un stub. CRI pide prioridad alta para su hilo vsync
+     y TIME_CRITICAL para el principal; el hilo principal del juego la reaplica cientos de veces. Todos los hilos
+     Xbox comparten un núcleo, como en la consola. Sin prioridades, el hilo vsync esperaba un cuanto entero
+     detrás de otros hilos y se saltaba vblanks.
+  2. **El vblank no iba a 60 Hz.** El hilo de DPC usaba `GetTickCount64`, que avanza a saltos de ~15,6 ms. Un
+     vblank "cada 16 ms" caía cada 31 ms: entre 26 y 37 por segundo. Los `KTIMER` periódicos se retrasaban igual.
+  3. **El hardware compartía el núcleo del juego.** El proceso entero estaba fijado a un núcleo, así que el hilo de
+     render (la GPU) y el de mezcla (la APU, en TIME_CRITICAL) le quitaban tiempo al juego. En cuanto el juego tuvo
+     sus prioridades, el hilo de audio se quedó a veces sin CPU (11 vaciados en 150 s).
+- **Arreglo:**
+  - `KeSetBasePriorityThread`, `KeQueryBasePriorityThread` y `KeSetDisableBoostThread` se aplican al hilo del
+    host. Los valores de XAPI (-2..2 y ±16) son los mismos `THREAD_PRIORITY_*`. El hilo de DPC va en
+    TIME_CRITICAL, porque las interrupciones se adelantan a todo.
+  - El hilo de DPC usa un reloj QPC de 1 ms. El vblank se programa en microsegundos y sin deriva, igual que los
+    timers periódicos.
+  - Los hilos Xbox se fijan al núcleo 0 y los hilos que emulan hardware (render y mezcla) van al resto
+    (`ngb_pin_hardware_thread`), como la GPU y la APU, que en la Xbox trabajan en paralelo a la CPU.
+- **Resultado** (demo determinista, 150 s, con sonido):
+  - el hilo vsync de CRI da 60 vueltas por segundo y ningún tramo de la música se repite;
+  - 0 vaciados;
+  - el gameplay va a 60 fps en todas las ventanas (antes, 40-58), con el dibujo en 1,4-2,6 ms por frame;
+  - 0 errores del push buffer.
+- **Lección:** los contadores de diagnóstico alteraban el reparto de CPU. Un muestreador de EIP en el hilo de DPC
+  bajaba el vblank a 30 por segundo y la música dejaba de fallar. Para medir esto, mejor contadores baratos en
+  el propio juego (`0x489E38`) que hilos que paren a otros.
+

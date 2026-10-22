@@ -126,6 +126,7 @@ typedef struct ngb_thread {
     uint32_t inflight_ordinal; /* llamada al kernel en curso (0 = ninguna) */
     uint32_t inflight_caller;
     uint32_t irql;
+    int32_t base_prio; /* incremento de KeSetBasePriorityThread (0 = normal) */
     void *xbox_stack;
     uint32_t saved_stack_base, saved_stack_limit, saved_seh;
 } ngb_thread_t;
@@ -144,6 +145,8 @@ void ngb_ke_set_event(uint32_t event); /* KeSetEvent sobre un KEVENT del juego *
 LONG ngb_thread_suspend(ngb_thread_t *t);
 LONG ngb_thread_resume(ngb_thread_t *t);
 ngb_thread_t *ngb_thread_from_ethread(uint32_t ethread);
+/* Aparta del núcleo de los hilos Xbox un hilo propio que emula hardware (GPU, APU). */
+void ngb_pin_hardware_thread(HANDLE h);
 ngb_thread_t *ngb_thread_from_handle(HANDLE h);
 __declspec(noreturn) void ngb_thread_exit(uint32_t status);
 int ngb_thread_alive_count(void);

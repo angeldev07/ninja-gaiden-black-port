@@ -114,6 +114,14 @@ LONG ngb_thread_resume(ngb_thread_t *t) {
     return prev;
 }
 
+/* La GPU y la APU de la Xbox trabajan en paralelo a la CPU: sus hilos de emulación van a los
+ * núcleos 1..n y no le quitan tiempo al juego, que vive en el núcleo 0 (ngb_thread_spawn). */
+void ngb_pin_hardware_thread(HANDLE h) {
+    DWORD_PTR proc, sys;
+    if (h && GetProcessAffinityMask(GetCurrentProcess(), &proc, &sys) && (proc & ~(DWORD_PTR)1))
+        SetThreadAffinityMask(h, proc & ~(DWORD_PTR)1);
+}
+
 ngb_thread_t *ngb_thread_current(void) {
     return g_tls == TLS_OUT_OF_INDEXES ? NULL : (ngb_thread_t *)TlsGetValue(g_tls);
 }
@@ -308,6 +316,7 @@ ngb_thread_t *ngb_thread_spawn(uint32_t start_routine, uint32_t start_context,
         free(t);
         return NULL;
     }
+    SetThreadAffinityMask(t->handle, 1); /* la CPU de la Xbox: un núcleo para todos sus hilos */
     *(uint32_t *)(t->ethread + 0x12C) = t->tid; /* ETHREAD.UniqueThread */
     EnterCriticalSection(&g_threads_lock);
     t->next = g_threads;

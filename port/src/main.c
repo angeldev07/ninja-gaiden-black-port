@@ -268,8 +268,9 @@ __declspec(dllexport) int __cdecl ngb_main(void) {
             ngb_log("gfx: ventana 720x480 x2 (4:3), F12 guarda captura en runs\\shots");
     }
 
-    /* Xbox: un solo núcleo y sin NX. */
-    SetProcessAffinityMask(GetCurrentProcess(), 1);
+    /* Xbox: un solo núcleo y sin NX. Los hilos Xbox se fijan al núcleo 0 (ngb_thread_spawn);
+     * los que emulan hardware, al resto (ngb_pin_hardware_thread). */
+    SetThreadAffinityMask(GetCurrentThread(), 1);
     SetProcessDEPPolicy(0);
 
     ngb_kernel_init();

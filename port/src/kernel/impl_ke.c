@@ -445,16 +445,37 @@ typedef void(__stdcall *dpc_routine_fn)(uint32_t dpc, uint32_t ctx, uint32_t a1,
 
 static uint8_t *g_gpu_interrupt; /* KINTERRUPT conectado al nivel 3 (NV2A) */
 static uint8_t *g_apu_interrupt; /* KINTERRUPT conectado al nivel 5 (APU, DirectSound) */
-static ULONGLONG g_next_vblank;
+static ULONGLONG g_next_vblank; /* en microsegundos de dpc_now_us */
+#define VBLANK_US 16667ull      /* 60 Hz */
+
+/* Reloj del hilo de DPC en microsegundos (QPC). GetTickCount64 avanza a saltos de ~15,6 ms:
+ * con él, un vblank "cada 16 ms" caía cada 31 ms (26-37 por segundo) y los KTIMER periódicos
+ * se retrasaban igual. */
+static ULONGLONG dpc_now_us(void) {
+    static LARGE_INTEGER f;
+    LARGE_INTEGER t;
+    if (!f.QuadPart)
+        QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&t);
+    return (ULONGLONG)(t.QuadPart / f.QuadPart) * 1000000ull +
+           (ULONGLONG)(t.QuadPart % f.QuadPart) * 1000000ull / (ULONGLONG)f.QuadPart;
+}
+
+static ULONGLONG dpc_now_ms(void) {
+    return dpc_now_us() / 1000ull;
+}
 
 typedef uint8_t(__stdcall *isr_fn)(uint32_t interrupt, uint32_t context);
 
 /* Vblank sintético a ~60 Hz: marca la interrupción en el modelo y llama a la ISR de D3D. */
-static void vblank_tick(ULONGLONG now, ULONGLONG *next) {
+static void vblank_tick(ULONGLONG *next) {
+    ULONGLONG us = dpc_now_us(), due_ms;
     if (!g_gpu_interrupt || !nv2a_vblank_enabled())
         return;
-    if (now >= g_next_vblank) {
-        g_next_vblank = now + 16;
+    if (us >= g_next_vblank) {
+        /* Sin deriva: el siguiente se cuenta desde el previsto, no desde ahora. Tras una parada
+           larga (depurador) se vuelve a sincronizar en vez de soltar una ráfaga. */
+        g_next_vblank = us - g_next_vblank > 50000ull ? us + VBLANK_US : g_next_vblank + VBLANK_US;
         if (nv2a_vblank() && g_gpu_interrupt[0x10]) {
             uint32_t old = raise_irql(*(uint32_t *)(g_gpu_interrupt + 0xC) & 0xFF);
             ((isr_fn)(uintptr_t) * (uint32_t *)g_gpu_interrupt)(
@@ -462,8 +483,9 @@ static void vblank_tick(ULONGLONG now, ULONGLONG *next) {
             lower_irql(old);
         }
     }
-    if (g_next_vblank < *next)
-        *next = g_next_vblank;
+    due_ms = (g_next_vblank + 999ull) / 1000ull;
+    if (due_ms < *next)
+        *next = due_ms;
 }
 
 /* Llama a la ISR de un KINTERRUPT conectado, a su IRQL. */
@@ -493,7 +515,7 @@ static void run_dpc(uint32_t dpc) {
 static void __stdcall dpc_thread(uint32_t unused) {
     (void)unused;
     for (;;) {
-        ULONGLONG now = GetTickCount64(), next = now + 50;
+        ULONGLONG now = dpc_now_ms(), next = now + 50;
         uint32_t fire[MAX_TIMERS + MAX_DPCS];
         int nfire = 0, i;
         EnterCriticalSection(&g_timer_lock);
@@ -515,15 +537,18 @@ static void __stdcall dpc_thread(uint32_t unused) {
             SetEvent(obj_handle(s->timer));
             if (*(uint32_t *)(tm + 0x20))
                 fire[nfire++] = *(uint32_t *)(tm + 0x20);
-            if (s->period_ms)
-                s->due_ms = now + s->period_ms;
-            else
+            if (s->period_ms) { /* periódico sin deriva; si va muy atrás, desde ahora */
+                s->due_ms += s->period_ms;
+                if (s->due_ms <= now)
+                    s->due_ms = now + s->period_ms;
+            } else {
                 s->active = 0;
+            }
         }
         LeaveCriticalSection(&g_timer_lock);
         for (i = 0; i < nfire; i++)
             run_dpc(fire[i]);
-        vblank_tick(now, &next);
+        vblank_tick(&next);
         ngb_apu_tick();
         if (g_apu_interrupt)
             ngb_apu_interrupt(call_isr, g_apu_interrupt);
@@ -546,6 +571,9 @@ static BOOL CALLBACK dpc_init(PINIT_ONCE once, PVOID param, PVOID *ctx) {
     if (!t)
         ngb_stop(NGB_EXIT_CRASH, "no se pudo crear el hilo de DPC");
     t->internal = 1;
+    /* Las interrupciones y las DPC se adelantan a cualquier hilo, también a los que el juego
+       pone en TIME_CRITICAL. */
+    SetThreadPriority(t->handle, THREAD_PRIORITY_TIME_CRITICAL);
     InterlockedExchange(&g_dpc_started, 1);
     ResumeThread(t->handle);
     return TRUE;
@@ -587,7 +615,7 @@ static int timer_set(uint32_t timer, int64_t due, uint32_t period, uint32_t dpc)
     ResetEvent(obj_handle(timer));
     if (free_slot >= 0) {
         g_timers[free_slot].timer = timer;
-        g_timers[free_slot].due_ms = GetTickCount64() + ms;
+        g_timers[free_slot].due_ms = dpc_now_ms() + ms;
         g_timers[free_slot].period_ms = period;
         g_timers[free_slot].active = 1;
     }
@@ -726,10 +754,49 @@ static uint64_t KeSynchronizeExecution(uint32_t *args) {
 
 /* ------------------------------------------------------------------ prioridades y FPU */
 
-/* 143 KeSetBasePriorityThread, 144 KeSetDisableBoostThread, 124 KeQueryBasePriorityThread */
-static uint64_t KePriorityStub(uint32_t *args) {
-    (void)args;
-    return 0;
+/*
+ * Prioridades. XAPI SetThreadPriority llama a KeSetBasePriorityThread con el incremento sobre la
+ * prioridad base: -2..2 y ±16 para TIME_CRITICAL / IDLE. Se aplican al hilo del host con los
+ * mismos valores (THREAD_PRIORITY_*). Importan porque los hilos Xbox comparten un núcleo, como
+ * en la consola: sin ellas, el hilo vsync de CRI (que pide prioridad alta para correr nada más llegar
+ * el vblank) esperaba un cuanto entero tras el hilo principal, se saltaba vblanks y la música
+ * se quedaba sin datos.
+ */
+static int host_priority(int32_t increment) {
+    if (increment >= 15)
+        return THREAD_PRIORITY_TIME_CRITICAL;
+    if (increment <= -15)
+        return THREAD_PRIORITY_IDLE;
+    return increment > 2 ? 2 : increment < -2 ? -2 : (int)increment;
+}
+
+/* 143 LONG KeSetBasePriorityThread(PKTHREAD Thread, LONG Increment) */
+static uint64_t KeSetBasePriorityThread(uint32_t *args) {
+    ngb_thread_t *t = ngb_thread_from_ethread(ARG(0));
+    int32_t old;
+    if (!t)
+        return 0;
+    old = t->base_prio;
+    t->base_prio = (int32_t)ARG(1);
+    SetThreadPriority(t->handle, host_priority(t->base_prio));
+    return RET32((uint32_t)old);
+}
+
+/* 124 LONG KeQueryBasePriorityThread(PKTHREAD Thread) */
+static uint64_t KeQueryBasePriorityThread(uint32_t *args) {
+    ngb_thread_t *t = ngb_thread_from_ethread(ARG(0));
+    return t ? RET32((uint32_t)t->base_prio) : 0;
+}
+
+/* 144 LOGICAL KeSetDisableBoostThread(PKTHREAD Thread, LOGICAL Disable) */
+static uint64_t KeSetDisableBoostThread(uint32_t *args) {
+    ngb_thread_t *t = ngb_thread_from_ethread(ARG(0));
+    BOOL old = FALSE;
+    if (!t)
+        return 0;
+    GetThreadPriorityBoost(t->handle, &old);
+    SetThreadPriorityBoost(t->handle, ARG(1) != 0);
+    return RET32((uint32_t)(old != 0));
 }
 
 /* 142 KeSaveFloatingPointState(PKFLOATING_SAVE) / 139 KeRestoreFloatingPointState */
@@ -792,7 +859,7 @@ static const ngb_kimpl_t k_impls[] = {
     {113, KeInitializeTimerEx},
     {119, KeInsertQueueDpc},
     {123, KeResetEvent},
-    {124, KePriorityStub},
+    {124, KeQueryBasePriorityThread},
     {125, KeQueryInterruptTime},
     {126, KeQueryPerformanceCounter},
     {127, KeQueryPerformanceFrequency},
@@ -802,8 +869,8 @@ static const ngb_kimpl_t k_impls[] = {
     {137, KeRemoveQueueDpc},
     {139, KeFloatingPointState},
     {142, KeFloatingPointState},
-    {143, KePriorityStub},
-    {144, KePriorityStub},
+    {143, KeSetBasePriorityThread},
+    {144, KeSetDisableBoostThread},
     {145, KeSetEvent},
     {149, KeSetTimer},
     {150, KeSetTimerEx},

@@ -21,7 +21,7 @@ en [[CLAUDE]] y la línea de tiempo en [[log]].
 - [[disco-ngb]]: imagen Redump y XISO, 249 archivos por tipo, grupos de AFS, ejecutables y videos.
 - [[arranque-nativo]]: qué hace `default.xbe` al arrancar de forma nativa (H6): hilos, XAPI, unidades, caché en el disco duro, init de D3D hasta la primera MMIO del NV2A.
 - [[personajes]]: galería de los 62 `chr_*`: 49 exportan a GLB, 20 con idle; fallos agrupados por causa.
-- [[audio-apu]]: APU del MCPX. Un procesador de voces mínimo avanza la posición de DirectSound y así el vídeo de introducción se reproduce entero (aún sin sonido).
+- [[audio-apu]]: APU del MCPX: procesador de voces, mezcla a waveOut, interrupciones de voz libre y la música de CRI (prioridades de hilos y vblank a 60 Hz).
 - [[entrada-xapi]]: el mando por HLE de las 8 funciones de XAPI. El bloqueo tras los avisos no es la entrada (hipótesis: vídeo de Sofdec sin audio).
 - [[gpu-nv2a]]: H7a. Registros del NV2A emulados, vblank y push buffer: el juego llega a la pantalla de avisos y envía 808k primitivas (aún sin rasterizar).
 - [[shaders-nv2a]]: traductor de vertex programs y register combiners del NV2A a GLSL; los 16 vertex programs reales del juego se decodifican.

@@ -244,6 +244,7 @@ int pgl_start(HWND hwnd, char *why, size_t whylen) {
         snprintf(why, whylen, "no se pudo crear el hilo de render");
         return GLB_ERR_ARGS;
     }
+    ngb_pin_hardware_thread(R.thread);
     WaitForSingleObject(R.done, INFINITE);
     if (R.init_err) {
         snprintf(why, whylen, "%s", glb_error_text(R.init_err));

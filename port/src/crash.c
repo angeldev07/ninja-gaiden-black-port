@@ -299,8 +299,12 @@ void ngb_apu_tick(void) {
             dt = 0.1;
         if (g_audio < 0 && g_vp.voices && !g_ngb_opts.mute) {
             g_audio = audio_out_open() == 0;
-            if (g_audio == 1)
-                CloseHandle(CreateThread(NULL, 0, audio_pump, NULL, 0, NULL));
+            if (g_audio == 1) {
+                HANDLE pump = CreateThread(NULL, 0, audio_pump, NULL, 0, NULL);
+                ngb_pin_hardware_thread(pump);
+                if (pump)
+                    CloseHandle(pump);
+            }
             if (g_audio == 1 && g_ngb_opts.audio_wav) {
                 char path[MAX_PATH];
                 snprintf(path, sizeof path, "%s-audio.wav", g_ngb_opts.log_path);

@@ -304,3 +304,23 @@ Detalle en [[gpu-nv2a]].
 - **Siguiente en coste:** la decodificación del push buffer (unos 6 ms) y la subida de vértices (2-3 ms).
 
 Detalle en [[gpu-nv2a]].
+
+## [2026-10-22] fix | La música a trozos: prioridades, vblank a 60 Hz y la GPU y la APU en otros núcleos
+- **Síntoma:** con sonido, la música se oía a trozos y el gameplay caía a 40-58 fps. Con `--mute`, los fps iban
+  mejor.
+- **Medida:** el 20-30 % de los tramos del anillo de la música (voz 68) se repetía, porque CRI escribía unas
+  32 000 muestras por segundo para una voz de 44 100. Su hilo vsync (`0x335710`) daba 13 vueltas por segundo en
+  vez de 60.
+- **Causas:**
+  - `KeSetBasePriorityThread` era un stub, así que el hilo vsync de CRI no tenía su prioridad alta en el núcleo
+    compartido;
+  - el vblank iba a 26-37 Hz porque el hilo de DPC usaba `GetTickCount64`, con saltos de ~15,6 ms;
+  - el render y la mezcla compartían el núcleo del juego.
+- **Arreglo:**
+  - las prioridades de los hilos se aplican al host, y el hilo de DPC va en TIME_CRITICAL;
+  - el hilo de DPC usa un reloj QPC, y el vblank y los timers no derivan;
+  - los hilos Xbox van al núcleo 0, y el render y la mezcla al resto.
+- **Resultado:** la música no repite ningún tramo, hay 0 vaciados y el gameplay va a 60 fps, con sonido.
+
+Detalle en [[audio-apu]].
+
