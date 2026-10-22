@@ -63,6 +63,11 @@ python -m unittest discover -s tests -v
 New contributors should start with [`docs/GOAL-ngb-port.md`](docs/GOAL-ngb-port.md) and
 [`docs/index.md`](docs/index.md).
 
+## License
+
+[GPL-3.0-or-later](LICENSE). Parts of the renderer and the pusher follow xemu
+(GPL-2.0-or-later). `port/third_party/renderdoc/renderdoc_app.h` is MIT (Baldur Karlsson).
+
 ## Legal
 
 Ninja Gaiden is a trademark of Koei Tecmo. This project is not affiliated with or endorsed by
