@@ -238,3 +238,20 @@ píxel del suelo mostró 43 draws descartados por culling: `glstate` invertía e
 nuestra proyección ya lo compensa. Sin la inversión aparece el escenario de la demo. Lección: con estado de GPU,
 un depurador de frames responde en minutos lo que las trazas a ciegas no respondían en horas. Detalle en
 [[gpu-nv2a]].
+
+## [2026-10-22] ingest | El templo de la demo: culling invertido y skinning del pipeline fijo
+- **El diagnóstico de #52 era incorrecto:**
+  - su cambio en `glstate` no tenía efecto, porque `pgraph_gl` fijaba `glFrontFace` justo después;
+  - la mejora que se vio venía de comparar escenas distintas.
+- **Lo que lo resolvió:**
+  - entrada determinista (`t=…p`);
+  - capturas de xemu del usuario como referencia;
+  - RenderDoc: el destino tras cada evento y los vértices de entrada.
+- **Arreglo:**
+  - se invierte la cara frontal, como en xemu;
+  - se implementa el skinning del pipeline fijo (`SET_SKIN_MODE`), que dejaba una pieza de Ryu pegada a la
+    cámara tapándolo todo.
+- **Lección:** no se compara antes y después sin entrada determinista; un mismo frame en dos builds evita
+  conclusiones falsas.
+
+Detalle en [[gpu-nv2a]].

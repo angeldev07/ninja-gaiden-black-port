@@ -273,22 +273,39 @@ en el modo fijo.
 - Con el culling desactivado aparecen grandes polígonos oscuros que cubren la vista. Puede ser una cúpula de cielo
   vista por dentro o geometría de volúmenes de sombra (hay stencil con INVERT); hay que aislar qué dibujo es.
 
-## RenderDoc y el culling invertido (el suelo y el escenario que faltaban)
+## RenderDoc: culling y skinning (el templo que faltaba)
 
 - **Herramienta (`--rdoc-frame N`, `port/src/gpu/rdoc.c`):**
   - carga la DLL x86 de RenderDoc antes de crear el contexto GL y captura exactamente el frame N; el `.rdc` queda
     junto al log, en NGB_DATA;
-  - la captura se analiza sin interfaz con `qrenderdoc --python script.py` (módulo `renderdoc`): lista de draws,
-    destino principal y *pixel history* de los píxeles que se pidan. El script está en el scratchpad de la
-    sesión.
-- **Hallazgo:** en un píxel del suelo de la demo, **43 draws marcados como `backfaceCulled`**.
-- **Causa:** `glstate` invertía el sentido de la cara frontal suponiendo que la Y del VS estaba espejada. Pero el
-  NV2A define CW/CCW con la Y hacia arriba y nuestra proyección también espeja la Y, así que las dos inversiones
-  se anulan. xemu invierte porque su proyección no espeja.
-- **Arreglo:** la cara frontal ya no se invierte. Aparecen el edificio, los muros, las columnas, el puente y las
-  pasarelas.
-- **Determinismo:** con `--input-script "t=180p:START,t=600p:START"` (lecturas del mando, no ms) la demo cae casi
-  en el mismo instante en cada ejecución; las capturas son comparables.
+  - la captura se analiza sin interfaz con `qrenderdoc --python script.py` (módulo `renderdoc`): lista de draws
+    con su estado, *pixel history*, el destino guardado tras un evento y los vértices de entrada y post-VS. Los
+    scripts están en el scratchpad de la sesión.
+- **Determinismo:** con `--input-script "t=180p:START,t=600p:START"` (lecturas del mando, no ms) la demo llega
+  al mismo frame en cada ejecución. Así dos builds se comparan con la misma escena.
+- **Referencia:** capturas de xemu de la demo del título, hechas por el usuario. La demo pasa dentro de un templo
+  cerrado; en nuestro render faltaban los muros y el suelo y se veía el color de fondo (lavanda).
+- **Primer diagnóstico, equivocado (PR #52):**
+  - el *pixel history* mostró 43 draws `backfaceCulled` en un píxel del suelo, y se quitó la inversión de la cara
+    frontal en `glstate`;
+  - pero `pgraph_gl` llamaba a `glFrontFace` sin invertir justo después, así que ese cambio no tenía efecto en el
+    runtime;
+  - la mejora que se vio venía de comparar escenas distintas, antes de tener la entrada determinista.
+- **Primera causa, el sentido de las caras:**
+  - hay que **invertirlo**, como hace xemu;
+  - sin invertir, el culling descarta los muros y el suelo vistos desde dentro.
+- **Segunda causa, el skinning:**
+  - con el sentido ya invertido, un objeto cubría toda la pantalla delante de la cámara;
+  - era una pieza de Ryu dibujada con **skinning del pipeline fijo**, que no estaba implementado;
+  - sin skinning, sus vértices (en el espacio local de cada hueso) acababan pegados a la cámara.
+- **Skinning implementado** (registro `SET_SKIN_MODE`, `0x0328`):
+  - 1 o 2 = 2 matrices, 3 o 4 = 3 matrices, 5 o 6 = 4 matrices; en los modos impares el último peso es 1 menos la
+    suma de los demás;
+  - las model-view están en `0x0480 + m·0x40` y sus inversas en `0x0580 + m·0x40`, ponderadas con los pesos del
+    atributo 1;
+  - la posición es la suma en espacio de ojo multiplicada por la proyección `0x0440`;
+  - sin skinning se sigue usando la matriz compuesta.
+- **Resultado:** el templo aparece completo y la escena coincide con la captura de xemu.
 
 ## Siguiente
 

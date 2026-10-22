@@ -76,7 +76,7 @@ Todavía no está enganchado al intérprete PGRAPH: es la base para el render ac
   - Con signo: V8U8 y L6V5U5. También cube maps y mipmaps.
   - **Coincide byte a byte con `ngb_tools.xpr` en 28 vectores sintéticos** (`texconv_test`).
 - **`glstate`:** traduce a GL el estado de los métodos NV097 (blend, depth, stencil, cull, color mask, scissor,
-  alpha test y fog). La cara frontal **no** se invierte: el NV2A define CW/CCW con la Y hacia arriba y nuestra proyección ya espeja la Y, así que las dos inversiones se anulan (ver [[gpu-nv2a]], RenderDoc).
+  alpha test y fog). La cara frontal se invierte, como en xemu (comprobado con RenderDoc y con capturas de xemu; ver [[gpu-nv2a]]).
 - **Prueba visual:** `gl_test` dibuja en `NGB_DATA\runs\shots\gl_test.png`:
   - un triángulo con microcódigo NV2A codificado a mano;
   - un tablero;

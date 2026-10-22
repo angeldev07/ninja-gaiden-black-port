@@ -56,7 +56,7 @@ typedef struct gl_prog {
     GLuint prog;
     int failed;
     GLint u_c, u_surface, u_clip, u_ffmat;
-    GLint u_ffmv, u_ffinv, u_fftm, u_ffplane, u_ffl, u_ffm, u_ffi; /* pipeline fijo */
+    GLint u_ffmv, u_ffinv, u_ffproj, u_fftm, u_ffplane, u_ffl, u_ffm, u_ffi; /* pipeline fijo */
     GLint u_psc0, u_psc1, u_fc0, u_fc1, u_fog, u_bump, u_bscale, u_boff;
     GLint u_atest, u_afunc, u_aref, u_texscale, u_tex[4], u_fogcfg, u_fogparam;
     uint32_t const_serial; /* constantes subidas por última vez (+1; 0 = nunca) */
@@ -340,9 +340,9 @@ static void apply_state(const pgl_regs *r, gl_state *out) {
         nv2a_state_defaults(&s, R.target_w, R.target_h);
         glstate_apply(&s, out);
     }
-    /* glstate invierte la cara frontal y el scissor porque supone la Y de OpenGL; aquí la
-     * fila 0 es la de arriba, como en la Xbox, así que van tal cual. */
-    glFrontFace(M(r, 0x03A0) == 0x0900 ? GL_CW : GL_CCW);
+    /* glstate invierte el scissor porque supone la Y de OpenGL; aquí la fila 0 es la de
+     * arriba, como en la Xbox, así que va tal cual. La cara frontal sí queda invertida (ver
+     * glstate.c). */
     glEnable(GL_SCISSOR_TEST);
     if (ch >> 16 && cv >> 16)
         glScissor((GLint)(ch & 0xFFFF), (GLint)(cv & 0xFFFF), (GLsizei)(ch >> 16), (GLsizei)(cv >> 16));
@@ -745,6 +745,9 @@ static void bind_textures(const pgl_regs *r, float tex_scale[8]) {
  * (nv2a_regs.h de xemu como referencia; código propio):
  *   - posición: matriz compuesta 0x0680 (ya incluye proyección y viewport); ojo: model-view
  *     0x0480, normales con la model-view inversa 0x0580;
+ *   - skinning (SET_SKIN_MODE 0x0328: 1/2 = 2 matrices, 3/4 = 3, 5/6 = 4; los impares calculan
+ *     el último peso): model-view 0x0480 + m·0x40 e inversas 0x0580 + m·0x40 ponderadas con los
+ *     pesos del atributo 1; la posición sale de la suma en el ojo por la proyección 0x0440;
  *   - luces 0..7 en 0x1000 + i·0x80 (ambiente, difusa, especular, rango, half vector, dirección
  *     infinita, posición local, atenuación) y el modo de cada una en 0x03BC (2 bits: 1
  *     infinita, 2 local, 3 foco, tratado como local);
@@ -759,28 +762,49 @@ static void bind_textures(const pgl_regs *r, float tex_scale[8]) {
  */
 static const char k_ff_vs[] =
     "#version 400\n"
-    "layout(location = 0) in vec4 v0;\nlayout(location = 2) in vec4 v2;\n"
+    "layout(location = 0) in vec4 v0;\nlayout(location = 1) in vec4 v1;\nlayout(location = 2) in vec4 v2;\n"
     "layout(location = 3) in vec4 v3;\nlayout(location = 4) in vec4 v4;\n"
     "layout(location = 9) in vec4 v9;\nlayout(location = 10) in vec4 v10;\n"
     "layout(location = 11) in vec4 v11;\nlayout(location = 12) in vec4 v12;\n"
     "layout(location = 5) in vec4 v5;\n"
     "uniform vec4 ffMat[4];\nuniform vec2 surfaceSize;\nuniform vec2 clipRange;\n"
-    "uniform vec4 ffMV[4];\nuniform vec4 ffInv[4];\nuniform vec4 ffTM[16];\nuniform vec4 ffPlane[16];\n"
+    "uniform vec4 ffMV[16];\nuniform vec4 ffInv[16];\nuniform vec4 ffProj[4];\nuniform vec4 ffTM[16];\n"
+    "uniform vec4 ffPlane[16];\n"
     "uniform vec4 ffL[64];\nuniform vec4 ffM[3];\nuniform int ffI[32];\n"
     FOG_GLSL
     "out vec4 oD0;\nout vec4 oD1;\nout vec4 oB0;\nout vec4 oB1;\nout vec4 oFog;\nout vec4 oPts;\n"
     "out vec4 oT0;\nout vec4 oT1;\nout vec4 oT2;\nout vec4 oT3;\n"
     "vec3 cmSource(int sel, vec3 mat) { return sel == 1 ? v3.rgb : sel == 2 ? v4.rgb : mat; }\n"
+    "vec4 mvMul(int m, vec4 v) {\n"
+    "    return vec4(dot(ffMV[m * 4], v), dot(ffMV[m * 4 + 1], v), dot(ffMV[m * 4 + 2], v), dot(ffMV[m * 4 + 3], v));\n"
+    "}\n"
+    "vec3 invMul(int m, vec3 n) { return n.x * ffInv[m * 4].xyz + n.y * ffInv[m * 4 + 1].xyz + n.z * ffInv[m * 4 + 2].xyz; }\n"
     "void main() {\n"
+    "    /* Skinning (SET_SKIN_MODE): 2-4 model-view ponderadas por v1; en los modos \"G\" el\n"
+    "     * último peso es 1 - la suma de los demás. Sin skinning, la matriz compuesta. */\n"
+    "    int nm = ffI[26] == 0 ? 0 : (ffI[26] + 3) / 2, nw = (ffI[26] & 1) != 0 ? nm - 1 : nm;\n"
+    "    vec4 pe = mvMul(0, v0);\n"
+    "    vec3 ne = invMul(0, v2.xyz);\n"
     "    vec4 p = vec4(dot(ffMat[0], v0), dot(ffMat[1], v0), dot(ffMat[2], v0), dot(ffMat[3], v0));\n"
+    "    if (nm > 0) {\n"
+    "        float used = 0.0;\n"
+    "        pe = vec4(0.0); ne = vec3(0.0);\n"
+    "        for (int i = 0; i < nm; i++) {\n"
+    "            float wi = i < nw ? v1[i] : 1.0 - used;\n"
+    "            used += wi;\n"
+    "            vec4 q = mvMul(i, v0);\n"
+    "            pe.xyz += wi * (q.xyz / (q.w != 0.0 ? q.w : 1.0));\n"
+    "            ne += wi * invMul(i, v2.xyz);\n"
+    "        }\n"
+    "        pe.w = 1.0;\n"
+    "        p = vec4(dot(ffProj[0], pe), dot(ffProj[1], pe), dot(ffProj[2], pe), dot(ffProj[3], pe));\n"
+    "    }\n"
     "    float w = p.w < 0.0 ? clamp(p.w, -1.84467e19, -5.42101e-20) : clamp(p.w, 5.42101e-20, 1.84467e19);\n"
     "    vec3 s = p.xyz / w;\n"
     "    vec3 n = vec3(s.x * (2.0 / surfaceSize.x) - 1.0, s.y * (2.0 / surfaceSize.y) - 1.0, s.z);\n"
     "    if (clipRange.y != clipRange.x) n.z = (s.z - clipRange.x) * (2.0 / (clipRange.y - clipRange.x)) - 1.0;\n"
     "    gl_Position = vec4(n * w, w);\n"
-    "    vec4 pe = vec4(dot(ffMV[0], v0), dot(ffMV[1], v0), dot(ffMV[2], v0), dot(ffMV[3], v0));\n"
     "    vec3 eyeP = pe.xyz / (pe.w != 0.0 ? pe.w : 1.0);\n"
-    "    vec3 ne = v2.x * ffInv[0].xyz + v2.y * ffInv[1].xyz + v2.z * ffInv[2].xyz;\n"
     "    ne = dot(ne, ne) > 0.0 ? normalize(ne) : vec3(0.0, 0.0, 1.0);\n"
     "    oD0 = v3; oD1 = v4;\n"
     "    if (ffI[0] != 0) {\n"
@@ -911,6 +935,7 @@ static void link_uniforms(gl_prog *p) {
     p->u_ffmat = ngl_glGetUniformLocation(g, "ffMat");
     p->u_ffmv = ngl_glGetUniformLocation(g, "ffMV");
     p->u_ffinv = ngl_glGetUniformLocation(g, "ffInv");
+    p->u_ffproj = ngl_glGetUniformLocation(g, "ffProj");
     p->u_fftm = ngl_glGetUniformLocation(g, "ffTM");
     p->u_ffplane = ngl_glGetUniformLocation(g, "ffPlane");
     p->u_ffl = ngl_glGetUniformLocation(g, "ffL");
@@ -1023,18 +1048,22 @@ static int texgen_code(uint32_t mode) {
 
 /* Uniforms del pipeline fijo (ver k_ff_vs). */
 static void set_ff_uniforms(const pgl_regs *r, gl_prog *p) {
-    static float l[64 * 4], big[16 * 4];
+    static float l[64 * 4], big[16 * 4], proj[16];
     GLint ints[32];
     float m[3 * 4];
     int i, k, e, c;
-    for (i = 0; i < 16; i++)
+    for (i = 0; i < 64; i++)
         big[i] = as_float(M(r, 0x0480 + 4 * i));
     if (p->u_ffmv >= 0)
-        ngl_glUniform4fv(p->u_ffmv, 4, big);
-    for (i = 0; i < 16; i++)
+        ngl_glUniform4fv(p->u_ffmv, 16, big);
+    for (i = 0; i < 64; i++)
         big[i] = as_float(M(r, 0x0580 + 4 * i));
     if (p->u_ffinv >= 0)
-        ngl_glUniform4fv(p->u_ffinv, 4, big);
+        ngl_glUniform4fv(p->u_ffinv, 16, big);
+    for (i = 0; i < 16; i++)
+        proj[i] = as_float(M(r, 0x0440 + 4 * i));
+    if (p->u_ffproj >= 0)
+        ngl_glUniform4fv(p->u_ffproj, 4, proj);
     for (i = 0; i < 64; i++)
         big[i] = as_float(M(r, 0x06C0 + 4 * i));
     if (p->u_fftm >= 0)
@@ -1073,6 +1102,7 @@ static void set_ff_uniforms(const pgl_regs *r, gl_prog *p) {
             ints[9 + e * 4 + c] = texgen_code(M(r, 0x03C0 + 0x10 * (uint32_t)e + 4 * (uint32_t)c));
     }
     ints[25] = (GLint)M(r, 0x02A0);
+    ints[26] = (GLint)(M(r, 0x0328) & 7u); /* SET_SKIN_MODE */
     if (p->u_ffi >= 0)
         ngl_glUniform1iv(p->u_ffi, 32, ints);
 }
@@ -1117,8 +1147,7 @@ static void set_uniforms(const pgl_regs *r, gl_prog *p, const gl_state *st, cons
     if (p->u_ffl >= 0) { /* pipeline fijo: luces, material, matrices y texgen */
         h = rc_hash(&r->m[0x0280 / 4], 0x0180, h); /* 0x0280-0x03FF: control, material, texgen */
         h = rc_hash(&r->m[0x0420 / 4], 0x0010, h); /* activación de matrices de textura */
-        h = rc_hash(&r->m[0x0480 / 4], 0x0040, h); /* model-view 0 */
-        h = rc_hash(&r->m[0x0580 / 4], 0x0040, h); /* inversa */
+        h = rc_hash(&r->m[0x0440 / 4], 0x0240, h); /* proyección, 4 model-view y 4 inversas */
         h = rc_hash(&r->m[0x06C0 / 4], 0x0100, h); /* matrices de textura */
         h = rc_hash(&r->m[0x0840 / 4], 0x0100, h); /* planos de texgen */
         h = rc_hash(&r->m[0x0A10 / 4], 0x0010, h); /* ambiente de escena */
