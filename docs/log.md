@@ -494,3 +494,9 @@ Details in [[gpu-nv2a]].
 - Now `glPolygonOffset(factor, bias · 2^24 / clip range)`, equivalent to xemu's in-shader depth offset for our
   24-bit depth buffer.
 - The owner confirmed in chapter 1 that the patterns are gone and the lighting looks right.
+
+## [2026-10-22] milestone | Release v0.2.0: launcher, lighting and stability (save point)
+- Tag `v0.2.0` on `51864e5`. The GitHub release ships `ngb-launcher.exe`, `ngb-loader.exe` and `ngb-core.dll`, built
+  from that commit. No game data.
+- It is the save point before internal resolution scaling, the next session's work. To return to it:
+  `git checkout v0.2.0`.
