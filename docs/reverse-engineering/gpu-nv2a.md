@@ -4,385 +4,385 @@ updated: 2026-10-22
 status: current
 ---
 
-# GPU NV2A en el runtime nativo (H7): la pantalla de avisos en una ventana
+# NV2A GPU in the native runtime (H7): the warnings screen in a window
 
-El cargador nativo ([[arranque-nativo]], [[adr-05-runtime-nativo]]) ya **emula un mínimo de registros del NV2A** y
-decodifica el push buffer. Con eso, `default.xbe` pasa la inicialización de D3D8, envía frames y llega a la
-**pantalla de avisos** ("Warnings"). El código está en `port/src/gpu/` y la decisión de diseño en
-[[adr-06-render-hibrido]].
+The native loader ([[native-boot]], [[adr-05-native-runtime]]) already **emulates a minimal set of NV2A registers** and
+decodes the push buffer. With that, `default.xbe` gets through D3D8 initialization, submits frames and reaches the
+**warnings screen** ("Warnings"). The code is in `port/src/gpu/` and the design decision in
+[[adr-06-hybrid-renderer]].
 
-Fuentes:
-- `NGB_DATA\runs\h7a-run.log` y `h7a-run-pgraph.log`: ejecución de 30 s del analista;
-- las texturas volcadas, revisadas por el líder.
+Sources:
+- `NGB_DATA\runs\h7a-run.log` and `h7a-run-pgraph.log`: 30 s run by the analyst;
+- the dumped textures, reviewed by the leader.
 
-Todo lo que sigue es `VERIFIED` por esos logs.
+Everything that follows is `VERIFIED` by those logs.
 
-## Qué destrabó cada paso
+## What unblocked each step
 
-1. **El bloqueo no era el vblank, sino un bug de H6.** La superposición del TEB escribía `fs:[0x24] = tid<<8`
-   como IRQL. En Windows ese campo es `ClientId.UniqueThread`, y el sistema lo usa para despertar a quien espera en
-   un CRITICAL_SECTION o un SRW. Se perdían despertares y el hilo DPC quedaba bloqueado para siempre en
+1. **The hang was not vblank, but an H6 bug.** The TEB overlay wrote `fs:[0x24] = tid<<8`
+   as the IRQL. On Windows that field is `ClientId.UniqueThread`, and the system uses it to wake whoever waits on
+   a CRITICAL_SECTION or an SRW. Wakeups were lost and the DPC thread stayed blocked forever in
    `NtWaitForAlertByThreadId`.
-   - **Arreglo:** ya no se toca `fs:[0x24]`. Las 7 lecturas `movzx r32, byte fs:[24h]` que hace el XBE se parchean
-     al cargar a `mov r32, 0` (IRQL 0).
-   - **Lección:** cada campo del TEB que se superpone hay que contrastarlo con su uso en Windows.
-2. **vblank sintético a ~60 Hz**, con la receta de H5 ([[xbe-default]]): se pone el bit 24 de `PMC_INTR_0` y el
-   bit 0 de `PCRTC_INTR_0`, se llama a la ISR `0x3D2040`, que pasa por la DPC `0x3D2310` y acaba en
-   `KeSetEvent(m_VerticalBlankEvent)`. Escribir `PCRTC_INTR_0` limpia los dos bits (W1C).
-3. **Audio sin bloquear:**
+   - **Fix:** `fs:[0x24]` is no longer touched. The 7 `movzx r32, byte fs:[24h]` reads that the XBE performs are patched
+     at load time to `mov r32, 0` (IRQL 0).
+   - **Lesson:** every overlaid TEB field must be checked against its use in Windows.
+2. **Synthetic vblank at ~60 Hz**, with the H5 recipe ([[xbe-default]]): bit 24 of `PMC_INTR_0` and
+   bit 0 of `PCRTC_INTR_0` are set, the ISR `0x3D2040` is called, it goes through the DPC `0x3D2310` and ends in
+   `KeSetEvent(m_VerticalBlankEvent)`. Writing `PCRTC_INTR_0` clears both bits (W1C).
+3. **Audio without blocking:**
    - APU `PIO_FREE = 0x80`;
-   - AC97 `GLOB_STA` con los códecs listos y un bit de reset que se limpia solo;
-   - un buzón del DSP GP que se vacía solo.
-4. `NtQueryDirectoryFile` implementado.
+   - AC97 `GLOB_STA` with the codecs ready and a reset bit that clears itself;
+   - a GP DSP mailbox that empties itself.
+4. `NtQueryDirectoryFile` implemented.
 
-## Registros modelados
+## Modeled registers
 
-- `PMC_BOOT_0 = 0x02A000A3` (id del NV2A) e interrupciones W1C en PMC, PFIFO, PGRAPH, PCRTC y PTIMER.
-- PFIFO: `DMA_PUT`/`GET`, canal 0 de USER y `DMA_CTL`. Cada cambio de PUT se decodifica y GET avanza.
-- PTIMER avanza; `PFB_CSTATUS` = 64 MB; el flush de PFB WBC se limpia solo; PGRAPH ocioso; `PCRTC_RASTER`; los PLL
-  de PRAMDAC están enganchados.
-- PRAMIN es un alias de RAM. RAMHT resuelve los objetos (clases `0x97` Kelvin/3D, `0x39`, `0x9F`, `0x62` y `0x44`).
-- Lo que no está modelado se comporta como RAM y se anota una sola vez.
+- `PMC_BOOT_0 = 0x02A000A3` (NV2A id) and W1C interrupts in PMC, PFIFO, PGRAPH, PCRTC and PTIMER.
+- PFIFO: `DMA_PUT`/`GET`, USER channel 0 and `DMA_CTL`. Each PUT change is decoded and GET advances.
+- PTIMER advances; `PFB_CSTATUS` = 64 MB; the PFB WBC flush clears itself; PGRAPH idle; `PCRTC_RASTER`; the PRAMDAC PLLs
+  are locked.
+- PRAMIN is an alias of RAM. RAMHT resolves the objects (classes `0x97` Kelvin/3D, `0x39`, `0x9F`, `0x62` and `0x44`).
+- Anything not modeled behaves like RAM and is noted only once.
 
-## Lo que el juego envía (30 s, sin pacing)
+## What the game submits (30 s, no pacing)
 
-| Métrica | Valor |
+| Metric | Value |
 | --- | --- |
-| Frames (`FLIP_STALL`) | 37,337. Todavía no se sincronizan con el vblank |
-| `BEGIN_END` | 808,728, todos `TRIANGLE_STRIP` con `INLINE_ARRAY` |
-| Primer frame con primitivas | el 202 |
+| Frames (`FLIP_STALL`) | 37,337. Not yet synchronized with vblank |
+| `BEGIN_END` | 808,728, all `TRIANGLE_STRIP` with `INLINE_ARRAY` |
+| First frame with primitives | frame 202 |
 | `CLEAR` | 74,473 |
-| Kicks del push buffer | 117,874; semáforos 117,870 |
-| Errores de decodificación del push buffer | 0 |
+| Push buffer kicks | 117,874; semaphores 117,870 |
+| Push buffer decoding errors | 0 |
 | vblanks | 972 |
-| Llamadas al kernel | 3.99 M |
+| Kernel calls | 3.99 M |
 
-- **Superficie de color:** 720x480 A8R8G8B8, pitch 3072, en `0x02878000`.
-- **Texturas que carga el juego**, volcadas desde la memoria de la GPU y revisadas por el líder:
-  - el **rótulo "Warnings"** (A8 256x64);
-  - el **atlas de la fuente** del juego (I8 con paleta, 128x128 con swizzle);
-  - los dos búferes de 720x480 que se usan como textura.
-- El búfer de color está **negro**: todavía no se rasteriza, y el CLEAR es 0.
+- **Color surface:** 720x480 A8R8G8B8, pitch 3072, at `0x02878000`.
+- **Textures the game loads**, dumped from GPU memory and reviewed by the leader:
+  - the **"Warnings" caption** (A8 256x64);
+  - the game's **font atlas** (I8 with palette, 128x128 swizzled);
+  - the two 720x480 buffers used as textures.
+- The color buffer is **black**: nothing is rasterized yet, and the CLEAR is 0.
 
-## H7b: el primer frame visible (`VERIFIED`)
+## H7b: the first visible frame (`VERIFIED`)
 
-**La pantalla de avisos se ve en una ventana del PC a 60 fps**: el rótulo "Warnings" con su brillo y el texto
-desplazándose y fundiéndose. Es el código del juego ejecutándose de forma nativa.
+**The warnings screen shows in a PC window at 60 fps**: the "Warnings" caption with its glow and the text
+scrolling and fading. It is the game's code running natively.
 
-- Comando: `build\port\ngb-loader.exe <default.xbe> --window`.
-- Capturas: el loader guarda una cada 300 frames (`<log>-pgraph-shot-NNNNN.png`); el líder revisó la de
+- Command: `build\port\ngb-loader.exe <default.xbe> --window`.
+- Captures: the loader saves one every 300 frames (`<log>-pgraph-shot-NNNNN.png`); the leader reviewed
   `h7b-int-pgraph-shot-00600.png`.
 
-### Cómo se dibuja
+### How it is drawn
 
-- **Rasterizador por software** (`port/src/gpu/raster.c`, código puro con 23 pruebas hechas a mano):
-  - triángulos con la posición ya en pantalla (XYZRHW), color difuso y texcoord0;
-  - muestreo por punto de A8R8G8B8, X8R8G8B8, R5G6B5, A8 e I8 con paleta, con o sin swizzle;
-  - textura × difuso, alpha test, blend con los factores GL del NV2A y corrección de perspectiva;
-  - las primitivas TRIANGLES, TRIANGLE_STRIP, TRIANGLE_FAN, QUADS, QUAD_STRIP y POLYGON.
-- **Métodos NV097 nuevos:**
+- **Software rasterizer** (`port/src/gpu/raster.c`, pure code with 23 hand-written tests):
+  - triangles with the position already in screen space (XYZRHW), diffuse color and texcoord0;
+  - point sampling of A8R8G8B8, X8R8G8B8, R5G6B5, A8 and I8 with palette, with or without swizzle;
+  - texture × diffuse, alpha test, blend with the NV2A's GL factors and perspective correction;
+  - the primitives TRIANGLES, TRIANGLE_STRIP, TRIANGLE_FAN, QUADS, QUAD_STRIP and POLYGON.
+- **New NV097 methods:**
   - `SET_VERTEX_DATA_ARRAY_FORMAT`;
-  - `SET_BEGIN_END`: se dibuja al cerrar;
-  - `INLINE_ARRAY` y `SET_VERTEX_DATA4UB`;
-  - alpha test y blend.
-- **Presentador** (`port/src/gfx/present.c`, Win32/GDI): en cada `FLIP_STALL` copia el búfer de color de 720x480
-  a la ventana. Después espera al siguiente 1/60 s, lo que fija el ritmo (*pacing*). Con `--no-pacing` vuelve a
-  ir sin límite: unos 1 300 fps.
-- **Para el render acelerado** ya hay traductores de shaders ([[shaders-nv2a]]) y un backend OpenGL 4.6 en
-  `feat/gl-backend`. El rasterizador por software basta para los avisos, que son 2D.
+  - `SET_BEGIN_END`: drawing happens on close;
+  - `INLINE_ARRAY` and `SET_VERTEX_DATA4UB`;
+  - alpha test and blend.
+- **Presenter** (`port/src/gfx/present.c`, Win32/GDI): on each `FLIP_STALL` it copies the 720x480 color buffer
+  to the window. Then it waits for the next 1/60 s, which sets the rhythm (*pacing*). With `--no-pacing` it goes back to
+  running unlimited: about 1,300 fps.
+- **For accelerated rendering** there are already shader translators ([[shaders-nv2a]]) and an OpenGL 4.6 backend in
+  `feat/gl-backend`. The software rasterizer is enough for the warnings, which are 2D.
 
-### Lo que hubo que arreglar en el kernel emulado
+### What had to be fixed in the emulated kernel
 
-- **`NtSuspendThread` aplazado.** El juego reparte trabajo entre hilos con Suspend/Resume, y podía congelar un
-  hilo que tenía tomado un lock del loader (kernel emulado, VEH del NV2A o IRQL ≥ DISPATCH). Ahora la suspensión
-  espera a que el hilo salga de ese código.
-- **Eventos limpiados en memoria.** D3D pone a 0 el `SignalState` de su evento de vblank directamente, sin
-  pasar por el kernel. `KeWaitFor*` ahora sincroniza el evento de Windows con la cabecera. Antes,
-  `BlockUntilVerticalBlank` volvía al instante unas 50 000 veces por segundo.
-- **Vigilante de inactividad:** una carrera hacía saltar "15 s sin llamadas" a los 5 s.
+- **Deferred `NtSuspendThread`.** The game shares work between threads with Suspend/Resume, and could freeze a
+  thread that held a loader lock (emulated kernel, NV2A VEH or IRQL ≥ DISPATCH). Now the suspension
+  waits for the thread to leave that code.
+- **Events cleared in memory.** D3D sets the `SignalState` of its vblank event to 0 directly, without
+  going through the kernel. `KeWaitFor*` now synchronizes the Windows event with the header. Before,
+  `BlockUntilVerticalBlank` returned instantly about 50,000 times per second.
+- **Idle watchdog:** a race made "15 s without calls" fire at 5 s.
 
-### Hasta dónde llega
+### How far it gets
 
-1. La pantalla de avisos completa, unos 40 s.
-2. **Se reproduce el vídeo de introducción** (Sofdec, un mar tormentoso), decodificado por el propio juego y
-   dibujado con el rasterizador por software. El líder revisó la captura del frame 3600 de `exit-fix.log`.
-   - Antes, el juego se quedaba en una pantalla negra. **La causa era un bug del kernel emulado**, no el audio
-     ni el mando.
-   - `GetExitCodeThread` de XAPI (`0x32BE72`) lee `Header.SignalState` (+4) y `ExitStatus` (+0x120) del ETHREAD.
-     El hilo que enumera las partidas guardadas termina pronto, pero `ngb_thread_exit` nunca escribía esos
-     campos.
-   - Por eso la tarea de fibra del hilo principal (`0x168030`) esperaba en un bucle `while (code == 0x103)`
-     para siempre.
-   - **Arreglo:** al terminar, un hilo escribe ExitStatus y pone SignalState a 1. Lo cubre un test con un XBE
-     sintético.
-3. Para reproducir el vídeo, el juego reinicia D3D dos veces (`AvSetDisplayMode` con pitch `0xB40`) y el pusher
-   lo soporta.
-4. **El vídeo se queda en su primer fotograma** (`INFERRED`: Sofdec avanza con el reloj del audio, y la APU no
-   está emulada). Con START se salta.
-5. **Pantalla de título** ("PRESS START BUTTON", con Ryu de fondo; captura `title4-pgraph-shot-15300.png`,
-   revisada por el líder). Antes de mostrarla, el juego verifica sus datos con `XcSHAInit/Update/Final`, que
-   ahora están implementadas (SHA-1 y HMAC propios en `port/src/kernel/sha1.c`, con los vectores de FIPS 180 y
-   RFC 2202).
+1. The full warnings screen, about 40 s.
+2. **The intro video plays** (Sofdec, a stormy sea), decoded by the game itself and
+   drawn with the software rasterizer. The leader reviewed the capture of frame 3600 from `exit-fix.log`.
+   - Before, the game stayed on a black screen. **The cause was a bug in the emulated kernel**, not the audio
+     or the gamepad.
+   - XAPI's `GetExitCodeThread` (`0x32BE72`) reads `Header.SignalState` (+4) and `ExitStatus` (+0x120) of the ETHREAD.
+     The thread that enumerates the save games ends early, but `ngb_thread_exit` never wrote those
+     fields.
+   - So the main thread's fiber task (`0x168030`) waited in a `while (code == 0x103)` loop
+     forever.
+   - **Fix:** when a thread ends, it writes ExitStatus and sets SignalState to 1. A test with a synthetic
+     XBE covers it.
+3. To play the video, the game resets D3D twice (`AvSetDisplayMode` with pitch `0xB40`) and the pusher
+   supports it.
+4. **The video stays on its first frame** (`INFERRED`: Sofdec advances with the audio clock, and the APU is not
+   emulated). START skips it.
+5. **Title screen** ("PRESS START BUTTON", with Ryu in the background; capture `title4-pgraph-shot-15300.png`,
+   reviewed by the leader). Before showing it, the game verifies its data with `XcSHAInit/Update/Final`, which
+   are now implemented (own SHA-1 and HMAC in `port/src/kernel/sha1.c`, with the FIPS 180 and
+   RFC 2202 vectors).
 
-**Los avisos "en bucle" van a cámara lenta (`VERIFIED` con `--watch`):**
-- La tarea de los avisos (`0x168030`) hace, por orden:
-  1. espera a T8;
-  2. ejecuta 5 fases (tabla `0x443B1C`);
-  3. espera a la caché de `z:\demo.afs` (`FUN_00304f10`, flag `0xD7DCF9`), que termina en 1,5 s;
-  4. dibuja los avisos (`FUN_001f73b0`, estado en `0x906180`).
-- En PAL (región 4), los avisos esperan 3·60 frames (`0xE130DA = 60`) y luego desplazan el texto 0,3 px por frame
-  (`0x43018C`) hasta recorrer 640 px: unos 2 300 frames, **38 s a 60 fps**. START o A los saltan.
-- **No hay ningún bucle:** el juego corre a 42 fps o menos, porque el rasterizador por software no llega a 60, y
-  los avisos se alargan a 1-3 minutos. Los fundidos que se ven son los del propio desplazamiento.
-- La solución es el render por GPU (H7c).
-- Por el camino:
-  - el loader pide al sistema resolución de reloj de 1 ms (`timeBeginPeriod(1)`), porque sin ella cada `Sleep`
-    corto de la Xbox duraba 15,6 ms;
-  - se añadió `--watch` para vigilar variables del juego.
+**The "looping" warnings run in slow motion (`VERIFIED` with `--watch`):**
+- The warnings task (`0x168030`) does, in order:
+  1. waits for T8;
+  2. runs 5 phases (table `0x443B1C`);
+  3. waits for the `z:\demo.afs` cache (`FUN_00304f10`, flag `0xD7DCF9`), which finishes in 1.5 s;
+  4. draws the warnings (`FUN_001f73b0`, state at `0x906180`).
+- On PAL (region 4), the warnings wait 3·60 frames (`0xE130DA = 60`) and then scroll the text 0.3 px per frame
+  (`0x43018C`) until it has covered 640 px: about 2,300 frames, **38 s at 60 fps**. START or A skips them.
+- **There is no loop:** the game runs at 42 fps or less, because the software rasterizer cannot reach 60, and
+  the warnings stretch to 1-3 minutes. The fades that are seen belong to the scrolling itself.
+- The solution is GPU rendering (H7c).
+- Along the way:
+  - the loader asks the system for 1 ms timer resolution (`timeBeginPeriod(1)`), because without it every short
+    Xbox `Sleep` lasted 15.6 ms;
+  - `--watch` was added to monitor game variables.
 
-## H7c: render por GPU con OpenGL (`VERIFIED`)
+## H7c: GPU rendering with OpenGL (`VERIFIED`)
 
-`--renderer gl` es el modo por defecto si hay ventana y contexto; `--renderer soft` queda como respaldo. Código en
-`port/src/gpu/pgraph_gl.c` y `rcache.c`; usa [[shaders-nv2a]], `texconv` y `glstate`.
+`--renderer gl` is the default mode if there is a window and a context; `--renderer soft` remains as a fallback. Code in
+`port/src/gpu/pgraph_gl.c` and `rcache.c`; it uses [[shaders-nv2a]], `texconv` and `glstate`.
 
-| Métrica (líneas `perf:` del log) | Software | OpenGL (RX 6600) |
+| Metric (`perf:` lines of the log) | Software | OpenGL (RX 6600) |
 | --- | --- | --- |
-| Título y menú | 16 fps (raster 59 ms/frame) | **60 fps** (pusher 0,7-2 ms) |
-| Avisos | 38-53 fps | **60 fps**: terminan a los 40,0 s, que es su duración de diseño |
+| Title and menu | 16 fps (raster 59 ms/frame) | **60 fps** (pusher 0.7-2 ms) |
+| Warnings | 38-53 fps | **60 fps**: they end at 40.0 s, which is their design duration |
 
-- **Hilos:**
-  - el kick llega en cualquier hilo Xbox, pero el contexto GL va atado a un solo hilo. Por eso hay un hilo de
-    render propio, y `pgraph_kick` le pasa el trabajo de forma síncrona;
-  - el pacing se hace fuera de los locks (issue #35).
-- **Superficies:**
-  - las de color y profundidad son texturas GL, indexadas por dirección física;
-  - render-to-texture sin pasar por la CPU;
-  - una firma dispersa de la RAM detecta qué superficies ha pisado la CPU.
-- **Dibujo:**
-  - INLINE_ARRAY, DRAW_ARRAYS y ARRAY_ELEMENT;
-  - vertex programs (`0x0B00` + LOAD/START) o fixed function;
-  - cachés de programas y texturas por hash.
-- **Bug del FIFO que causaba el "parpadeo" tras los avisos** (presente también en soft):
-  - al reiniciar D3D para el vídeo, el juego para el pusher (`CACHE1_PUSH0 = 0`), libera el push buffer viejo y
-    pone PUT a 0;
-  - el NV2A emulado hacía kick con cualquier escritura de PUT, aunque el pusher estuviera parado, y reproducía
-    unos 4 M de palabras del búfer liberado. Salían FLIP de los avisos viejos alternando con negro durante unos 2
-    minutos, más 121 errores del pb;
-  - ahora, con el pusher parado PUT solo se guarda, y el kick llega al reactivarlo.
-  - Resultado: los avisos dan paso al vídeo (mar, montañas, logo de Team NINJA) y al título, a 60 fps.
-- **3D tras New Game** (visto una vez):
-  - 1 091 primitivas por frame con vertex programs y 0 errores de shader, pero a 6,6 fps, y la captura muestra un
-    búfer intermedio;
-  - falta el formato `0x2E` (profundidad lineal como textura), bajar el coste por draw y elegir la superficie que
-    se presenta.
+- **Threads:**
+  - the kick arrives on any Xbox thread, but the GL context is bound to a single thread. That is why there is a
+    dedicated render thread, and `pgraph_kick` hands the work to it synchronously;
+  - pacing is done outside the locks (issue #35).
+- **Surfaces:**
+  - color and depth surfaces are GL textures, indexed by physical address;
+  - render-to-texture without going through the CPU;
+  - a sparse signature of the RAM detects which surfaces the CPU has overwritten.
+- **Drawing:**
+  - INLINE_ARRAY, DRAW_ARRAYS and ARRAY_ELEMENT;
+  - vertex programs (`0x0B00` + LOAD/START) or fixed function;
+  - program and texture caches by hash.
+- **FIFO bug that caused the "flicker" after the warnings** (also present in soft):
+  - when D3D is reset for the video, the game stops the pusher (`CACHE1_PUSH0 = 0`), frees the old push buffer and
+    sets PUT to 0;
+  - the emulated NV2A kicked on any PUT write, even with the pusher stopped, and replayed
+    about 4 M words of the freed buffer. FLIPs of the old warnings came out alternating with black for about 2
+    minutes, plus 121 pb errors;
+  - now, with the pusher stopped, PUT is only stored, and the kick happens when it is reactivated.
+  - Result: the warnings give way to the video (sea, mountains, Team NINJA logo) and to the title, at 60 fps.
+- **3D after New Game** (seen once):
+  - 1,091 primitives per frame with vertex programs and 0 shader errors, but at 6.6 fps, and the capture shows an
+    intermediate buffer;
+  - missing: format `0x2E` (linear depth as texture), lowering the cost per draw and choosing which surface is
+    presented.
 
-## H8b: gameplay en 3D (la demo del título)
+## H8b: 3D gameplay (the title demo)
 
-Si se deja la pantalla de título sin pulsar nada, el juego reproduce una **demo de gameplay con su propio motor**:
-- es una escena 3D determinista que no necesita input, así que es el mejor caso de prueba del render 3D;
-- el usuario avisó de ella, y llega sola: avisos (40 s), vídeo (~15 s), título y espera.
+If the title screen is left without pressing anything, the game plays a **gameplay demo with its own engine**:
+- it is a deterministic 3D scene that needs no input, so it is the best test case for 3D rendering;
+- the project owner pointed it out, and it arrives on its own: warnings (40 s), video (~15 s), title and wait.
 
-**Resultado (`VERIFIED`):**
-- Ryu pelea contra demonios con la Dragon Sword y un Ninpo de fuego, con modelos, animaciones, texturas y efectos.
-  El líder revisó las capturas `demo1-pgraph-shot-05400.png` y `-06600.png`.
-- Va a 35-60 fps (antes, 6,6).
-- Suenan 46 voces, 38 de ellas efectos de una sola vez, sin cortes.
+**Result (`VERIFIED`):**
+- Ryu fights demons with the Dragon Sword and a fire Ninpo, with models, animations, textures and effects.
+  The leader reviewed the captures `demo1-pgraph-shot-05400.png` and `-06600.png`.
+- It runs at 35-60 fps (before, 6.6).
+- 46 voices play, 38 of them one-shot effects, without cuts.
 
-**Qué se cambió:**
-- **Rendimiento:** estado GL incremental, menos hashing de texturas, constantes solo si están sucias y cachés nuevas
-  en `rcache.c`.
+**What changed:**
+- **Performance:** incremental GL state, less texture hashing, constants only if dirty and new caches
+  in `rcache.c`.
 - **EEPROM** (`kernel/eeprom.c`):
-  - XAPI pide la EEPROM entera (índice `0xFFFF`) para firmar los archivos del disco duro cuando `XboxHDKey` es
-    cero;
-  - antes solo se escribían 4 bytes y el resto era basura de la pila, así que la firma de `T:\system.dat` cambiaba
-    entre ejecuciones y el juego decía "Unable to load game settings";
-  - ahora hay una imagen completa de 256 bytes.
-- **Input determinista:** `--input-script` acepta la unidad `p` (lecturas del mando), por ejemplo
-  `t=2400p:START@10p`. Así no depende de lo que tarden las cargas.
+  - XAPI asks for the whole EEPROM (index `0xFFFF`) to sign the hard-disk files when `XboxHDKey` is
+    zero;
+  - before, only 4 bytes were written and the rest was stack garbage, so the signature of `T:\system.dat` changed
+    between runs and the game said "Unable to load game settings";
+  - now there is a full 256-byte image.
+- **Deterministic input:** `--input-script` accepts the `p` unit (gamepad reads), for example
+  `t=2400p:START@10p`. That way it does not depend on how long the loads take.
 
-**Pendiente:**
-- el cielo y el fondo salen de un azul plano (skybox o niebla) y falta parte del suelo;
-- las caídas a ~30 fps en escenas cargadas;
-- el resto de los menores del issue #43.
+**Pending:**
+- the sky and the background come out as a flat blue (skybox or fog) and part of the floor is missing;
+- the drops to ~30 fps in loaded scenes;
+- the rest of the minor items of issue #43.
 
-**Lección de proceso:** el agente gastó 1 h 30 min intentando llegar al nivel por New Game, cuyo vídeo inicial no se
-puede saltar sin partida guardada, y llenó `NGB_DATA` de capturas. La demo del título daba la misma escena 3D sin
-input. Los agentes tienen que limpiar sus capturas y buscar antes el caso de prueba más barato.
+**Process lesson:** the agent spent 1 h 30 min trying to reach the level via New Game, whose initial video cannot be
+skipped without a save game, and filled `NGB_DATA` with captures. The title demo gave the same 3D scene without
+input. Agents must clean up their captures and look first for the cheapest test case.
 
-## Fixups de push buffers estáticos (el cuelgue de la demo y los fps del 3D)
+## Static push buffer fixups (the demo hang and the 3D fps)
 
-**Síntoma:** al empezar la demo del título, el juego se colgaba en `D3D_BlockOnTime` (`0x3CD0D0`) en 2 de cada
-3 ejecuciones, y la demo iba a 35-44 fps.
+**Symptom:** when the title demo started, the game hung in `D3D_BlockOnTime` (`0x3CD0D0`) in 2 out of
+3 runs, and the demo ran at 35-44 fps.
 
-**Causa (`VERIFIED` en Ghidra y con trazas):**
-- `D3DDevice_RunPushBuffer` (`0x3CD680`) salta desde el anillo a un push buffer estático que termina en un JUMP de
-  vuelta, y D3D reescribe ese JUMP en cada uso.
-- Si la GPU no ha terminado el uso anterior, D3D mete `NO_OPERATION` (`0x100`) con el parámetro `(i << 5) | 0xD`
-  (registro `i` de una tabla del dispositivo) o `(va << 5) | 0xC` (registro en el anillo).
-- En la Xbox, ese NOP detiene la GPU y lanza una interrupción; la rutina de D3D hace el parcheo, el mismo que
-  `FUN_003cd5e0` hace directamente cuando la GPU ya pasó.
-- Nosotros lo tratábamos como un NOP más:
-  - el JUMP de vuelta seguía apuntando al uso anterior y la GPU emulada daba vueltas hasta el tope de 4 M
-    palabras (hasta 400 M palabras por ejecución);
-  - pisaba el fence de D3D (`0x82774000`) con valores viejos, y el juego esperaba para siempre.
+**Cause (`VERIFIED` in Ghidra and with traces):**
+- `D3DDevice_RunPushBuffer` (`0x3CD680`) jumps from the ring to a static push buffer that ends in a JUMP back,
+  and D3D rewrites that JUMP on every use.
+- If the GPU has not finished the previous use, D3D inserts `NO_OPERATION` (`0x100`) with the parameter `(i << 5) | 0xD`
+  (record `i` of a device table) or `(va << 5) | 0xC` (record in the ring).
+- On the Xbox, that NOP stops the GPU and raises an interrupt; the D3D routine does the patching, the same one
+  `FUN_003cd5e0` does directly when the GPU has already passed.
+- We treated it as an ordinary NOP:
+  - the JUMP back still pointed to the previous use and the emulated GPU looped up to the cap of 4 M
+    words (up to 400 M words per run);
+  - it overwrote D3D's fence (`0x82774000`) with stale values, and the game waited forever.
 
-**Arreglo:** HLE del parcheo en `pgraph.c` (`d3d_pushbuffer_fixup`):
-- recorre la lista de registros, escribe el JUMP de vuelta y aplica la lista de fixups;
-- valida cada puntero contra la RAM contigua o la imagen del XBE.
+**Fix:** HLE of the patching in `pgraph.c` (`d3d_pushbuffer_fixup`):
+- it walks the record list, writes the JUMP back and applies the fixup list;
+- it validates each pointer against the contiguous RAM or the XBE image.
 
-**Resultado:** cero kicks enormes, sin cuelgues en las pruebas y la demo a **55-60 fps**.
+**Result:** zero huge kicks, no hangs in the tests and the demo at **55-60 fps**.
 
-**Herramientas nuevas:**
-- las líneas `perf:` miden ahora `pb_run`, `kick_body`, la espera del lock y `pgl_call`;
-- un kick de más de 1 M palabras se registra con sus primeros saltos;
-- cada cambio de destino del semáforo de D3D va al log.
+**New tools:**
+- the `perf:` lines now measure `pb_run`, `kick_body`, the lock wait and `pgl_call`;
+- a kick of more than 1 M words is logged with its first jumps;
+- every change of the D3D semaphore target goes to the log.
 
-**Carrera con el pusher asíncrono (el cuelgue del render en partidas largas), `VERIFIED` en Ghidra:**
-- **Síntoma:** una vez por hora de juego, más o menos, el render se congela; en el log aparece
-  `pb: parada en X sin llegar a PUT`.
-- **La lista de registros:** `D3DDevice_RunPushBuffer` mira si el último registro (`dev+0x58`, con el dispositivo
-  en `0x3D85E0`) tiene el siguiente a 0, es decir, si su interrupción sigue pendiente. Si es así, encadena el
-  registro nuevo ahí y no mete otro NOP.
-- **La carrera:** nuestro fixup corre en el hilo de render, en paralelo con el juego. Leía el siguiente y lo
-  cerraba (`0xFFFFFFFF`) en dos pasos, y si el juego enlazaba en medio, ese registro se perdía. Su JUMP de vuelta
-  quedaba viejo y la GPU daba vueltas hasta el tope de 4 M palabras (`INFERRED`: no salió el aviso de kick enorme,
-  así que el bucle era casi todo saltos, que no cuentan como palabras de datos).
-- **Arreglo (`d3d_fixup_chain` y `d3d_fixup_late`):**
-  - el cierre es un `InterlockedExchange`;
-  - si el juego aún enlaza al registro ya cerrado, ese enlace se atiende antes del siguiente salto del pb. Solo
-    cuenta si la cadena llega al último registro de D3D: un registro del anillo puede estar ya reescrito.
-- **ISR fiel (`h5-decomp-d3d-vblank.txt`):**
-  - los NOP `0xC` y `0xD` descuentan las interrupciones pendientes (`dev+0x50`, `DAT_003d8630`), que antes no
-    bajaban nunca;
-  - el `0xE` (registro en el anillo, sin descuento) ya se atiende.
-  - Tras el fixup, la ISR escribe el bit 16 de `0x100410` y espera a que baje (`FUN_003cd540`), un flush de PFB
-    que aquí no hace falta.
-- **Diagnóstico:** un kick que no llega a PUT vuelca al log sus primeros saltos.
+**Race with the asynchronous pusher (the render hang in long sessions), `VERIFIED` in Ghidra:**
+- **Symptom:** about once per hour of play, the render freezes; the log shows
+  `pb: stopped at X without reaching PUT`.
+- **The record list:** `D3DDevice_RunPushBuffer` checks whether the last record (`dev+0x58`, with the device
+  at `0x3D85E0`) has its next pointer at 0, that is, whether its interrupt is still pending. If so, it chains the
+  new record there and does not insert another NOP.
+- **The race:** our fixup runs on the render thread, in parallel with the game. It read the next pointer and
+  closed it (`0xFFFFFFFF`) in two steps, and if the game linked in between, that record was lost. Its JUMP back
+  stayed stale and the GPU looped up to the cap of 4 M words (`INFERRED`: the huge-kick warning did not appear,
+  so the loop was almost all jumps, which do not count as data words).
+- **Fix (`d3d_fixup_chain` and `d3d_fixup_late`):**
+  - the close is an `InterlockedExchange`;
+  - if the game still links to the already closed record, that link is handled before the next pb jump. It only
+    counts if the chain reaches D3D's last record: a ring record may already be rewritten.
+- **Faithful ISR (`h5-decomp-d3d-vblank.txt`):**
+  - the NOPs `0xC` and `0xD` decrement the pending interrupts (`dev+0x50`, `DAT_003d8630`), which previously
+    never went down;
+  - `0xE` (record in the ring, no decrement) is now handled.
+  - After the fixup, the ISR writes bit 16 of `0x100410` and waits for it to drop (`FUN_003cd540`), a PFB
+    flush that is not needed here.
+- **Diagnostics:** a kick that does not reach PUT dumps its first jumps to the log.
 
-**Datos de vértices en bloque (`on_bulk`):**
-- `ARRAY_ELEMENT16` e `INLINE_ARRAY` son dos tercios de las palabras del push buffer (1 097 M y 751 M
-  en una partida de 70 min).
-- `pb_run` entrega las rachas no crecientes de una vez, sin cruzar de página ni pasar de PUT. Con el log
-  del frame activo siguen yendo palabra a palabra.
-- **Medida:** en la demo determinista, frames 2400-6000, `pb_run` baja de ~8,4 a ~7,3 ms por frame.
-- **Queda sin explicar:** unos 4 ms de `pb_run` fuera del GL. Hace falta perfilarlo.
+**Bulk vertex data (`on_bulk`):**
+- `ARRAY_ELEMENT16` and `INLINE_ARRAY` are two thirds of the push buffer words (1,097 M and 751 M
+  in a 70 min session).
+- `pb_run` delivers the non-increasing runs at once, without crossing a page or passing PUT. With the active-frame
+  log they still go word by word.
+- **Measurement:** in the deterministic demo, frames 2400-6000, `pb_run` drops from ~8.4 to ~7.3 ms per frame.
+- **Still unexplained:** about 4 ms of `pb_run` outside GL. It needs profiling.
 
-**Probado y descartado:** sustituir el traspaso por eventos al hilo de render por una espera activa. En esta CPU
-(Ryzen 7 5700G) añadía ~17 ms por frame, así que se queda el traspaso por eventos (~1,6 ms por frame en total).
+**Tried and discarded:** replacing the event handoff to the render thread with a busy wait. On this CPU
+(Ryzen 7 5700G) it added ~17 ms per frame, so the event handoff stays (~1.6 ms per frame in total).
 
-## Pipeline fijo con iluminación y mapas de sombra (`VERIFIED` en la demo)
+## Fixed pipeline with lighting and shadow maps (`VERIFIED` in the demo)
 
-En un frame de la demo, **la mitad de los dibujos usan el pipeline fijo** (`SET_TRANSFORM_EXECUTION_MODE` `0x4`;
-el `0x6` es vertex program), casi todos con la iluminación activa: 1 396 cambios de luces, 812 matrices model-view
-y 372 matrices de textura por frame. Antes, el modo fijo solo transformaba la posición y copiaba el color del
-vértice.
+In a demo frame, **half the draws use the fixed pipeline** (`SET_TRANSFORM_EXECUTION_MODE` `0x4`;
+`0x6` is vertex program), almost all with lighting on: 1,396 light changes, 812 model-view matrices
+and 372 texture matrices per frame. Before, the fixed mode only transformed the position and copied the vertex
+color.
 
-**Ahora, `k_ff_vs` en `pgraph_gl.c`:**
-- normales con la model-view inversa (`0x0580`);
-- 8 luces (infinitas, locales y focos sin cono) con atenuación y rango;
-- color material (`0x0298`: emisión, ambiente, difusa y especular, desde el material o el vértice);
-- especular, texgen por etapa (lineal de ojo y de objeto, mapa esférico, normal y de reflexión) y matrices de
-  textura;
-- uniforms con hash de los registros, que no se resuben si no cambian.
+**Now, `k_ff_vs` in `pgraph_gl.c`:**
+- normals with the inverse model-view (`0x0580`);
+- 8 lights (infinite, local and spotlights without cone) with attenuation and range;
+- material color (`0x0298`: emission, ambient, diffuse and specular, from the material or the vertex);
+- specular, per-stage texgen (eye-linear and object-linear, sphere map, normal and reflection) and texture
+  matrices;
+- uniforms with a hash of the registers, which are not re-uploaded if they do not change.
 
-**Resultado:** los arcos, muros y columnas del escenario y los enemigos aparecen iluminados y con textura.
+**Result:** the stage's arches, walls and columns and the enemies appear lit and textured.
 
-**Mapas de sombra:**
-- 46 dibujos por frame (vertex program con blend) usaban una textura de formato `0x2E`: la profundidad Z24S8
-  de una superficie de 128x128 que el juego pinta al empezar el frame desde la luz. No se podía convertir y el
-  dibujo se descartaba.
-- Ahora la etapa enlaza la textura GL de esa superficie Z (render-to-texture). `psh` compara, como el NV2A,
-  `profundidad · máx` con la z proyectada (`0xFFFFFF` en 24 bits, `0xFFFF` en 16) usando la función de
+**Shadow maps:**
+- 46 draws per frame (vertex program with blend) used a texture of format `0x2E`: the Z24S8 depth
+  of a 128x128 surface that the game paints at the start of the frame from the light. It could not be converted and the
+  draw was discarded.
+- Now the stage binds the GL texture of that Z surface (render-to-texture). `psh` compares, like the NV2A,
+  `depth · max` with the projected z (`0xFFFFFF` at 24 bits, `0xFFFF` at 16) using the function in
   `0x1E6C`.
 
-**Aproximaciones:** potencia especular fija (16) en vez de `SET_SPECULAR_PARAMS`, focos sin cono y sin skinning
-en el modo fijo.
+**Approximations:** fixed specular power (16) instead of `SET_SPECULAR_PARAMS`, spotlights without cone and no skinning
+in fixed mode.
 
-**Abierto:**
-- **El cielo** sigue siendo el color de borrado (`0xFFA1A5E8`, lavanda) y **falta el suelo**.
-- Con el culling desactivado aparecen grandes polígonos oscuros que cubren la vista. Puede ser una cúpula de cielo
-  vista por dentro o geometría de volúmenes de sombra (hay stencil con INVERT); hay que aislar qué dibujo es.
+**Open:**
+- **The sky** is still the clear color (`0xFFA1A5E8`, lavender) and **the floor is missing**.
+- With culling disabled, large dark polygons appear that cover the view. It may be a sky dome
+  seen from inside or shadow volume geometry (there is stencil with INVERT); it is necessary to isolate which draw it is.
 
-## RenderDoc: culling y skinning (el templo que faltaba)
+## RenderDoc: culling and skinning (the missing temple)
 
-- **Herramienta (`--rdoc-frame N`, `port/src/gpu/rdoc.c`):**
-  - carga la DLL x86 de RenderDoc antes de crear el contexto GL y captura exactamente el frame N; el `.rdc` queda
-    junto al log, en NGB_DATA;
-  - la captura se analiza sin interfaz con `qrenderdoc --python script.py` (módulo `renderdoc`): lista de draws
-    con su estado, *pixel history*, el destino guardado tras un evento y los vértices de entrada y post-VS. Los
-    scripts están en el scratchpad de la sesión.
-- **Determinismo:** con `--input-script "t=180p:START,t=600p:START"` (lecturas del mando, no ms) la demo llega
-  al mismo frame en cada ejecución. Así dos builds se comparan con la misma escena.
-- **Referencia:** capturas de xemu de la demo del título, hechas por el usuario. La demo pasa dentro de un templo
-  cerrado; en nuestro render faltaban los muros y el suelo y se veía el color de fondo (lavanda).
-- **Primer diagnóstico, equivocado (PR #52):**
-  - el *pixel history* mostró 43 draws `backfaceCulled` en un píxel del suelo, y se quitó la inversión de la cara
-    frontal en `glstate`;
-  - pero `pgraph_gl` llamaba a `glFrontFace` sin invertir justo después, así que ese cambio no tenía efecto en el
+- **Tool (`--rdoc-frame N`, `port/src/gpu/rdoc.c`):**
+  - loads the x86 RenderDoc DLL before creating the GL context and captures exactly frame N; the `.rdc` is left
+    next to the log, in NGB_DATA;
+  - the capture is analyzed headlessly with `qrenderdoc --python script.py` (module `renderdoc`): list of draws
+    with their state, *pixel history*, the target saved after an event and the input and post-VS vertices. The
+    scripts are in the session scratchpad.
+- **Determinism:** with `--input-script "t=180p:START,t=600p:START"` (gamepad reads, not ms) the demo reaches
+  the same frame on every run. That way two builds are compared on the same scene.
+- **Reference:** xemu captures of the title demo, made by the project owner. The demo takes place inside a closed
+  temple; in our render the walls and the floor were missing and the background color (lavender) showed.
+- **First diagnosis, wrong (PR #52):**
+  - the *pixel history* showed 43 `backfaceCulled` draws on a floor pixel, and the front-face inversion was
+    removed from `glstate`;
+  - but `pgraph_gl` called `glFrontFace` without inverting right after, so that change had no effect in the
     runtime;
-  - la mejora que se vio venía de comparar escenas distintas, antes de tener la entrada determinista.
-- **Primera causa, el sentido de las caras:**
-  - hay que **invertirlo**, como hace xemu;
-  - sin invertir, el culling descarta los muros y el suelo vistos desde dentro.
-- **Segunda causa, el skinning:**
-  - con el sentido ya invertido, un objeto cubría toda la pantalla delante de la cámara;
-  - era una pieza de Ryu dibujada con **skinning del pipeline fijo**, que no estaba implementado;
-  - sin skinning, sus vértices (en el espacio local de cada hueso) acababan pegados a la cámara.
-- **Skinning implementado** (registro `SET_SKIN_MODE`, `0x0328`):
-  - 1 o 2 = 2 matrices, 3 o 4 = 3 matrices, 5 o 6 = 4 matrices; en los modos impares el último peso es 1 menos la
-    suma de los demás;
-  - las model-view están en `0x0480 + m·0x40` y sus inversas en `0x0580 + m·0x40`, ponderadas con los pesos del
-    atributo 1;
-  - la posición es la suma en espacio de ojo multiplicada por la **matriz compuesta**. Con skinning, D3D deja en
-    ella solo la proyección y el viewport, y el registro de proyección `0x0440` queda a cero. #53 usaba `0x0440`, y
-    las piezas con skinning (hombros, cuello, torso) desaparecían; se corrigió en #54;
-  - sin skinning se sigue usando la matriz compuesta.
-- **Resultado:** el templo aparece completo y la escena coincide con la captura de xemu.
+  - the improvement that was seen came from comparing different scenes, before having deterministic input.
+- **First cause, the face winding:**
+  - it has to be **inverted**, as xemu does;
+  - without inverting, culling discards the walls and the floor seen from inside.
+- **Second cause, skinning:**
+  - with the winding already inverted, an object covered the whole screen in front of the camera;
+  - it was a piece of Ryu drawn with **fixed-pipeline skinning**, which was not implemented;
+  - without skinning, its vertices (in the local space of each bone) ended up stuck to the camera.
+- **Skinning implemented** (register `SET_SKIN_MODE`, `0x0328`):
+  - 1 or 2 = 2 matrices, 3 or 4 = 3 matrices, 5 or 6 = 4 matrices; in the odd modes the last weight is 1 minus the
+    sum of the others;
+  - the model-views are at `0x0480 + m·0x40` and their inverses at `0x0580 + m·0x40`, weighted with the weights of
+    attribute 1;
+  - the position is the sum in eye space multiplied by the **composite matrix**. With skinning, D3D leaves in
+    it only the projection and viewport, and the projection register `0x0440` is left at zero. #53 used `0x0440`, and
+    the skinned pieces (shoulders, neck, torso) disappeared; it was fixed in #54;
+  - without skinning the composite matrix is still used.
+- **Result:** the temple appears complete and the scene matches the xemu capture.
 
-## Pusher asíncrono (como la GPU real)
+## Asynchronous pusher (like the real GPU)
 
-- **Antes:** cada escritura de `PUT` bloqueaba el hilo del juego mientras el hilo de render procesaba el kick
-  entero, unas 38 veces por frame. Cada ida y vuelta entre hilos costaba unos 0,17 ms (unos 6,6 ms por frame), y
-  la lógica del juego no se solapaba con el dibujo.
-- **Ahora:** `pgraph_kick` apunta el nuevo `PUT` y vuelve. El hilo de render es el pusher: consume
-  `[GET, PUT)` en paralelo con el juego y hace él el pacing de `FLIP_STALL`.
-- **Lo que D3D necesita de una GPU asíncrona:**
-  - **`GET` real**, palabra a palabra (`pb_state.cur`). `D3D_BlockOnTime` calcula a qué distancia va la GPU y,
-    si va más de 9 KB por detrás, parchea el push buffer más adelante. Con un `GET` atrasado parchearía lo que
-    ya se ha pasado y esperaría para siempre.
-  - **`NO_OPERATION(5)`:** ese parche es `WAIT_FOR_IDLE` más `NO_OPERATION` con parámetro 5, una interrupción
-    de la GPU. D3D duerme en el KEVENT del dispositivo (+0x773 palabras), que su ISR señala al llegar. Se
-    emula señalándolo al procesar el método (`ngb_ke_set_event`).
-  - **`PGRAPH_PATT_COLOR0` (`0x400B10`):** D3D escribe un marcador con el objeto pattern (clase `0x44`, método
-    `0x310`) y, al esperar a la GPU, compara sus bits 2-6 con la valla. El pusher lo guarda al procesarlo.
-- **Resultado** (demo determinista, 200 s): sin cuelgues ni errores del push buffer.
-  - El gameplay pasa de 45-53 a 54-60 fps.
-  - El vídeo del montaje va a 30 fps, su ritmo de origen.
-  - Audio limpio: 0 frames descartados.
+- **Before:** each write to `PUT` blocked the game thread while the render thread processed the whole
+  kick, about 38 times per frame. Each round trip between threads cost about 0.17 ms (about 6.6 ms per frame), and
+  the game logic did not overlap with drawing.
+- **Now:** `pgraph_kick` records the new `PUT` and returns. The render thread is the pusher: it consumes
+  `[GET, PUT)` in parallel with the game and does the `FLIP_STALL` pacing itself.
+- **What D3D needs from an asynchronous GPU:**
+  - **A real `GET`**, word by word (`pb_state.cur`). `D3D_BlockOnTime` computes how far the GPU is and,
+    if it is more than 9 KB behind, patches the push buffer further ahead. With a lagging `GET` it would patch what has
+    already been passed and wait forever.
+  - **`NO_OPERATION(5)`:** that patch is `WAIT_FOR_IDLE` plus `NO_OPERATION` with parameter 5, a GPU
+    interrupt. D3D sleeps on the device's KEVENT (+0x773 words), which its ISR signals on arrival. It is
+    emulated by signaling it when the method is processed (`ngb_ke_set_event`).
+  - **`PGRAPH_PATT_COLOR0` (`0x400B10`):** D3D writes a marker with the pattern object (class `0x44`, method
+    `0x310`) and, when waiting for the GPU, compares its bits 2-6 with the fence. The pusher stores it when processing it.
+- **Result** (deterministic demo, 200 s): no hangs or push buffer errors.
+  - Gameplay goes from 45-53 to 54-60 fps.
+  - The montage video runs at 30 fps, its source rate.
+  - Clean audio: 0 dropped frames.
 
-## Uniforms por grupos con sellos de cambio
+## Uniforms by groups with change stamps
 
-- **Medida** (demo determinista, gameplay): los uniforms costaban **3,1-5,3 ms por frame**. Casi cada draw
-  (400-560 de 450-600) resubía todo, unos 250 vec4 en el pipeline fijo, porque el hash de los registros incluía
-  la model-view, que cambia en cada objeto. El propio hash leía unos 3,3 KB por draw.
-- **Cambio:**
-  - `gl_track` (`pgraph.c`) solo cuenta como cambio un valor distinto del anterior, porque D3D reenvía
-    luces y material con el mismo valor. Cada bloque de 16 métodos (`PGL_BLOCK`) y cada constante `c[i]` guardan
-    el sello del reloj `stamp` en su último cambio. Los sellos son de 64 bits: con 32 darían la vuelta en minutos.
-  - `pgraph_gl.c` agrupa los uniforms (`k_ug`: compuesta, model-view, inversas, matrices de textura, planos,
-    luces, material, enteros del pipeline fijo, psC y bump). Cada programa sube un grupo solo si su sello cambió
-    desde la última subida a ese programa. El resto (superficie, niebla, alpha test...) sigue con un hash
-    pequeño.
-  - `c[]` sube solo los tramos que cambian, porque las locations de los elementos van seguidas. `link_uniforms`
-    lo comprueba y busca el tamaño activo del array; si no van seguidas, se sube entero como antes.
-- **Resultado** (`VERIFIED`, misma demo y mismas fases): los uniforms bajan a **0,8-1,5 ms por frame** y unos
-  19 000 vec4 por frame (antes, unos 100 000). El dibujo del hilo de render pasa de 8,6-15 a 6,7-9,5 ms. Las
-  capturas no muestran cambios.
-- **Lo siguiente en coste** dentro del dibujo: subir vértices (2,2-3,4 ms) y los draws (1,9-2,5 ms). Fuera del
-  dibujo, el resto de `pb_run` (unos 6 ms) es la decodificación del push buffer palabra a palabra.
+- **Measurement** (deterministic demo, gameplay): the uniforms cost **3.1-5.3 ms per frame**. Almost every draw
+  (400-560 of 450-600) re-uploaded everything, about 250 vec4 in the fixed pipeline, because the hash of the registers included
+  the model-view, which changes on every object. The hash itself read about 3.3 KB per draw.
+- **Change:**
+  - `gl_track` (`pgraph.c`) only counts a value different from the previous one as a change, because D3D resends
+    lights and material with the same value. Each block of 16 methods (`PGL_BLOCK`) and each constant `c[i]` store
+    the `stamp` clock stamp of their last change. The stamps are 64-bit: with 32 bits they would wrap in minutes.
+  - `pgraph_gl.c` groups the uniforms (`k_ug`: composite, model-view, inverses, texture matrices, planes,
+    lights, material, fixed-pipeline integers, psC and bump). Each program uploads a group only if its stamp changed
+    since the last upload to that program. The rest (surface, fog, alpha test...) still uses a small
+    hash.
+  - `c[]` uploads only the ranges that change, because the locations of the elements are consecutive. `link_uniforms`
+    checks this and looks up the active size of the array; if they are not consecutive, it is uploaded whole as before.
+- **Result** (`VERIFIED`, same demo and same phases): the uniforms drop to **0.8-1.5 ms per frame** and about
+  19,000 vec4 per frame (before, about 100,000). The render thread's drawing goes from 8.6-15 to 6.7-9.5 ms. The
+  captures show no changes.
+- **Next in cost** inside drawing: uploading vertices (2.2-3.4 ms) and the draws (1.9-2.5 ms). Outside
+  drawing, the rest of `pb_run` (about 6 ms) is the word-by-word push buffer decoding.
 
-## Siguiente
+## Next
 
-1. Pasar de la pantalla de título al menú principal, y averiguar qué esperan los avisos y el vídeo (audio).
-2. Geometría 3D: vertex programs ([[shaders-nv2a]]) y dibujo desde arrays de vértices (`DRAW_ARRAYS`/`ARRAY_ELEMENT`)
-   sobre el backend OpenGL.
+1. Go from the title screen to the main menu, and find out what the warnings and the video (audio) wait for.
+2. 3D geometry: vertex programs ([[shaders-nv2a]]) and drawing from vertex arrays (`DRAW_ARRAYS`/`ARRAY_ELEMENT`)
+   on the OpenGL backend.

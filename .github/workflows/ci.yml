@@ -10,12 +10,12 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  # En una PR, un push nuevo deja obsoleto el anterior; en main cada commit se valida entero.
+  # On a PR, a new push supersedes the previous run; on main every commit is validated in full.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   hygiene:
-    name: guardia de datos del juego
+    name: game data guard
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -23,7 +23,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      # -P: sin el cwd en sys.path, un .py en la raíz del repo no tapa la stdlib.
+      # -P: without the cwd on sys.path, a .py in the repo root cannot shadow the stdlib.
       - run: python -P -m ngb_tools.hygiene
         env:
           PYTHONPATH: src

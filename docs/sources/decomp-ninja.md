@@ -4,24 +4,24 @@ updated: 2026-10-20
 status: current
 ---
 
-# Trabajo previo sobre NGB
+# Prior work on NGB
 
-## DECOMP__Ninja (abandonado)
+## DECOMP__Ninja (abandoned)
 
-- Repo: https://github.com/mehmetalinya/DECOMP__Ninja. Último push el 2022-07-02, 6 estrellas. `VERIFIED` vía la API de GitHub.
-- Casi solo es una estructura de carpetas: `Ninja Gaiden Black Decomp`, `Ninja Gaiden Black
-  Prototype Decomp`, `SDK/` y equivalentes para NG2. Las carpetas de NGB están prácticamente vacías.
-- El autor se detuvo porque consideró los formatos de assets "UNKNOWN" (compresión o cifrado propios).
-- **Lo que vimos nosotros:** los contenedores del disco son **AFS de CRI Middleware**, con la magia
-  `AFS\0` (`VERIFIED`, [[disco-ngb]]). El formato del contenedor está documentado en implementaciones
-  abiertas como [AFSLib](https://github.com/MaikelChan/AFSLib) y
-  [Sewer56/AfsLib](https://github.com/Sewer56/AfsLib). Lo desconocido, si lo hay, es el contenido de cada
-  entrada ([[afs]]).
-- El nombre "Prototype Decomp" sugiere que existe un prototipo de NG. `UNVERIFIED`: un prototipo con
-  símbolos cambiaría mucho la viabilidad de descompilar, como pasó con [[opence]].
+- Repo: https://github.com/mehmetalinya/DECOMP__Ninja. Last push on 2022-07-02, 6 stars. `VERIFIED` via the GitHub API.
+- It is almost only a folder structure: `Ninja Gaiden Black Decomp`, `Ninja Gaiden Black
+  Prototype Decomp`, `SDK/` and equivalents for NG2. The NGB folders are practically empty.
+- The author stopped because they considered the asset formats "UNKNOWN" (custom compression or encryption).
+- **What we saw ourselves:** the containers on the disc are **CRI Middleware AFS**, with the magic
+  `AFS\0` (`VERIFIED`, [[ngb-disc]]). The container format is documented in open
+  implementations such as [AFSLib](https://github.com/MaikelChan/AFSLib) and
+  [Sewer56/AfsLib](https://github.com/Sewer56/AfsLib). What is unknown, if anything, is the content of each
+  entry ([[afs]]).
+- The name "Prototype Decomp" suggests that an NG prototype exists. `UNVERIFIED`: a prototype with
+  symbols would greatly change the feasibility of decompiling, as happened with [[opence]].
 
-## Contexto oficial
+## Official context
 
-- Team Ninja (Fumihiko Yasuda, 2021) dijo que NGB quedó fuera de *Master Collection* porque ya no tienen
-  el código fuente completo. Fuente:
+- Team Ninja (Fumihiko Yasuda, 2021) said NGB was left out of the *Master Collection* because they no longer have
+  the complete source code. Source:
   https://gameranx.com/updates/id/219898/article/ninja-gaiden-black-left-out-of-master-collection-thanks-to-lost-code/

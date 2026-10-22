@@ -4,30 +4,30 @@ updated: 2026-10-20
 status: current
 ---
 
-# Roadmap: hitos tangibles
+# Roadmap: tangible milestones
 
-Cada hito termina con algo que **se ve, se oye o se ejecuta**. El estado se
-actualiza al cerrar cada sesión, y el detalle de cada cierre queda en [[log]].
+Each milestone ends with something that **you can see, hear or run**. The status is
+updated at the close of each session, and the detail of each close is left in [[log]].
 
-| Hito | Resultado tangible | Criterio de terminado | Estado |
+| Milestone | Tangible result | Definition of done | Status |
 | --- | --- | --- | --- |
-| **H0** Cerebro y base | Vault, repo, datos extraídos, equipo definido | Una sesión nueva puede retomar el proyecto con [[GOAL-ngb-port]] | **hecho** (2026-10-20) |
-| **H1** Mapa del disco y del binario | Reporte del XBE (versión del XDK, librerías, imports del kernel, secciones) e inventario de los `.afs` | [[xbe-default]] y [[afs]] con datos `VERIFIED`; herramientas con tests en verde | **hecho** (2026-10-20, tag `milestone/h1`) |
-| **H2** Primera textura | Una textura del juego exportada a PNG, por ejemplo la de Ryu | Formato de textura documentado en `formats/`; exportador con test | **hecho** (2026-10-20): 19 texturas de Ryu, menú y fuentes ([[kmd]], [[xpr0]]) |
-| **H3** Primer modelo | Modelo de Ryu exportado a glTF/OBJ y visible en un visor | Formato de modelo documentado; exportador | **hecho** (2026-10-20): Ryu, Ayane, Murai y armas de Doku en glTF ([[kmd]]) |
-| **H4** Primer sonido | Una pista de `bgm.afs` reproducida como WAV | Formato de audio documentado | **hecho** (2026-10-20): música (bgm), voces (sse), efectos (.wva) y XWB en WAV ([[adx]], [[wva]]). Falta `movie/ninja.aix` (AIX multipista) |
-| **H5** Proyecto Ghidra y firmas del SDK | Proyecto Ghidra persistente; librerías del XDK identificadas por firmas; % de funciones con nombre | Métrica de cobertura en [[xbe-default]] | **hecho** (2026-10-21): 548 de 9,118 funciones con nombre; D3D8 identificable ([[adr-06-render-hibrido]]) |
-| **H6** Arranque nativo | `default.xbe` corriendo en un proceso Win32 de 32 bits hasta la primera llamada al kernel sin implementar, con log de las llamadas | Log reproducible; kernel HLE mínimo | **hecho** (2026-10-21): 285 llamadas al kernel, hasta la primera MMIO del NV2A ([[arranque-nativo]], [[adr-05-runtime-nativo]]) |
-| **H7** Primer frame | Un frame del juego (logo o pantalla de carga) en una ventana de PC | D3D8 mínimo sobre GL/Vulkan | **hecho**: la pantalla de avisos del juego se ve en una ventana a 60 fps ([[gpu-nv2a]]). Rasterizado por software ([[adr-06-render-hibrido]]) |
-| **H8** Menú jugable | Menú principal con mando, audio y video | Entrada SDL3, audio, `.sfd` | **en curso**: hay mando (HLE de XAPI, [[entrada-xapi]]) y se llega a la **pantalla de título** ("PRESS START BUTTON", [[gpu-nv2a]]). Faltan el audio, el vídeo animado y pasar del título |
-| **H9+** Descompilación y mejoras | Funciones en C con tests diferenciales; panorámico, 60+ fps interpolados, resolución alta | Por función o subsistema | pendiente |
+| **H0** Brain and base | Vault, repo, extracted data, team defined | A new session can resume the project with [[GOAL-ngb-port]] | **done** (2026-10-20) |
+| **H1** Map of the disc and the binary | XBE report (XDK version, libraries, kernel imports, sections) and inventory of the `.afs` | [[xbe-default]] and [[afs]] with `VERIFIED` data; tools with green tests | **done** (2026-10-20, tag `milestone/h1`) |
+| **H2** First texture | A game texture exported to PNG, for example Ryu's | Texture format documented in `formats/`; exporter with a test | **done** (2026-10-20): 19 textures of Ryu, menu and fonts ([[kmd]], [[xpr0]]) |
+| **H3** First model | Ryu's model exported to glTF/OBJ and visible in a viewer | Model format documented; exporter | **done** (2026-10-20): Ryu, Ayane, Murai and Doku's weapons in glTF ([[kmd]]) |
+| **H4** First sound | A track from `bgm.afs` played as WAV | Audio format documented | **done** (2026-10-20): music (bgm), voices (sse), effects (.wva) and XWB to WAV ([[adx]], [[wva]]). `movie/ninja.aix` (multitrack AIX) is missing |
+| **H5** Ghidra project and SDK signatures | Persistent Ghidra project; XDK libraries identified by signatures; % of functions named | Coverage metric in [[xbe-default]] | **done** (2026-10-21): 548 of 9,118 functions named; D3D8 identifiable ([[adr-06-hybrid-renderer]]) |
+| **H6** Native boot | `default.xbe` running in a 32-bit Win32 process up to the first unimplemented kernel call, with a call log | Reproducible log; minimal HLE kernel | **done** (2026-10-21): 285 kernel calls, up to the first NV2A MMIO ([[native-boot]], [[adr-05-native-runtime]]) |
+| **H7** First frame | A game frame (logo or loading screen) in a PC window | Minimal D3D8 over GL/Vulkan | **done**: the game's warnings screen shows in a window at 60 fps ([[gpu-nv2a]]). Software rasterized ([[adr-06-hybrid-renderer]]) |
+| **H8** Playable menu | Main menu with gamepad, audio and video | SDL3 input, audio, `.sfd` | **in progress**: the gamepad works (XAPI HLE, [[xapi-input]]) and the **title screen** is reached ("PRESS START BUTTON", [[gpu-nv2a]]). Missing: audio, animated video and getting past the title |
+| **H9+** Decompilation and improvements | Functions in C with differential tests; widescreen, 60+ interpolated fps, high resolution | Per function or subsystem | pending |
 
-H2, H3 y H4 (assets) no dependen de H5, H6 y H7 (ejecución), así que pueden avanzar
-en paralelo. Los assets dan resultados visibles pronto y además revelan las
-estructuras que luego usa el código.
+H2, H3 and H4 (assets) do not depend on H5, H6 and H7 (execution), so they can advance
+in parallel. The assets give visible results early and also reveal the
+structures that the code uses later.
 
-## Siguiente paso concreto
+## Concrete next step
 
-**H7, primer frame.** Hay que decidir con datos entre emular un mínimo del NV2A y hacer HLE de D3D8
-([[adr-05-runtime-nativo]] § Próxima decisión). Antes conviene **H5**: el proyecto Ghidra con ghidra-xbe, para medir
-cuánto de D3D8LTCG es identificable. Requiere que el usuario apruebe instalar Ghidra.
+**H7, first frame.** We have to decide with data between emulating a minimal NV2A and doing D3D8 HLE
+([[adr-05-native-runtime]] § Next decision). Beforehand **H5** is worth doing: the Ghidra project with ghidra-xbe, to measure
+how much of D3D8LTCG is identifiable. It requires the project owner to approve installing Ghidra.

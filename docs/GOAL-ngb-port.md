@@ -1,60 +1,59 @@
 ---
 tags: [ngb, goal]
-updated: 2026-10-20
+updated: 2026-10-22
 status: current
 ---
 
-# GOAL: port nativo de Ninja Gaiden Black a PC
+# GOAL: native PC port of Ninja Gaiden Black
 
-> **Una sesión nueva lee esta página primero.** Después lee [[index]] y luego
-> [[log]] (las últimas entradas: `grep "^## \[" docs/log.md | tail -5`).
+> **A new session reads this page first.** Then it reads [[index]] and then
+> [[log]] (the latest entries: `grep "^## \[" docs/log.md | tail -5`).
 
-## Qué
+## What
 
-Correr Ninja Gaiden Black (Xbox original, versión PAL "Europe (En,Fr,De,Es,It)")
-**de forma nativa en Windows**, sin emulador. El código del juego se ejecuta
-sobre una capa propia que reemplaza al hardware y al SDK de Xbox. El modelo es
-[[opence]] (Halo CE nativo).
+Run Ninja Gaiden Black (original Xbox, PAL version "Europe (En,Fr,De,Es,It)")
+**natively on Windows**, without an emulator. The game code runs
+on a layer of our own that replaces the Xbox hardware and SDK. The model is
+[[opence]] (native Halo CE).
 
-## Por qué
+## Why
 
-Es un proyecto **pedagógico y personal**. Lo que importa es aprender y documentar
-el proceso de ingeniería: ingeniería inversa, cargadores, kernels, gráficos y
-descompilación. No tiene fines comerciales y no se distribuye nada del juego.
-El juego es el favorito del usuario.
+This is an **unofficial, non-commercial fan port**. What matters is the engineering process and
+documenting it in the open: reverse engineering, loaders, kernels, graphics and
+decompilation. Nothing from the game is distributed, and you need your own copy of the game.
 
-**Criterio de avance:** cada hito deja algo **tangible**: un reporte, una imagen
-o un sonido extraídos, o un binario que arranca. Se avanza poco a poco, con ayuda
-de la IA, así que el plan se cuenta en hitos, no en meses.
+**Progress criterion:** every milestone leaves something **tangible**: a report, an image
+or a sound extracted, or a binary that boots. Progress is incremental, with AI
+assistance, so the plan is counted in milestones, not in months.
 
-## Dónde está todo
+## Where everything is
 
-| Qué | Dónde |
+| What | Where |
 | --- | --- |
-| Repo (código, herramientas, vault) | `<repo>` |
-| Vault (este cerebro) | `docs/`. Se abre como vault en Obsidian. |
-| Datos del juego extraídos (inmutables) | `%USERPROFILE%\ngb-data\game\`. Fuera del repo y de OneDrive: [[adr-03-datos-fuera-del-repo]] |
-| Contenido extraído de contenedores | `%USERPROFILE%\ngb-data\extracted\` |
-| Imagen XISO del juego | `%USERPROFILE%\xemu\Juegos\Ninja Gaiden Black (Europe) (En,Fr,De,Es,It).xiso.iso` |
-| Emulador de referencia (oráculo) | xemu 0.8.136 en `%USERPROFILE%\xemu\` |
-| extract-xiso | `...\xemu\tools\extract-xiso\artifacts\extract-xiso.exe` ([[herramientas]]) |
-| Reportes generados | `build/reports/` (ignorado por git; se regenera con las herramientas) |
+| Repo (code, tools, vault) | the repo root (GitHub repo `angeldev07/ninja-gaiden-black-port`) |
+| Vault (this brain) | `docs/`. Open it as a vault in Obsidian. |
+| Extracted game data (immutable) | `%NGB_DATA%\game\` (`NGB_DATA` defaults to `%USERPROFILE%\ngb-data`). Outside the repo: [[adr-03-game-data-outside-repo]] |
+| Content extracted from containers | `%NGB_DATA%\extracted\` |
+| XISO image of the game | your own disc image ("Ninja Gaiden Black (Europe) (En,Fr,De,Es,It)", XISO format) |
+| Reference emulator (oracle) | xemu 0.8.136, your own xemu install |
+| extract-xiso | `extract-xiso.exe` from your extract-xiso build ([[tools]]) |
+| Generated reports | `build/reports/` (ignored by git; regenerated with the tools) |
 
-## Reglas (versión corta)
+## Rules (short version)
 
-- No va al repo ningún byte del juego. Prohibido usar el XDK filtrado. Ver [[CLAUDE]] § Reglas legales.
-- Toda afirmación lleva un ancla y una etiqueta `VERIFIED` / `INFERRED` / `UNVERIFIED`.
-- El líder es el único que escribe en el vault. Los subagentes reportan en caveman ultra. Ver [[equipo]].
-- Las herramientas que leen datos del juego se ejecutan con `python -I` (aislado).
-- Código: identificadores en inglés y comentarios en español.
+- No byte of the game goes into the repo. Using the leaked XDK is forbidden. See [[CLAUDE]] § Legal rules.
+- Every claim carries an anchor and a `VERIFIED` / `INFERRED` / `UNVERIFIED` tag.
+- The leader is the only one who writes in the vault. Subagents report in caveman ultra. See [[team]].
+- Tools that read game data run with `python -I` (isolated).
+- Code, comments and docs are in English.
 
-## Decisiones vigentes
+## Current decisions
 
-- [[adr-01-enfoque-port]]: rehosting del XBE más descompilación incremental. El estado final es como OpenCE.
-- [[adr-02-herramientas-re]]: proyecto persistente en Ghidra con ghidra-xbe, herramientas Python propias, REA como auxiliar en WSL y xemu como oráculo.
-- [[adr-03-datos-fuera-del-repo]]: los datos del juego viven en `NGB_DATA`.
-- [[adr-04-control-de-versiones]]: el líder gestiona git y las PRs. Repo privado `angeldev07/ninja-gaiden-black-port`.
+- [[adr-01-port-approach]]: rehosting of the XBE plus incremental decompilation. The end state is like OpenCE.
+- [[adr-02-re-tools]]: persistent Ghidra project with ghidra-xbe, our own Python tools, REA as a helper in WSL and xemu as the oracle.
+- [[adr-03-game-data-outside-repo]]: the game data lives in `NGB_DATA`.
+- [[adr-04-version-control]]: the leader manages git and the PRs. GitHub repo `angeldev07/ninja-gaiden-black-port`.
 
-## Estado y siguiente paso
+## Status and next step
 
-Ver [[roadmap]]: hitos, criterio de terminado y estado de cada uno.
+See [[roadmap]]: milestones, definition of done and status of each one.

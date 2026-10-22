@@ -1,126 +1,123 @@
 ---
 tags: [ngb, schema]
-updated: 2026-10-20
+updated: 2026-10-22
 status: current
 ---
 
-# NGB Port Wiki: esquema y convenciones
+# NGB Port Wiki: schema and conventions
 
-Base de conocimiento **mantenida por el LLM** para el port nativo de Ninja Gaiden
-Black (Xbox, PAL) a PC. Sigue el patrón de [[wiki-llm]], el mismo estándar del
-vault de Rithm. Obsidian es el lector. El LLM escribe y mantiene todas las
-páginas. El humano dirige, pregunta y cura.
+**LLM-maintained** knowledge base for the native PC port of Ninja Gaiden
+Black (Xbox, PAL). It follows the [[wiki-llm]] pattern. Obsidian is the reader. The LLM
+writes and maintains all the pages. The human directs, asks questions and curates.
 
-**Es el cerebro de contexto del proyecto.** Una sesión nueva empieza leyendo
-[[GOAL-ngb-port]]. Después lee [[index]] y luego las páginas que necesite. Es más
-barato que volver a analizar binarios o rehacer búsquedas.
+**It is the project's context brain.** A new session starts by reading
+[[GOAL-ngb-port]]. Then it reads [[index]] and then whichever pages it needs. That is
+cheaper than re-analyzing binaries or redoing searches.
 
-## Capas
+## Layers
 
-- **Fuentes crudas (inmutables, fuera del repo):** los datos del juego, extraídos de
-  la copia del usuario en `NGB_DATA` (por defecto `%USERPROFILE%\ngb-data\`):
-  - `game/`: árbol del disco (XISO extraído). Nunca se modifica.
-  - `extracted/`: contenido sacado de los `.afs` y otros contenedores.
-  Las fuentes externas (repos, wikis, docs públicas) se resumen en `sources/`.
-- **El wiki:** este directorio (`docs/`). Markdown que pertenece al LLM.
-- **El esquema:** este archivo.
-- **Las herramientas:** `tools/` en la raíz del repo. Producen reportes en `build/reports/`
-  (ignorado por git). El wiki cita esos reportes y los resume. No los copia enteros.
+- **Raw sources (immutable, outside the repo):** the game data, extracted from the
+  user's own copy and stored under `NGB_DATA`:
+  - `game/`: the disc tree (extracted XISO). Never modified.
+  - `extracted/`: content pulled out of the `.afs` files and other containers.
+  External sources (repos, wikis, public docs) are summarized in `sources/`.
+- **The wiki:** this directory (`docs/`). Markdown owned by the LLM.
+- **The schema:** this file.
+- **The tools:** `tools/` and `src/` at the repo root. They produce reports in `build/reports/`
+  (ignored by git). The wiki cites those reports and summarizes them. It does not copy them whole.
 
-## Estructura de directorios
+## Directory structure
 
 ```
 docs/
-  CLAUDE.md             ← este archivo (esquema)
-  GOAL-ngb-port.md      ← punto de entrada de toda sesión nueva
-  index.md              ← catálogo de todas las páginas
-  log.md                ← registro cronológico, solo se agrega
-  wiki-llm.md           ← el patrón que seguimos
-  reverse-engineering/  ← OBSERVACIÓN: qué hay en el disco y en los binarios
-  formats/              ← OBSERVACIÓN: una página por formato de archivo
-  findings/             ← OBSERVACIÓN: hallazgos puntuales F1…Fn (dato → evidencia → impacto)
-  target/               ← PROPUESTA: ADRs, roadmap, arquitectura destino
-  team/                 ← cómo trabaja el equipo de agentes
-  tools/                ← cómo usar nuestras herramientas
-  sources/              ← resúmenes de fuentes externas (proyectos, docs)
+  CLAUDE.md             ← this file (schema)
+  GOAL-ngb-port.md      ← entry point of every new session
+  index.md              ← catalog of all pages
+  log.md                ← chronological record, append-only
+  wiki-llm.md           ← the pattern we follow
+  reverse-engineering/  ← OBSERVATION: what is on the disc and in the binaries
+  formats/              ← OBSERVATION: one page per file format
+  findings/             ← OBSERVATION: individual findings F1…Fn (fact → evidence → impact)
+  target/               ← PROPOSAL: ADRs, roadmap, target architecture
+  team/                 ← how the agent team works
+  tools/                ← how to use our tools
+  sources/              ← summaries of external sources (projects, docs)
 ```
 
-Obsidian resuelve `[[enlaces]]` por nombre de archivo en todo el vault. Por eso
-**los nombres de página son únicos** en todo `docs/`.
+Obsidian resolves `[[links]]` by file name across the whole vault. That is why
+**page names are unique** across `docs/`.
 
-## Reglas de ingeniería inversa (heredadas del estándar de auditoría)
+## Reverse-engineering rules (inherited from the audit standard)
 
-- **Toda afirmación lleva un ancla.** Ejemplos:
-  - Binario: `default.xbe @ 0x0001A2B0 (FUN_0001a2b0)`, con dirección virtual y nombre si existe.
-  - Archivo: `cmn.afs#12`, con archivo y número de entrada.
-  - Herramienta: `tools/afs.py → parse_toc`.
-  Si una afirmación no tiene ancla es una hipótesis y se marca como tal.
-- **Etiquetas de confianza** en todo lo que no se leyó directamente:
-  - `VERIFIED`: leído en los bytes, en la salida de una herramienta o en la doc oficial.
-  - `INFERRED`: deducido sin ejecutar ni confirmar.
-  - `UNVERIFIED`: requiere comprobarlo, por ejemplo en xemu o en un depurador.
-- **Observación separada de propuesta.** `reverse-engineering/`, `formats/` y
-  `findings/` describen solo lo que existe. `target/` contiene diseño y decisiones,
-  y nunca se presenta como estado actual.
-- **Cada número dice de dónde salió:** el comando, el reporte o el offset.
+- **Every claim carries an anchor.** Examples:
+  - Binary: `default.xbe @ 0x0001A2B0 (FUN_0001a2b0)`, with virtual address and name if one exists.
+  - File: `cmn.afs#12`, with file and entry number.
+  - Tool: `tools/afs.py → parse_toc`.
+  A claim without an anchor is a hypothesis and is marked as such.
+- **Confidence tags** on everything that was not read directly:
+  - `VERIFIED`: read in the bytes, in tool output or in the official docs.
+  - `INFERRED`: deduced without running or confirming it.
+  - `UNVERIFIED`: needs checking, for example in xemu or in a debugger.
+- **Observation separated from proposal.** `reverse-engineering/`, `formats/` and
+  `findings/` describe only what exists. `target/` holds design and decisions,
+  and is never presented as the current state.
+- **Every number says where it came from:** the command, the report or the offset.
 
-## Reglas legales (no negociables)
+## Legal rules (non-negotiable)
 
-- Nunca va al repo ningún byte del juego: binarios, assets, extractos ni dumps
-  grandes de memoria. Lo impiden dos barreras: `.gitignore` (por extensión) y la
-  guardia `ngb_tools.hygiene` (por extensión, firma binaria y tamaño), que corre en
-  el hook pre-commit y en CI ([[adr-04-control-de-versiones]]).
-- Prohibido usar el XDK filtrado de Microsoft ni nada derivado de él (headers,
-  librerías). OpenCE reescribió las declaraciones del SDK sin el XDK, partiendo de la
-  información de depuración de builds de Halo y de documentación pública ([[opence]]).
-  NGB no tiene información de depuración, así que aquí las declaraciones salen solo
-  de la documentación pública y del análisis propio.
-- El proyecto es pedagógico, personal y sin fines comerciales. Cada persona usa su
-  propia copia del juego.
+- No byte of the game ever goes into the repo: binaries, assets, extracts or large
+  memory dumps. Two barriers enforce this: `.gitignore` (by extension) and the
+  `ngb_tools.hygiene` guard (by extension, binary signature and size), which runs in the
+  pre-commit hook and in CI ([[adr-04-version-control]]).
+- Using Microsoft's leaked XDK or anything derived from it (headers,
+  libraries) is forbidden. OpenCE rewrote the SDK declarations without the XDK, starting from the
+  debug information of Halo builds and from public documentation ([[opence]]).
+  NGB has no debug information, so here the declarations come only from public
+  documentation and from our own analysis.
+- This is an unofficial, non-commercial fan project. Each person uses their
+  own copy of the game.
 
-## Convenciones de página
+## Page conventions
 
-- **Frontmatter** YAML en todas las páginas. Hay dos excepciones: [[log]], que es un
-  registro append-only igual que en el vault de Rithm, y [[wiki-llm]], que es una copia
-  literal de una fuente externa:
+- **Frontmatter** YAML on every page. There are two exceptions: [[log]], which is an
+  append-only record, and [[wiki-llm]], which is a verbatim copy of an external source:
   ```yaml
   ---
-  tags: [ngb, <área>]
+  tags: [ngb, <area>]
   updated: YYYY-MM-DD
   status: current | draft | superseded
   ---
   ```
-- **Wikilinks** `[[nombre-de-pagina]]`, enlazando sin miedo. Un enlace a una página
-  que aún no existe sirve como marcador de TODO.
-- **Densidad y hechos.** La forma preferida es "Qué es → Cómo funciona → Evidencia →
-  Gotchas → Siguiente paso".
-- **Idioma:** español con tildes. Los términos técnicos, identificadores y comandos
-  van tal cual.
-- **Contradicciones:** si un hecho nuevo invalida otro, se corrige la página vieja y
-  se anota en [[log]].
+- **Wikilinks** `[[page-name]]`; link freely. A link to a page that does not exist
+  yet works as a TODO marker.
+- **Density and facts.** The preferred shape is "What it is → How it works → Evidence →
+  Gotchas → Next step".
+- **Language:** English. Technical terms, identifiers and commands are kept as they are.
+- **Contradictions:** if a new fact invalidates another, the old page is corrected and
+  the change is noted in [[log]].
 
-## Flujos
+## Workflows
 
-**Ingest** (se aprende algo): actualizar las páginas afectadas y sus enlaces,
-añadir a [[index]] una línea por cada página nueva y registrar la entrada en [[log]].
+**Ingest** (something is learned): update the affected pages and their links,
+add one line to [[index]] for each new page and record the entry in [[log]].
 
-**Query** (una pregunta): leer [[index]], bajar a las páginas y responder citando.
-Si la respuesta es una síntesis que vale la pena conservar, guardarla como página.
+**Query** (a question): read [[index]], drill down to the pages and answer with citations.
+If the answer is a synthesis worth keeping, save it as a page.
 
-**Lint** (chequeo de salud): buscar contradicciones, afirmaciones viejas, páginas
-huérfanas, conceptos sin página propia y anclas rotas.
+**Lint** (health check): look for contradictions, stale claims, orphan pages,
+concepts without their own page and broken anchors.
 
-## Formato del log
+## Log format
 
-Solo se agrega al final, una línea de encabezado por entrada, para que
-`grep "^## \[" log.md` funcione:
+Append-only at the end, one header line per entry, so that
+`grep "^## \[" log.md` works:
 
 ```
-## [YYYY-MM-DD] <ingest|query|lint|decision|milestone> | <título corto>
+## [YYYY-MM-DD] <ingest|query|lint|decision|milestone> | <short title>
 ```
 
-## Equipo de agentes
+## Agent team
 
-El líder (la sesión principal) es el **único escritor del vault**. Los subagentes
-entregan reportes en formato caveman ultra y el líder los ingiere al vault en prosa
-normal. Los roles, las plantillas y las reglas están en [[equipo]].
+The leader (the main session) is the **only writer of the vault**. Subagents
+deliver reports in caveman ultra format and the leader ingests them into the vault in
+normal prose. The roles, templates and rules are in [[team]].

@@ -1,7 +1,7 @@
-# Datos del juego: nunca al repo (copyright). Viven fuera, en $NGB_DATA (por defecto ~/ngb-data).
-# Esto es solo comodidad: en Linux .gitignore distingue mayúsculas (*.afs no cubre CMN.AFS) y
-# `git add -f` lo salta. La barrera real es la guardia (python -m ngb_tools.hygiene: hook y
-# CI), que no distingue mayúsculas, mira ruta, firma y tamaño y bloquea los comprimidos.
+# Game data never goes in the repo (copyright). It lives outside, in $NGB_DATA (default ~/ngb-data).
+# This is only a convenience: on Linux .gitignore is case-sensitive (*.afs misses CMN.AFS) and
+# `git add -f` bypasses it. The real barrier is the guard (python -m ngb_tools.hygiene: hook and
+# CI), which is case-insensitive, checks path, signature and size, and blocks archives.
 *.iso
 *.xiso
 *.xbe
@@ -15,10 +15,10 @@
 *.bin
 *.def
 *.ins
-# Fuentes: la guardia no las bloquea por extensión (una fuente libre puede ser legítima);
-# las del juego (23 MB) las caza la regla de tamaño. Una fuente libre entra con `git add -f`.
+# Fonts: the guard does not block them by extension (a free font can be legitimate); the
+# game's fonts (23 MB) are caught by the size rule. A free font goes in with `git add -f`.
 *.ttf
-# Formatos internos de los AFS (Team Ninja)
+# Internal formats inside the AFS archives (Team Ninja)
 *.kmd
 *.spr
 *.sty
@@ -32,29 +32,29 @@
 game/
 extracted/
 
-# Salidas generadas por las herramientas
+# Generated tool output
 build/
 
 # Python
 __pycache__/
 *.pyc
 
-# Obsidian: estado volátil por máquina (la config compartible sí se versiona)
+# Obsidian: volatile per-machine state (the shareable config is versioned)
 docs/.obsidian/workspace.json
 docs/.obsidian/workspace-mobile.json
 docs/.obsidian/cache
 docs/.trash/
 
-# Entornos y cachés de herramientas
+# Environments and tool caches
 .venv/
 .mypy_cache/
 .ruff_cache/
 *.egg-info/
 
-# Artefactos de compilación de MSVC fuera de build/
+# MSVC build artifacts outside build/
 *.pdb
 *.ilk
 *.obj
 
-# Worktrees y estado local de Claude Code
+# Claude Code worktrees and local state
 .claude/

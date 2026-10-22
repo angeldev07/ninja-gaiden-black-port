@@ -70,7 +70,7 @@ _GAME_DATA: Final = "game data"
 _ARCHIVE: Final = "compressed archive (could contain game data)"
 
 # Forbidden extensions, grouped by origin. A new entry here requires updating
-# docs/target/adr-03-datos-fuera-del-repo.md.
+# docs/target/adr-03-game-data-outside-repo.md.
 _DISC_FILES = (".xbe", ".iso", ".xiso", ".bin", ".def", ".ins")
 _CRI_MIDDLEWARE = (".afs", ".sfd", ".aix", ".adx")
 _XDK_RESOURCES = (".xpr", ".xwb", ".xsb")

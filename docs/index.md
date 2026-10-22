@@ -1,70 +1,70 @@
 ---
 tags: [ngb, index]
-updated: 2026-10-20
+updated: 2026-10-22
 status: current
 ---
 
-# NGB Port Wiki: índice
+# NGB Port Wiki: index
 
-Catálogo de todas las páginas. Se empieza por [[GOAL-ngb-port]]. Las convenciones están
-en [[CLAUDE]] y la línea de tiempo en [[log]].
+Catalog of all pages. Start with [[GOAL-ngb-port]]. The conventions are
+in [[CLAUDE]] and the timeline in [[log]].
 
-## Raíz
+## Root
 
-- [[GOAL-ngb-port]]: qué, por qué, dónde está todo, reglas y decisiones vigentes. **Punto de entrada.**
-- [[CLAUDE]]: esquema del vault, reglas de RE (anclas y etiquetas de confianza) y reglas legales.
-- [[log]]: registro cronológico, solo se agrega.
-- [[wiki-llm]]: el patrón LLM Wiki que seguimos.
+- [[GOAL-ngb-port]]: what, why, where everything is, rules and current decisions. **Entry point.**
+- [[CLAUDE]]: vault schema, RE rules (anchors and confidence tags) and legal rules.
+- [[log]]: chronological record, append-only.
+- [[wiki-llm]]: the LLM Wiki pattern we follow.
 
-## Observación: ingeniería inversa (`reverse-engineering/`)
+## Observation: reverse engineering (`reverse-engineering/`)
 
-- [[disco-ngb]]: imagen Redump y XISO, 249 archivos por tipo, grupos de AFS, ejecutables y videos.
-- [[arranque-nativo]]: qué hace `default.xbe` al arrancar de forma nativa (H6): hilos, XAPI, unidades, caché en el disco duro, init de D3D hasta la primera MMIO del NV2A.
-- [[personajes]]: galería de los 62 `chr_*`: 49 exportan a GLB, 20 con idle; fallos agrupados por causa.
-- [[mods]]: trajes ocultos e Intercept; `--dump-ram` para comparar estados de la RAM (borrador)
-- [[audio-apu]]: APU del MCPX: procesador de voces, mezcla a waveOut, interrupciones de voz libre y la música de CRI (prioridades de hilos y vblank a 60 Hz).
-- [[entrada-xapi]]: el mando por HLE de las 8 funciones de XAPI. El bloqueo tras los avisos no es la entrada (hipótesis: vídeo de Sofdec sin audio).
-- [[gpu-nv2a]]: H7a. Registros del NV2A emulados, vblank y push buffer: el juego llega a la pantalla de avisos y envía 808k primitivas (aún sin rasterizar).
-- [[shaders-nv2a]]: traductor de vertex programs y register combiners del NV2A a GLSL; los 16 vertex programs reales del juego se decodifican.
-- [[xbe-default]]: anatomía de `default.xbe`. Motor "Kunai", MSVC 13.10 con el XDK 5849, D3D8LTCG, 16 secciones, 145 imports del kernel, middleware de CRI y los otros 4 XBE del disco.
+- [[ngb-disc]]: Redump image and XISO, 249 files by type, AFS groups, executables and videos.
+- [[native-boot]]: what `default.xbe` does when it boots natively (H6): threads, XAPI, drives, hard-disk cache, D3D init up to the first NV2A MMIO.
+- [[characters]]: gallery of the 62 `chr_*`: 49 export to GLB, 20 with idle; failures grouped by cause.
+- [[mods]]: hidden costumes and Intercept; `--dump-ram` to compare RAM states (draft)
+- [[audio-apu]]: MCPX APU: voice processor, mixing to waveOut, free-voice interrupts and CRI music (thread priorities and 60 Hz vblank).
+- [[xapi-input]]: HLE gamepad for the 8 XAPI functions. The hang after the warning screens is not the input (hypothesis: Sofdec video without audio).
+- [[gpu-nv2a]]: H7a. Emulated NV2A registers, vblank and push buffer: the game reaches the warnings screen and submits 808k primitives (not yet rasterized).
+- [[shaders-nv2a]]: translator from NV2A vertex programs and register combiners to GLSL; the game's 16 real vertex programs decode.
+- [[xbe-default]]: anatomy of `default.xbe`. "Kunai" engine, MSVC 13.10 with XDK 5849, D3D8LTCG, 16 sections, 145 kernel imports, CRI middleware and the other 4 XBEs on the disc.
 
-## Observación: formatos (`formats/`)
+## Observation: formats (`formats/`)
 
-- [[afs]]: contenedor AFS de CRI. Estructura, peculiaridad del campo custom, inventario de las 3,766 entradas, magias y entropía.
-- [[chunk-teamninja]]: cabecera común de los formatos del motor Kunai (KMD, `chr_dat`, `stry_dat`…).
-- [[kmd]]: modelos y escenas. Slots fijos (OBJINFO, XPR0, HIERARC…); `ryu.kmd` tiene 59 objetos y 19 texturas.
-- [[xpr0]]: Xbox Packed Resource (texturas, paletas, VB e IB). Campo `Format` y swizzle.
-- [[mtn]]: animaciones `.mtn`/`.mot`: 44 pistas (raíz, tronco e IK de 4 miembros), claves de 20 bits, 258 motions de Ryu.
-- [[escenarios]]: KMD de zona (descriptor multiparte, vértices en mundo), colisión HITMDL y las 17 zonas exportadas a glb.
-- [[armas]]: las 10 armas de Ryu (KMD + `.itm`) y la tabla de anclaje a los huesos (estado, hueso, posición y rotación).
-- [[adx]]: audio de CRI (95 pistas de música y 317 voces).
-- [[wva]]: banco de efectos de sonido en Xbox ADPCM.
+- [[afs]]: CRI AFS container. Structure, quirk of the custom field, inventory of the 3,766 entries, magics and entropy.
+- [[chunk-teamninja]]: common header of the Kunai engine formats (KMD, `chr_dat`, `stry_dat`…).
+- [[kmd]]: models and scenes. Fixed slots (OBJINFO, XPR0, HIERARC…); `ryu.kmd` has 59 objects and 19 textures.
+- [[xpr0]]: Xbox Packed Resource (textures, palettes, VB and IB). `Format` field and swizzle.
+- [[mtn]]: `.mtn`/`.mot` animations: 44 tracks (root, trunk and 4-limb IK), 20-bit keys, 258 motions of Ryu.
+- [[stages]]: zone KMD (multipart descriptor, world-space vertices), HITMDL collision and the 17 zones exported to glb.
+- [[weapons]]: Ryu's 10 weapons (KMD + `.itm`) and the bone attachment table (state, bone, position and rotation).
+- [[adx]]: CRI audio (95 music tracks and 317 voices).
+- [[wva]]: sound-effects bank in Xbox ADPCM.
 
-## Observación: hallazgos (`findings/`)
+## Observation: findings (`findings/`)
 
-_(todavía vacío)_
+_(still empty)_
 
-## Propuesta: diseño y decisiones (`target/`)
+## Proposal: design and decisions (`target/`)
 
-- [[roadmap]]: hitos tangibles H0 a H9+, con criterio de terminado y estado.
-- [[adr-01-enfoque-port]]: rehosting más capa de plataforma más descompilación incremental.
-- [[adr-02-herramientas-re]]: Ghidra con ghidra-xbe, herramientas propias, REA auxiliar, xemu como oráculo.
-- [[adr-03-datos-fuera-del-repo]]: los datos del juego en `NGB_DATA`, fuera del repo y de OneDrive.
-- [[adr-05-runtime-nativo]]: cargador con base fija, cabecera PE sombra, KPCR superpuesta en el TEB, TLS, archivos y MMIO. Opciones para H7.
-- [[adr-06-render-hibrido]]: H7b. PGRAPH emulado como base, con HLE en Swap, KickOff, fences y vblank. Decidido con los datos de Ghidra.
-- [[adr-04-control-de-versiones]]: trunk-based, Conventional Commits, PRs con squash, revisión, puertas de CI y tags por hito.
+- [[roadmap]]: tangible milestones H0 to H9+, with definition of done and status.
+- [[adr-01-port-approach]]: rehosting plus platform layer plus incremental decompilation.
+- [[adr-02-re-tools]]: Ghidra with ghidra-xbe, our own tools, REA as a helper, xemu as the oracle.
+- [[adr-03-game-data-outside-repo]]: the game data in `NGB_DATA`, outside the repo and any cloud-synced folder.
+- [[adr-05-native-runtime]]: fixed-base loader, shadow PE header, KPCR overlaid on the TEB, TLS, files and MMIO. Options for H7.
+- [[adr-06-hybrid-renderer]]: H7b. Emulated PGRAPH as the base, with HLE in Swap, KickOff, fences and vblank. Decided with the Ghidra data.
+- [[adr-04-version-control]]: trunk-based, Conventional Commits, squash PRs, review, CI gates and a tag per milestone.
 
-## Equipo (`team/`)
+## Team (`team/`)
 
-- [[equipo]]: roles, reglas de coordinación, depuración e historial de despliegues.
-- [[plantilla-tarea-agente]]: brief estándar para subagentes.
+- [[team]]: roles, coordination rules, debugging and deployment history.
+- [[agent-task-template]]: standard brief for subagents.
 
-## Herramientas (`tools/`)
+## Tools (`tools/`)
 
-- [[herramientas]]: extract-xiso y las herramientas propias (`xbe_info.py`, `afs.py`).
+- [[tools]]: extract-xiso and our own tools (`xbe_info.py`, `afs.py`).
 
-## Fuentes externas (`sources/`)
+## External sources (`sources/`)
 
-- [[opence]]: Halo CE nativo. Descompilación con símbolos y D3D8 sobre GL. Es el precedente.
-- [[rea]]: MCP de RE. Evaluación y límites (no acepta XBE; en Windows es de solo lectura).
-- [[decomp-ninja]]: intento previo abandonado y contexto oficial (código fuente perdido).
+- [[opence]]: native Halo CE. Decompilation with symbols and D3D8 over GL. It is the precedent.
+- [[rea]]: RE MCP. Evaluation and limits (does not accept XBE; read-only on Windows).
+- [[decomp-ninja]]: abandoned earlier attempt and official context (lost source code).

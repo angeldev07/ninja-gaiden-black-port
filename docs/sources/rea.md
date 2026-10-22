@@ -4,36 +4,36 @@ updated: 2026-10-20
 status: current
 ---
 
-# REA (Reverse Engineer Anything): evaluación
+# REA (Reverse Engineer Anything): evaluation
 
-- Repo: https://github.com/morluto/rea. Licencia MIT. Unas 348k estrellas según la página del repo el
-  2026-10-20. Paquete npm `rea-agents` v6.7.0 (2026-10-18, según `npm view`). Saca versiones casi a diario
+- Repo: https://github.com/morluto/rea. MIT license. About 348k stars according to the repo page on
+  2026-10-20. npm package `rea-agents` v6.7.0 (2026-10-18, according to `npm view`). It ships releases almost daily
   (CHANGELOG).
-- Es un MCP más una CLI que da a los agentes acceso a Ghidra, IDA o Hopper en modo
-  headless: pseudocódigo, ensamblador, strings, xrefs, llamadas entrantes y salientes y
-  dossiers de funciones, todo con evidencia. Instala skills de flujo de trabajo en el agente.
+- It is an MCP plus a CLI that gives agents access to Ghidra, IDA or Hopper in headless
+  mode: pseudocode, assembly, strings, xrefs, incoming and outgoing calls and function
+  dossiers, all with evidence. It installs workflow skills into the agent.
 
-## Encaje con NGB (`VERIFIED` en docs/windows-ghidra-p0.md, raw-binary.md y native-investigation.md)
+## Fit with NGB (`VERIFIED` in docs/windows-ghidra-p0.md, raw-binary.md and native-investigation.md)
 
-- **No acepta XBE.** Solo admite PE, ELF, Mach-O o binarios sin cabecera (`raw-binary`).
-- **En Windows es experimental, de solo lectura y solo admite PE.** Los PE x86 de 32 bits
-  entraron en la v6.0.0. Los `raw-binary` x86 no se admiten en Windows.
-- **Renombrar y comentar** (`annotate_native_function`, `set_address_name`) **solo funciona en Linux o macOS**,
-  y sobre una base de datos **efímera**. No sirve como proyecto persistente.
-- Requisitos: Node ≥ 22.19 (aquí hay 22.15.1), Ghidra 12.1.x (no instalado) y JDK 21 (instalado).
-- Hay WSL con Ubuntu 24.04 disponible, que es la vía para usarlo sin las limitaciones de Windows.
-- Showcase relevante: **DX-Ball**, una función x86 reconstruida en C que pasa 3,205
-  casos y reproduce los 63 bytes compilados. Es el modelo de los tests diferenciales.
+- **It does not accept XBE.** It only supports PE, ELF, Mach-O or headerless binaries (`raw-binary`).
+- **On Windows it is experimental, read-only and PE-only.** 32-bit x86 PEs
+  arrived in v6.0.0. x86 `raw-binary` is not supported on Windows.
+- **Renaming and commenting** (`annotate_native_function`, `set_address_name`) **only works on Linux or macOS**,
+  and on an **ephemeral** database. It is not usable as a persistent project.
+- Requirements: Node ≥ 22.19 (the evaluation machine had 22.15.1), Ghidra 12.1.x (not installed) and JDK 21 (installed).
+- WSL with Ubuntu 24.04 was available, which is the way to use it without the Windows limitations.
+- Relevant showcase: **DX-Ball**, an x86 function rebuilt in C that passes 3,205
+  cases and reproduces the 63 compiled bytes. It is the model for differential tests.
 
-## Postura
+## Stance
 
-Sirve como **auxiliar para investigaciones puntuales**, no como base del proyecto
-([[adr-02-herramientas-re]]). Si algún día se usa en Windows, un conversor propio
-`xbe2pe` lo habilitaría, y escribirlo también tiene valor pedagógico.
+It works as a **helper for one-off investigations**, not as the basis of the project
+([[adr-02-re-tools]]). If it is ever used on Windows, a custom `xbe2pe` converter
+would enable it, and writing it would also make a useful side project.
 
-## Legal y seguridad
+## Legal and security
 
-- El disclaimer permite educación, interoperabilidad, preservación y analizar software
-  propio. No ayuda a "reproducing its protected code and assets".
-- El README advierte de clones. Instalar solo desde npm `rea-agents`, con la versión fija,
-  y revisar el diff que propone `setup`.
+- The disclaimer allows education, interoperability, preservation and analyzing one's own
+  software. It does not help with "reproducing its protected code and assets".
+- The README warns about clones. Install only from npm `rea-agents`, with the version pinned,
+  and review the diff that `setup` proposes.

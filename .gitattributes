@@ -1,10 +1,10 @@
-# Fin de línea LF en el repo para todos los archivos de texto, sin importar la plataforma.
+# LF line endings in the repo for every text file, whatever the platform.
 * text=auto eol=lf
 
 *.png binary
 *.jpg binary
 
-# Los .cmd van con CRLF: cmd.exe calcula mal los desplazamientos en archivos LF con UTF-8
-# multibyte y, al volver de un `call`, retoma a mitad de línea (bucle infinito en el build).
+# .cmd files use CRLF: cmd.exe miscomputes offsets in LF files with multibyte UTF-8 and,
+# when returning from a `call`, resumes mid-line (an endless loop in the build).
 *.cmd text eol=crlf
 *.bat text eol=crlf

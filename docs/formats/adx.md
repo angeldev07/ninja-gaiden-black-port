@@ -4,40 +4,40 @@ updated: 2026-10-20
 status: current
 ---
 
-# ADX: audio de CRI
+# ADX: CRI audio
 
-Hay 412 entradas ADX (480.1 MB): las 95 pistas de música de `bgm.afs` y las 317 voces de `sse.afs`.
-Es un formato público, y ffmpeg y vgmstream lo decodifican.
+There are 412 ADX entries (480.1 MB): the 95 music tracks of `bgm.afs` and the 317 voices of `sse.afs`.
+It is a public format, and ffmpeg and vgmstream decode it.
 
-## Cabecera (`VERIFIED` en `bgm.afs#0`, leída por el líder)
+## Header (`VERIFIED` on `bgm.afs#0`, read by the leader)
 
-| Offset | Valor en `bgm.afs#0` | Campo |
+| Offset | Value in `bgm.afs#0` | Field |
 | --- | --- | --- |
-| `0x00` | `80 00` | magia |
-| `0x02` | `0x0020` (u16 big endian) | offset del copyright. `VERIFIED`. Los datos empiezan en `offset + 4` = `0x24`: `INFERRED` |
-| `0x04` | 3 | codificación (ADX estándar). `INFERRED` |
-| `0x05` | 18 | tamaño de bloque. `INFERRED` |
-| `0x06` | 4 | bits por muestra. `INFERRED` |
-| `0x07` | 2 | canales. `VERIFIED` |
-| `0x08` | 44,100 (u32 big endian) | frecuencia de muestreo. `VERIFIED` |
-| `0x0C` | u32 big endian | total de muestras. `INFERRED` |
+| `0x00` | `80 00` | magic |
+| `0x02` | `0x0020` (u16 big endian) | copyright offset. `VERIFIED`. The data starts at `offset + 4` = `0x24`: `INFERRED` |
+| `0x04` | 3 | encoding (standard ADX). `INFERRED` |
+| `0x05` | 18 | block size. `INFERRED` |
+| `0x06` | 4 | bits per sample. `INFERRED` |
+| `0x07` | 2 | channels. `VERIFIED` |
+| `0x08` | 44,100 (u32 big endian) | sample rate. `VERIFIED` |
+| `0x0C` | u32 big endian | total samples. `INFERRED` |
 | `0x1E` | `(c)CRI` | copyright. `VERIFIED` |
 
-## Decodificación (H4, con `ngb_tools.audio`: validada de forma visual y estadística, sin comparar bit a bit)
+## Decoding (H4, with `ngb_tools.audio`: validated visually and statistically, not compared bit by bit)
 
-- Los 412 ADX del juego son **v3, codificación 3, corte de highpass 500 Hz y sin cifrado** (el byte `0x13` vale 0).
-- Los coeficientes del predictor salen de la fórmula pública: con 500 Hz a 44,100 Hz, `(7334, −3283)` en punto
-  fijo ×4096.
-- Cada bloque de 18 B tiene una escala u16be y 32 nibbles con signo. En v3 la escala se usa como escala+1 y cada
-  producto se desplaza por separado, como en vgmstream.
-- Lote completo:
-  - **bgm 95/95** (unos 150 min de música). El manifiesto marca 65 pistas con loop; falta comprobar el offset
-    real del loop en v3 (issue de seguimiento);
-  - **sse 317/317** voces.
-- La validación fue visual y estadística (forma de onda, espectrograma y RMS). No se comparó bit a bit con otro
-  decodificador porque no hay ffmpeg ni vgmstream instalados.
+- All 412 ADX in the game are **v3, encoding 3, 500 Hz highpass cutoff and no encryption** (byte `0x13` is 0).
+- The predictor coefficients come from the public formula: with 500 Hz at 44,100 Hz, `(7334, −3283)` in
+  ×4096 fixed point.
+- Each 18 B block has a u16be scale and 32 signed nibbles. In v3 the scale is used as scale+1 and each
+  product is shifted separately, as in vgmstream.
+- Full batch:
+  - **bgm 95/95** (about 150 min of music). The manifest marks 65 tracks as looping; the real loop offset
+    in v3 still has to be checked (follow-up issue);
+  - **sse 317/317** voices.
+- Validation was visual and statistical (waveform, spectrogram and RMS). It was not compared bit by bit
+  with another decoder because neither ffmpeg nor vgmstream is installed.
 
-## Notas
+## Notes
 
-- `bgm.afs#66` (`bgm_rtm_dummy.adx`) es una de las 2 únicas entradas de entropía alta del juego.
-- El motor enlaza ADXT 9.50 y AIXP 2.32 ([[xbe-default]]). `movie\ninja.aix` es AIX (`AIXF`), ADX multipista.
+- `bgm.afs#66` (`bgm_rtm_dummy.adx`) is one of only 2 high-entropy entries in the game.
+- The engine links ADXT 9.50 and AIXP 2.32 ([[xbe-default]]). `movie\ninja.aix` is AIX (`AIXF`), multitrack ADX.

@@ -4,82 +4,82 @@ updated: 2026-10-21
 status: current
 ---
 
-# Shaders del NV2A: vertex programs y register combiners → GLSL
+# NV2A shaders: vertex programs and register combiners → GLSL
 
-Es una pieza de H7b ([[adr-06-render-hibrido]]): traduce el código de shader que el juego carga en la GPU a GLSL
-4.00, para el backend de OpenGL. Implementación propia en `port/src/shaders/` (`vsh.c`, `psh.c` y `emit.c`). Se
-estudió el formato en xemu, Cxbx-Reloaded, envytools, GL_NV_register_combiners y la especificación vs_1_1, sin
-copiar código GPL y sin tocar el XDK.
+It is a piece of H7b ([[adr-06-hybrid-renderer]]): it translates the shader code that the game loads into the GPU to GLSL
+4.00, for the OpenGL backend. Own implementation in `port/src/shaders/` (`vsh.c`, `psh.c` and `emit.c`). The
+format was studied in xemu, Cxbx-Reloaded, envytools, GL_NV_register_combiners and the vs_1_1 specification, without
+copying GPL code and without touching the XDK.
 
-## Vertex programs (`VERIFIED`: tests más los 16 programas reales)
+## Vertex programs (`VERIFIED`: tests plus the 16 real programs)
 
-- Cada instrucción ocupa 128 bits, con **MAC e ILU en paralelo**:
+- Each instruction takes 128 bits, with **MAC and ILU in parallel**:
   - MAC: MOV MUL ADD MAD DP3 DPH DP4 DST MIN MAX SLT SGE ARL;
   - ILU: MOV RCP RCC RSQ EXP LOG LIT.
-- Registros:
-  - R0-R11; R12 es alias de oPos;
-  - entradas v0-v15 y constantes c[0-191], con direccionamiento relativo por A0;
-  - swizzles, negación y máscaras de escritura.
-  - Si el ILU va emparejado con el MAC, escribe en R1.
-- **Epílogo de screen space de la Xbox:** la posición sale en píxeles y se convierte a clip space con
-  `surfaceSize`/`clipRange`, multiplicando xyz por w.
-- **Datos reales:** en `.data` de `default.xbe` hay **16 binarios de vertex shader** (cabecera `0x2078`, de 13 a 134
-  instrucciones), y se decodifican los 16. Confirman el formato:
-  - `DP4 oPos` con la matriz en c[96-99];
-  - epílogo `MUL c[58]` + `RCC R1.x` + `MAD c[59]`.
-  - Los GLSL generados están en `NGB_DATA\runs\shaders\` (son derivados del juego, no van al repo).
+- Registers:
+  - R0-R11; R12 is an alias of oPos;
+  - inputs v0-v15 and constants c[0-191], with relative addressing by A0;
+  - swizzles, negation and write masks.
+  - If the ILU is paired with the MAC, it writes to R1.
+- **Xbox screen-space epilogue:** the position comes out in pixels and is converted to clip space with
+  `surfaceSize`/`clipRange`, multiplying xyz by w.
+- **Real data:** in `.data` of `default.xbe` there are **16 vertex shader binaries** (header `0x2078`, 13 to 134
+  instructions), and all 16 decode. They confirm the format:
+  - `DP4 oPos` with the matrix in c[96-99];
+  - epilogue `MUL c[58]` + `RCC R1.x` + `MAD c[59]`.
+  - The generated GLSL is in `NGB_DATA\runs\shaders\` (it is derived from the game and does not go in the repo).
 
 ## Register combiners (pixel shaders)
 
-- 1 a 8 etapas más la final.
-  - Entradas A-D, con los 8 mapeos (unsigned, expand, signed…).
-  - AB/CD como producto o dot, y SUM o MUX.
-  - Escala y sesgo, y blue-to-alpha.
-  - Constantes por etapa.
-- Etapa final: A·B + (1−A)·C + D, alfa = G, más EF_PROD y V1R0_SUM.
-- Modos de textura emulados:
-  - 2D proyectiva, 3D y CUBE;
+- 1 to 8 stages plus the final one.
+  - Inputs A-D, with the 8 mappings (unsigned, expand, signed…).
+  - AB/CD as product or dot, and SUM or MUX.
+  - Scale and bias, and blue-to-alpha.
+  - Per-stage constants.
+- Final stage: A·B + (1−A)·C + D, alpha = G, plus EF_PROD and V1R0_SUM.
+- Emulated texture modes:
+  - projective 2D, 3D and CUBE;
   - PASSTHRU;
   - CLIPPLANE;
-  - BUMPENVMAP y BUMPENVMAP_LUM.
-- **Datos reales:** se encontraron 2 pixel shaders reales, de 2 etapas con bump por producto escalar
-  (`DOTPRODUCT` + `DOT_ST`). Se traducen, pero **los modos `DOT_*` aún no se emulan**, así que su resultado todavía
-  no es correcto. `INFERRED`: la mayoría de los materiales usarán el pipeline fijo (texture stage states), no
+  - BUMPENVMAP and BUMPENVMAP_LUM.
+- **Real data:** 2 real pixel shaders were found, of 2 stages with dot-product bump
+  (`DOTPRODUCT` + `DOT_ST`). They are translated, but **the `DOT_*` modes are not emulated yet**, so their result is
+  not correct yet. `INFERRED`: most materials will use the fixed pipeline (texture stage states), not
   pixel shaders.
 
-## Pruebas
+## Tests
 
-- `port/tests/shaders_test.c`: 219 comprobaciones, con instrucciones codificadas a mano palabra a palabra.
-- **Compilado con el driver real (`VERIFIED`)**: los **18 shaders reales** (16 vertex programs y 2 pixel shaders)
-  compilan y enlazan en OpenGL 4.6 (AMD RX 6600), sin tocar el emisor. Lo mismo las 62 variantes del modo
-  `--stress` de `gl_test`, que cubre cada operación, cada mapeo y cada modo de textura. Solo se ha probado en AMD.
+- `port/tests/shaders_test.c`: 219 checks, with instructions hand-encoded word by word.
+- **Compiled with the real driver (`VERIFIED`)**: the **18 real shaders** (16 vertex programs and 2 pixel shaders)
+  compile and link in OpenGL 4.6 (AMD RX 6600), without touching the emitter. So do the 62 variants of the
+  `--stress` mode of `gl_test`, which covers every operation, every mapping and every texture mode. It has only been tested on AMD.
 
-## Pendiente
+## Pending
 
-- Los modos `DOT_*`, BRDF y DPNDNT.
-- Niebla no lineal, oB0/oB1 según la cara y el offset de medio píxel.
-- Alpha test, color key y alpha kill.
-- Juntar los programas que llegan por push buffer (`0x0B00` + LOAD/START) en el intérprete PGRAPH.
+- The `DOT_*` modes, BRDF and DPNDNT.
+- Non-linear fog, oB0/oB1 by face and the half-pixel offset.
+- Alpha test, color key and alpha kill.
+- Merge the programs that arrive through the push buffer (`0x0B00` + LOAD/START) into the PGRAPH interpreter.
 
-## Backend OpenGL (`port/src/gl/`)
+## OpenGL backend (`port/src/gl/`)
 
-Todavía no está enganchado al intérprete PGRAPH: es la base para el render acelerado de la geometría 3D.
+It is not hooked into the PGRAPH interpreter yet: it is the base for accelerated rendering of the 3D geometry.
 
 - **`glbackend`:**
-  - contexto GL 4.x por WGL, con un loader propio (`wglGetProcAddress`, sin dependencias);
-  - render offscreen en un FBO de 720x480;
-  - atributos en los formatos de `SET_VERTEX_DATA_ARRAY_FORMAT` (float, D3DCOLOR, short normalizado y CMP
-    11:11:10) y dibujo indexado.
-- **`texconv`:** convierte las texturas del NV2A a GL.
-  - Formatos empaquetados (con swizzle y lineales), P8 con paleta y DXT1/3/5. Los DXT se suben comprimidos con
-    S3TC si el driver lo admite.
-  - Con signo: V8U8 y L6V5U5. También cube maps y mipmaps.
-  - **Coincide byte a byte con `ngb_tools.xpr` en 28 vectores sintéticos** (`texconv_test`).
-- **`glstate`:** traduce a GL el estado de los métodos NV097 (blend, depth, stencil, cull, color mask, scissor,
-  alpha test y fog). La cara frontal se invierte, como en xemu (comprobado con RenderDoc y con capturas de xemu; ver [[gpu-nv2a]]).
-- **Prueba visual:** `gl_test` dibuja en `NGB_DATA\runs\shots\gl_test.png`:
-  - un triángulo con microcódigo NV2A codificado a mano;
-  - un tablero;
-  - un quad DXT1 y otro P8 con swizzle;
-  - una banda translúcida.
-  El líder revisó la captura.
+  - GL 4.x context through WGL, with its own loader (`wglGetProcAddress`, no dependencies);
+  - offscreen rendering into a 720x480 FBO;
+  - attributes in the `SET_VERTEX_DATA_ARRAY_FORMAT` formats (float, D3DCOLOR, normalized short and CMP
+    11:11:10) and indexed drawing.
+- **`texconv`:** converts NV2A textures to GL.
+  - Packed formats (swizzled and linear), P8 with palette and DXT1/3/5. DXT is uploaded compressed with
+    S3TC if the driver supports it.
+  - Signed: V8U8 and L6V5U5. Also cube maps and mipmaps.
+  - **Matches `ngb_tools.xpr` byte for byte on 28 synthetic vectors** (`texconv_test`).
+- **`glstate`:** translates the state of the NV097 methods to GL (blend, depth, stencil, cull, color mask, scissor,
+  alpha test and fog). The front face is inverted, as in xemu (checked with RenderDoc and with xemu captures; see [[gpu-nv2a]]).
+- **Visual test:** `gl_test` draws to `NGB_DATA\runs\shots\gl_test.png`:
+  - a triangle with hand-encoded NV2A microcode;
+  - a checkerboard;
+  - a DXT1 quad and a swizzled P8 one;
+  - a translucent band.
+  The leader reviewed the capture.

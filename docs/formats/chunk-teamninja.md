@@ -4,37 +4,37 @@ updated: 2026-10-20
 status: draft
 ---
 
-# Chunk de Team Ninja: cabecera común de los formatos del motor Kunai
+# Team Ninja chunk: common header of the Kunai engine formats
 
-Los formatos propios del motor (KMD, `itm_dat2`, `chr_dat`, `stry_dat`, `rtm_dat`, `chr_dat2`, `MESSTR`,
-`JPFONT`, `STG_ETC`, y los subchunks `OBJINFO`, `HIERARC`, `MORPH`…) comparten esta cabecera.
+The engine's own formats (KMD, `itm_dat2`, `chr_dat`, `stry_dat`, `rtm_dat`, `chr_dat2`, `MESSTR`,
+`JPFONT`, `STG_ETC`, and the subchunks `OBJINFO`, `HIERARC`, `MORPH`…) share this header.
 
-## Cabecera (`INFERRED`; regularidad comprobada en 2,198 de 2,198 entradas con etiqueta)
+## Header (`INFERRED`; regularity checked on 2,198 of 2,198 tagged entries)
 
-| Offset | Tipo | Campo |
+| Offset | Type | Field |
 | --- | --- | --- |
-| `0x00` | `char[12]` | etiqueta ASCII rellenada con NUL (`KMD`, `chr_dat`…) |
-| `0x0C` | `u32` | tamaño del chunk. Coincide con el tamaño de la entrada salvo en KMD. **No acota los slots**: en `r_ryu.kmd` vale `0x1385e0` y el slot 7 está en `0x138840` (`VERIFIED`, `ngb_tools.teamninja`). El último slot llega hasta el final de los datos |
+| `0x00` | `char[12]` | NUL-padded ASCII tag (`KMD`, `chr_dat`…) |
+| `0x0C` | `u32` | chunk size. Matches the entry size except in KMD. **It does not bound the slots**: in `r_ryu.kmd` it is `0x1385e0` and slot 7 is at `0x138840` (`VERIFIED`, `ngb_tools.teamninja`). The last slot extends to the end of the data |
 | `0x10` | `u32` | `n_slots` |
-| `0x14` | `u32` | `n_used`: cuántos offsets son distintos de 0 |
-| `0x18` | `u32` | `table_pos` (`0x20`; en KMD `0x80` y en MESSTR `0x40`) |
-| `0x1C` | `u32` | `0x20` (tamaño de la cabecera) |
-| `0x20 … table_pos` | — | cabecera propia de cada tipo |
-| `table_pos` | `u32[n_slots]` | offsets de los subchunks, relativos al chunk. 0 = vacío; los usados van en orden ascendente |
+| `0x14` | `u32` | `n_used`: how many offsets are non-zero |
+| `0x18` | `u32` | `table_pos` (`0x20`; in KMD `0x80` and in MESSTR `0x40`) |
+| `0x1C` | `u32` | `0x20` (header size) |
+| `0x20 … table_pos` | — | type-specific header |
+| `table_pos` | `u32[n_slots]` | subchunk offsets, relative to the chunk. 0 = empty; the used ones are in ascending order |
 
-`VERIFIED` en `ryu.kmd` (leído por el líder): tamaño `1018672`, 10 slots, 7 usados, tabla en `0x80`, offsets
+`VERIFIED` on `ryu.kmd` (read by the leader): size `1018672`, 10 slots, 7 used, table at `0x80`, offsets
 `0xb0` (OBJINFO), `0x3000` (XPR0), `0xdf000` (HIERARC), `0xdf4f0` (MORPH), `0xf7120` (ACSSRI), `0xf8490`
-(MISCDATA) y `0xf8a40` (OBJHIT).
+(MISCDATA) and `0xf8a40` (OBJHIT).
 
-## Excepciones
+## Exceptions
 
-- `STG_DAT` tiene otra disposición: etiqueta, `0x10`, la ruta `d:\nocare.stg` y relleno `Stak`.
+- `STG_DAT` has a different layout: tag, `0x10`, the path `d:\nocare.stg` and `Stak` padding.
 
-## Hipótesis por tipo (`INFERRED`)
+## Per-type hypotheses (`INFERRED`)
 
-- `chr_dat` (`.mtn`): 3 slots. Una tabla de offsets por motion con keyframes, una segunda tabla y una cola pequeña.
-- `itm_dat2` (`.sob`, `.itm`): 4 slots, 1 usado. Registros de colocación que terminan en `0x0FFFFFFF`.
-- `stry_dat` (`.sty`): el slot 0 es un flujo de `u32`. Los tokens `0x80`/`0x81`/`0x86xxxxxx` son opcodes (id en el
-  `u16` bajo) y el resto son argumentos int o float. Encaja con las 479 cadenas `STRY_*` de [[xbe-default]].
+- `chr_dat` (`.mtn`): 3 slots. A table of offsets per motion with keyframes, a second table and a small tail.
+- `itm_dat2` (`.sob`, `.itm`): 4 slots, 1 used. Placement records that end in `0x0FFFFFFF`.
+- `stry_dat` (`.sty`): slot 0 is a `u32` stream. The tokens `0x80`/`0x81`/`0x86xxxxxx` are opcodes (id in the
+  low `u16`) and the rest are int or float arguments. It fits the 479 `STRY_*` strings of [[xbe-default]].
 
-Detalle de KMD: [[kmd]].
+KMD details: [[kmd]].

@@ -4,32 +4,32 @@ updated: 2026-10-20
 status: current
 ---
 
-# WVA: banco de efectos de sonido
+# WVA: sound-effects bank
 
-Hay 326 archivos `.wva` (43.3 MB), uno o varios por escenario (`bf_wfall.wva`, `bf_head.wva`…). No llevan una
-magia ASCII: la cabecera empieza por `u32 N`, el número de sonidos. Por eso el inventario los agrupa como
+There are 326 `.wva` files (43.3 MB), one or several per stage (`bf_wfall.wva`, `bf_head.wva`…). They carry no
+ASCII magic: the header starts with `u32 N`, the number of sounds. That is why the inventory groups them as
 `hex:NN000000`.
 
-## Estructura (`INFERRED`, con evidencia fuerte: con este layout se decodifican los 2,966 registros de los 326 `.wva`, y el audio se ve correcto en el espectrograma; el significado de los floats de parámetros es desconocido)
+## Structure (`INFERRED`, with strong evidence: with this layout the 2,966 records of the 326 `.wva` decode, and the audio looks correct in the spectrogram; the meaning of the parameter floats is unknown)
 
 ```
 u32 N
-N × u32 puntero           // 0 = hueco vacío (370 en el juego)
-                          // bit31 = 1 → bloque de parámetros de 24 B; bit31 = 0 → de 8 B
-registro:
-  u32 (flags << 24 | data_size)     // flags vistos: 0x00, 0x01, 0x04
+N × u32 pointer           // 0 = empty slot (370 in the game)
+                          // bit31 = 1 → 24 B parameter block; bit31 = 0 → 8 B
+record:
+  u32 (flags << 24 | data_size)     // flags seen: 0x00, 0x01, 0x04
   WAVEFORMATEX (20 B)               // wFormatTag 0x0069 = Xbox ADPCM
-  bloque de parámetros (24 u 8 B, floats)
-  datos Xbox ADPCM
+  parameter block (24 or 8 B, floats)
+  Xbox ADPCM data
 ```
 
-- Esto corrige la hipótesis anterior: el bit31 **no** es un flag de validez, sino que marca el tamaño del bloque
-  de parámetros.
-- Xbox ADPCM: 64 muestras por bloque y canal (la de cabecera más 63 nibbles; el último se descarta), distinto
-  de las 65 de MS-IMA. Hay 63 registros en estéreo, y las frecuencias van de 11,000 a 44,100 Hz.
-- 93 registros son silencio puro (sobre todo huecos de relleno).
-- `Media\Wave.xwb` (WBND v3) contiene 7 sonidos en **PCM16**, no en Xbox ADPCM.
+- This corrects the earlier hypothesis: bit31 is **not** a validity flag, but marks the size of the parameter
+  block.
+- Xbox ADPCM: 64 samples per block and channel (the header one plus 63 nibbles; the last is discarded), unlike
+  the 65 of MS-IMA. There are 63 stereo records, and the sample rates range from 11,000 to 44,100 Hz.
+- 93 records are pure silence (mostly padding slots).
+- `Media\Wave.xwb` (WBND v3) contains 7 sounds in **PCM16**, not in Xbox ADPCM.
 
-## Siguiente
+## Next
 
-Mapear qué evento del juego dispara cada sonido (`.sty` y tablas de `chr_dat`).
+Map which game event triggers each sound (`.sty` and `chr_dat` tables).

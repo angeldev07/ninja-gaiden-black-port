@@ -1,19 +1,19 @@
-## Qué
+## What
 
-<!-- Qué cambia, en 2-5 viñetas. -->
+<!-- What changes, in 2-5 bullets. -->
 
-## Por qué
+## Why
 
-<!-- Hito del roadmap (H1, H2, …) y motivo. -->
+<!-- Roadmap milestone (H1, H2, ...) and motivation. -->
 
-## Evidencia
+## Evidence
 
-<!-- Comandos ejecutados y su resultado: tests, reportes, muestras verificadas. -->
+<!-- Commands run and their results: tests, reports, verified samples. -->
 
 ## Checklist
 
-- [ ] Ningún dato del juego en el diff (`python -m ngb_tools.hygiene` en verde)
-- [ ] `ruff check .`, `ruff format --check .` y `mypy` en verde
-- [ ] `python -m unittest discover -s tests -v` en verde
-- [ ] Vault actualizado: páginas afectadas, `docs/index.md` si hay página nueva, entrada en `docs/log.md`
-- [ ] Afirmaciones de RE con ancla y etiqueta `VERIFIED` / `INFERRED` / `UNVERIFIED`
+- [ ] No game data in the diff (`python -m ngb_tools.hygiene` is green)
+- [ ] `ruff check .`, `ruff format --check .` and `mypy` are green
+- [ ] `python -m unittest discover -s tests -v` is green
+- [ ] Vault updated: affected pages, `docs/index.md` if there is a new page, an entry in `docs/log.md`
+- [ ] RE claims carry an anchor and a `VERIFIED` / `INFERRED` / `UNVERIFIED` tag

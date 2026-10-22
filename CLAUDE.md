@@ -7,9 +7,9 @@ project's context brain: an Obsidian vault that follows the LLM Wiki pattern. It
 
 ## Repository rules
 
-- **Nothing from the game goes in the repo.** Game data lives in `%USERPROFILE%\ngb-data\`: `game/` (immutable)
+- **Nothing from the game goes in the repo.** Game data lives in `%NGB_DATA%`: `game/` (immutable)
   and `extracted/`. `.gitignore` and the `ngb-hygiene` check block game files. See
-  `docs/target/adr-03-datos-fuera-del-repo.md`.
+  `docs/target/adr-03-game-data-outside-repo.md`.
 - **Never use the leaked Microsoft XDK** or anything derived from it.
 - **No official artwork, logos or trademarks** as assets: launcher art and icons are original.
 - Tools that read game data run with `python -I`.
@@ -23,8 +23,8 @@ project's context brain: an Obsidian vault that follows the LLM Wiki pattern. It
 - **Agent team:**
   - The leader is the only writer in `docs/`, except for mechanical translations the leader
     authorizes.
-  - Subagents report in caveman ultra. See `docs/team/equipo.md`.
+  - Subagents report in caveman ultra. See `docs/team/team.md`.
 - **Version control:**
   - The leader manages branches, commits, PRs, reviews and merges (authorized by the user on
-    2026-10-20). Flow in `docs/target/adr-04-control-de-versiones.md`.
+    2026-10-20). Flow in `docs/target/adr-04-version-control.md`.
   - Subagents never commit.

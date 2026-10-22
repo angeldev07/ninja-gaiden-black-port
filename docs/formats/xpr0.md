@@ -6,89 +6,89 @@ status: current
 
 # XPR0: Xbox Packed Resource
 
-Es el formato estándar del ecosistema Xbox para empaquetar recursos de GPU: texturas, paletas, vertex
-buffers, index buffers y push buffers. En NGB aparece suelto, en las 689 entradas de AFS con la magia `XPR0`
-(sobre todo los `.spr` de sprites y UI) y en `Media\*.xpr`, y también dentro de cada [[kmd]]. Herramienta:
-`python -I -m ngb_tools.xpr` ([[herramientas]]).
+It is the standard format of the Xbox ecosystem for packing GPU resources: textures, palettes, vertex
+buffers, index buffers and push buffers. In NGB it appears standalone, in the 689 AFS entries with the `XPR0` magic
+(mostly the `.spr` sprites and UI) and in `Media\*.xpr`, and also inside every [[kmd]]. Tool:
+`python -I -m ngb_tools.xpr` ([[tools]]).
 
-## Estructura
+## Structure
 
-| Offset | Campo | Confianza |
+| Offset | Field | Confidence |
 | --- | --- | --- |
-| `0x00` | magia `XPR0` | `VERIFIED` |
-| `0x04` | `u32` tamaño total | `VERIFIED` (ryu: `0xDC000`) |
-| `0x08` | `u32` `header_size`: los datos de GPU empiezan ahí | `VERIFIED` (ryu: `0x6590`) |
-| `0x0C…` | cabeceras de recurso, hasta `0xFFFFFFFF` | `VERIFIED` |
+| `0x00` | magic `XPR0` | `VERIFIED` |
+| `0x04` | `u32` total size | `VERIFIED` (ryu: `0xDC000`) |
+| `0x08` | `u32` `header_size`: the GPU data starts there | `VERIFIED` (ryu: `0x6590`) |
+| `0x0C…` | resource headers, up to `0xFFFFFFFF` | `VERIFIED` |
 
-- **`Data` de cada recurso es relativo a `header_size`.** En ryu, el primer índice cae en `header+0` y la
-  textura 0 en `header+0xBA70`, es decir en el offset `0x12000` del XPR, alineado a `0x1000`. `VERIFIED`: el
-  sha256 del manifiesto coincide con un hash independiente de esos bytes.
-- **`header_size` no tiene por qué ir alineado a `0x800`**, aunque xboxdevwiki dice que sí: en ryu vale `0x6590`.
+- **Each resource's `Data` is relative to `header_size`.** In ryu, the first index falls at `header+0` and
+  texture 0 at `header+0xBA70`, that is at offset `0x12000` of the XPR, aligned to `0x1000`. `VERIFIED`: the
+  manifest sha256 matches an independent hash of those bytes.
+- **`header_size` need not be aligned to `0x800`**, although xboxdevwiki says it is: in ryu it is `0x6590`.
   `VERIFIED`.
 
-### Cabeceras de recurso, según el campo `Common` (`VERIFIED` al recorrer los archivos reales)
+### Resource headers, by the `Common` field (`VERIFIED` by walking the real files)
 
-| `Common` | Recurso | Tamaño de la cabecera |
+| `Common` | Resource | Header size |
 | --- | --- | --- |
-| `0x00040001` | textura: `Common`, `Data`, `Lock`, `Format`, `Size` | 20 B |
-| `0x00830001` | paleta | 12 B |
+| `0x00040001` | texture: `Common`, `Data`, `Lock`, `Format`, `Size` | 20 B |
+| `0x00830001` | palette | 12 B |
 | `0x00800001` | vertex buffer | — |
 | `0x00010001` | index buffer | — |
-| push buffer | `Size`, `AllocationSize` y **un `u32` extra que siempre vale 0** | **24 B** (Cxbx documenta 20; con 20, el recorrido de las cabeceras se desalinea) |
-| `0x80000000` exacto | USERDATA: `u32 size` y el payload (en los `.spr`, una tabla de atlas UV) | 8 B + payload |
+| push buffer | `Size`, `AllocationSize` and **an extra `u32` that is always 0** | **24 B** (Cxbx documents 20; with 20, the walk over the headers gets misaligned) |
+| exactly `0x80000000` | USERDATA: `u32 size` and the payload (in the `.spr`, a table of UV atlases) | 8 B + payload |
 
-Campo `Format` de la textura: dimensiones en los bits 4 a 7, `D3DFORMAT` en los bits 8 a 15, número de mips
-en los 16 a 19, `log2 U` en los 20 a 23 y `log2 V` en los 24 a 27.
+Texture `Format` field: dimensions in bits 4 to 7, `D3DFORMAT` in bits 8 to 15, mip count
+in bits 16 to 19, `log2 U` in bits 20 to 23 and `log2 V` in bits 24 to 27.
 
-## Formatos vistos en los datos (`VERIFIED`: exportados y revisados a ojo)
+## Formats seen in the data (`VERIFIED`: exported and checked by eye)
 
-| `D3DFORMAT` | Nombre | Dónde | Swizzle |
+| `D3DFORMAT` | Name | Where | Swizzle |
 | --- | --- | --- | --- |
-| `0x04` | A4R4G4B4 | `font.xpr` (atlas de glifos 512x256) y `kfont.xpr` | sí (Morton) |
-| `0x0B` | P8 con paleta D3DCOLOR | 89 texturas de `menu.spr` | sí |
-| `0x0C` | DXT1 / BC1 | 14 texturas de ryu | **no**: bloques 4×4 lineales |
-| `0x0E` | DXT2/3 / BC2 | `dlcustom.xpr` (3 texturas de 1024x512) | no |
-| `0x0F` | DXT4/5 / BC3 | 5 texturas de ryu (efectos con alfa) | no |
-| `0x19` | A8 | 8 texturas de `menu.spr` | sí |
-| `0x28` | V8U8 (relieve con signo; alias G8B8) | 326 texturas (agua y superficies de escenarios) | sí |
-| `0x27` / `0x37` | L6V5U5 (relieve con signo más luminancia; alias R6G5B5) | 32 texturas (por ejemplo `chr_kotei`) | sí / no |
+| `0x04` | A4R4G4B4 | `font.xpr` (512x256 glyph atlas) and `kfont.xpr` | yes (Morton) |
+| `0x0B` | P8 with D3DCOLOR palette | 89 textures of `menu.spr` | yes |
+| `0x0C` | DXT1 / BC1 | 14 textures of ryu | **no**: linear 4×4 blocks |
+| `0x0E` | DXT2/3 / BC2 | `dlcustom.xpr` (3 textures of 1024x512) | no |
+| `0x0F` | DXT4/5 / BC3 | 5 textures of ryu (effects with alpha) | no |
+| `0x19` | A8 | 8 textures of `menu.spr` | yes |
+| `0x28` | V8U8 (signed bump; alias G8B8) | 326 textures (water and stage surfaces) | yes |
+| `0x27` / `0x37` | L6V5U5 (signed bump plus luminance; alias R6G5B5) | 32 textures (for example `chr_kotei`) | yes / no |
 
-- La tabla de `ngb_tools.xpr.formats` conoce 54 códigos `D3DFORMAT` de Xbox. Los de profundidad y YUV se
-  reconocen, pero no se decodifican, porque no aparecen en los datos.
-- **Relieve con signo** (V8U8 y L6V5U5): en la NV2A son formatos de color sin signo, y el signo lo pone el estado
-  de la etapa de textura, que el XPR0 no guarda. Se usa la semántica D3D de los nombres; leídos con signo, la
-  variación entre píxeles vecinos es 74 veces menor (`VERIFIED`, spike del analista). En el PNG, R y G llevan
-  U y V en binario desplazado, B la z de la normal reconstruida y A la luminancia. El manifiesto los marca con
+- The `ngb_tools.xpr.formats` table knows 54 Xbox `D3DFORMAT` codes. The depth and YUV ones are
+  recognized but not decoded, because they do not appear in the data.
+- **Signed bump** (V8U8 and L6V5U5): on the NV2A these are unsigned color formats, and the sign is set by the state
+  of the texture stage, which the XPR0 does not store. The D3D semantics of the names are used; read as signed,
+  the variation between neighboring pixels is 74 times smaller (`VERIFIED`, analyst's spike). In the PNG, R and G carry
+  U and V in offset binary, B the z of the reconstructed normal and A the luminance. The manifest marks them with
   `encoding: signed-bump`.
-- **DXT va sin swizzle.** `VERIFIED`, por dos vías:
-  - en xemu, `pgraph/texture.c` solo des-swizzlea los formatos marcados como swizzled y los compressed los
-    pasa a `pgraph/s3tc.c` en bloques lineales;
-  - las 22 texturas DXT exportadas (19 de ryu y 3 de `dlcustom.xpr`) se ven correctas sin swizzle.
-  Los formatos con swizzle usan Morton, con x en el bit bajo (`pgraph/swizzle.c`). `VERIFIED` con `menu.spr` y
+- **DXT is not swizzled.** `VERIFIED`, in two ways:
+  - in xemu, `pgraph/texture.c` only deswizzles the formats marked as swizzled and passes the compressed ones
+    to `pgraph/s3tc.c` as linear blocks;
+  - the 22 exported DXT textures (19 of ryu and 3 of `dlcustom.xpr`) look correct without swizzle.
+  The swizzled formats use Morton, with x in the low bit (`pgraph/swizzle.c`). `VERIFIED` with `menu.spr` and
   `font.xpr`.
-- **P8:** se toma la paleta de la cabecera siguiente, si es una paleta, y si no la única del archivo. En
-  `menu.spr` cada P8 va seguida de su paleta tanto en las cabeceras como en los datos, y las imágenes salen
-  bien. `INFERRED`.
-- **A8** se exporta como blanco con alfa, igual que hace Cxbx. Sobre fondo blanco parece vacía.
-- La alfa de DXT5 se decodifica siguiendo a xemu (`pgraph/s3tc.c`) y la especificación BC3 de Microsoft, no a
-  Cxbx. `INFERRED`: el analista vio en el decodificador de Cxbx (`XbConvert.cpp`) una precedencia de operadores
-  dudosa, pero no se fijó la línea exacta.
+- **P8:** the palette is taken from the following header, if it is a palette, and otherwise the only one in the file. In
+  `menu.spr` each P8 is followed by its palette both in the headers and in the data, and the images come out
+  fine. `INFERRED`.
+- **A8** is exported as white with alpha, as Cxbx does. On a white background it looks empty.
+- The DXT5 alpha is decoded following xemu (`pgraph/s3tc.c`) and Microsoft's BC3 specification, not
+  Cxbx. `INFERRED`: the analyst saw a dubious operator precedence in Cxbx's decoder (`XbConvert.cpp`),
+  but did not pin down the exact line.
 
-## Fuentes (no se usó el XDK)
+## Sources (the XDK was not used)
 
 - xemu: [`nv2a_regs.h`](https://github.com/xemu-project/xemu/blob/master/hw/xbox/nv2a/nv2a_regs.h),
   [`pgraph/texture.c`](https://github.com/xemu-project/xemu/blob/master/hw/xbox/nv2a/pgraph/texture.c),
-  [`pgraph/swizzle.c`](https://github.com/xemu-project/xemu/blob/master/hw/xbox/nv2a/pgraph/swizzle.c) y
+  [`pgraph/swizzle.c`](https://github.com/xemu-project/xemu/blob/master/hw/xbox/nv2a/pgraph/swizzle.c) and
   [`pgraph/s3tc.c`](https://github.com/xemu-project/xemu/blob/master/hw/xbox/nv2a/pgraph/s3tc.c).
 - Cxbx-Reloaded: [`XbD3D8Types.h`](https://github.com/Cxbx-Reloaded/Cxbx-Reloaded/blob/master/src/core/hle/D3D8/XbD3D8Types.h)
-  y [`XbConvert.cpp`](https://github.com/Cxbx-Reloaded/Cxbx-Reloaded/blob/master/src/core/hle/D3D8/XbConvert.cpp).
+  and [`XbConvert.cpp`](https://github.com/Cxbx-Reloaded/Cxbx-Reloaded/blob/master/src/core/hle/D3D8/XbConvert.cpp).
 - [xboxdevwiki/XPR](https://xboxdevwiki.net/XPR).
 - [Block compression (Microsoft)](https://learn.microsoft.com/en-us/windows/win32/direct3d10/d3d10-graphics-programming-guide-resources-block-compression).
 - [Texture tiling and swizzling (F. Giesen)](https://fgiesen.wordpress.com/2011/01/17/texture-tiling-and-swizzling/).
 
-## Gotcha para el port
+## Gotcha for the port
 
-En PC, las texturas con swizzle hay que des-swizzlearlas al cargarlas, o resolverlo en un shader. Las DXT se
-pueden subir tal cual a la GPU sin decodificarlas en la CPU. BC1, BC2 y BC3 son obligatorios en Direct3D 11/12.
-En Vulkan dependen de la feature `textureCompressionBC` y en OpenGL de `EXT_texture_compression_s3tc`; ambas
-están en todas las GPU de escritorio, pero no en móviles.
+On PC, swizzled textures have to be deswizzled when they are loaded, or handled in a shader. DXT can be
+uploaded as is to the GPU without decoding on the CPU. BC1, BC2 and BC3 are mandatory in Direct3D 11/12.
+In Vulkan they depend on the `textureCompressionBC` feature and in OpenGL on `EXT_texture_compression_s3tc`; both
+are present on all desktop GPUs, but not on mobile.
