@@ -58,6 +58,7 @@ typedef struct ngb_options {
     int mute;                 /* --mute: sin salida de audio (el VP sigue avanzando) */
     int audio_wav;            /* --audio-wav: guarda la mezcla en <log>-audio.wav */
     unsigned rdoc_frame;      /* --rdoc-frame N: captura ese frame con RenderDoc (gpu/rdoc.c) */
+    int rdoc_key;             /* --rdoc-key: F11 captura el frame siguiente con RenderDoc */
 } ngb_options_t;
 
 /* --renderer: AUTO = OpenGL si hay ventana y contexto 4.x; si no, el rasterizador. */

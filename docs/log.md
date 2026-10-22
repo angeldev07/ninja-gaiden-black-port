@@ -343,3 +343,27 @@ Detalle en [[arranque-nativo]].
 
 Detalle en [[audio-apu]].
 
+
+## [2026-10-22] query | Primera partida larga: hasta el capítulo 6 y dos cuelgues del render
+- **Sesión del usuario:** 70 min (249 024 frames) más 9 min. Llegó al inicio del capítulo 6 (The Monastery), y
+  las partidas guardadas cargan bien. Fps estables, salvo una cinemática.
+- **Herramienta nueva:** `--rdoc-key`. F11 captura con RenderDoc el frame siguiente.
+- **Cuelgue del render (el "cofre blanco" y el "dragón rojo"):**
+  - Firma idéntica en los dos casos: `pb: parada en 0x... sin llegar a PUT ...; se fuerza GET = PUT`. Después, el
+    contador de frames no avanza más. El vblank y el audio siguen.
+  - Run `h6-20261021-231324`: parada en `0x018290D0` (frame 23675, el cofre). Run `h6-20261021-232359`: parada en
+    `0x000097D0` (frame 249024, el dragón).
+  - No hay errores del pb ni "kick enorme". `pb_run` agotó el tope de 4 M palabras dando vueltas por saltos (un
+    salto no cuenta en `g_words`).
+  - Es la misma firma que el cuelgue de los fixups (#50): un push buffer estático cuyo JUMP de vuelta no está
+    parcheado. Se sale con GET = PUT, se pierde el semáforo o la valla del tramo saltado, y D3D espera para
+    siempre.
+  - `INFERRED`: una carrera entre el pusher asíncrono (#56) y el parcheo de D3D (`FUN_003cd5e0` decide con GET si
+    la GPU ya pasó). Es rara y crece con la carga (más `RunPushBuffer` por frame).
+  - Siguiente paso: registrar los primeros saltos del kick cuando agota el tope, contando también los saltos, y
+    reproducirlo.
+- **Cinemática in-game a 43-49 fps** (Rachel y Ryu, frames 204000-210600): `pb_run` 21-23 ms por frame, de los
+  que solo ~9 ms son GL (vértices 3,9, texturas 1,8, draws 1,7). Unos 13 ms son el decode del pb palabra a
+  palabra, con 35 000 vértices por frame. El audio sufre porque el juego va lento. Es el siguiente frente de perf.
+- **Capturas F11 (5):** muros y suelos muy claros y planos en la mansión y la aldea. Es el problema de iluminación
+  ya abierto ([[gpu-nv2a]]).

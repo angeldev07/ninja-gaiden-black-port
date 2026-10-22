@@ -6,6 +6,8 @@
  * captura (.rdc) queda junto al log, en NGB_DATA, y se analiza con qrenderdoc o con su API
  * de Python (draws, estado, texturas, pixel history). Es opcional: sin la DLL no pasa nada.
  * El loader es de 32 bits, así que se usa la DLL de x86 de la instalación.
+ * Con --rdoc-key, cada pulsación de F11 captura el frame siguiente (para jugar a mano y
+ * capturar justo cuando aparece un fallo).
  */
 #include "rdoc.h"
 
@@ -22,15 +24,15 @@
 
 static RENDERDOC_API_1_6_0 *g_rdoc;
 static uint32_t g_target;
-static int g_capturing;
+static int g_capturing, g_hotkey;
 
-int rdoc_load(uint32_t frame) {
+int rdoc_load(uint32_t frame, int hotkey) {
     pRENDERDOC_GetAPI get_api;
     char dll[MAX_PATH], tmpl[MAX_PATH + 16];
     const char *env = getenv("NGB_RENDERDOC_DLL");
     HMODULE h;
     char *dot;
-    if (!frame)
+    if (!frame && !hotkey)
         return 0;
     snprintf(dll, sizeof dll, "%s", env && *env ? env : "C:\\Program Files\\RenderDoc\\x86\\renderdoc.dll");
     h = GetModuleHandleA("renderdoc.dll");
@@ -55,13 +57,25 @@ int rdoc_load(uint32_t frame) {
     g_rdoc->SetCaptureFilePathTemplate(tmpl);
     g_rdoc->MaskOverlayBits(eRENDERDOC_Overlay_None, eRENDERDOC_Overlay_None);
     g_target = frame;
-    ngb_log("rdoc: RenderDoc cargado; se capturará el frame %u en %s_*.rdc", frame, tmpl);
+    g_hotkey = hotkey;
+    if (frame)
+        ngb_log("rdoc: RenderDoc cargado; se capturará el frame %u en %s_*.rdc", frame, tmpl);
+    if (hotkey)
+        ngb_log("rdoc: RenderDoc cargado; F11 captura el frame siguiente en %s_*.rdc", tmpl);
     return 0;
 }
 
 void rdoc_after_present(uint32_t presented) {
     if (!g_rdoc)
         return;
+    /* F11 (al pulsarla): captura el frame siguiente. */
+    if (g_hotkey) {
+        static int was_down;
+        int down = (GetAsyncKeyState(VK_F11) & 0x8000) != 0;
+        if (down && !was_down && !g_capturing && !g_target)
+            g_target = presented + 2;
+        was_down = down;
+    }
     if (g_capturing && presented >= g_target) {
         char path[MAX_PATH];
         uint32_t len = sizeof path;

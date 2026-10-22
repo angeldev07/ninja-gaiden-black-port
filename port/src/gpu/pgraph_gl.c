@@ -236,7 +236,7 @@ int pgl_start(HWND hwnd, char *why, size_t whylen) {
         return GLB_ERR_ARGS;
     }
     R.hwnd = hwnd;
-    rdoc_load(g_ngb_opts.rdoc_frame); /* antes de crear el contexto GL */
+    rdoc_load(g_ngb_opts.rdoc_frame, g_ngb_opts.rdoc_key); /* antes de crear el contexto GL */
     R.req = CreateEventA(NULL, FALSE, FALSE, NULL);
     R.done = CreateEventA(NULL, FALSE, FALSE, NULL);
     R.thread = R.req && R.done ? CreateThread(NULL, 1 << 20, render_main, NULL, 0, NULL) : NULL;
