@@ -36,6 +36,7 @@
 #include <wchar.h>
 
 #include "import.h"
+#include "update.h"
 #include "strings.h"
 #include "ui.h"
 #include "version.h"
@@ -72,6 +73,7 @@ enum ui_id {
     ID_DATA_OPEN, ID_VIEW_LOG, ID_OPEN_RUNS, ID_CB_RENDERER, ID_CB_SCALE, ID_CB_LOGCAP, ID_CHK_PACING, ID_CHK_FULLSCREEN, ID_CHK_WIDESCREEN,
     ID_CHK_MUTE, ID_CHK_WAV, ID_CHK_RDOC, ID_CHK_LENIENT, ID_CHK_DETAIL, ID_LANG_EN, ID_LANG_ES,
     ID_LOG_BACK, ID_COPY_INFO, ID_ABOUT_REPO, ID_ABOUT_CONTRIB, ID_ABOUT_LICENSE,
+    ID_CHK_UPDATES, ID_UPD_NOTES, ID_UPD_GO,
     ID_ITEM0 = 100 /* items of the open drop-down */
 };
 
@@ -91,6 +93,8 @@ typedef struct settings {
     int lenient;   /* --lenient */
     int detailed_log; /* 0: --log-detail minimal; 1: the loader's full log */
     int log_cap;   /* --log-cap */
+    int check_updates; /* look for a new release once a day (update.h) */
+    int update_day;    /* day number of the last check */
 } settings_t;
 
 typedef struct session {
@@ -125,6 +129,12 @@ static wchar_t g_ini[MAX_PATH];
 static wchar_t g_loader[MAX_PATH];
 static wchar_t g_data[MAX_PATH]; /* resolved data folder */
 static wchar_t g_runs[MAX_PATH];
+static wchar_t g_upd_url[1024] = UPD_MANIFEST_URL; /* --update-url replaces it (tests) */
+static int g_upd_forced;                          /* --update-url: check now, whatever the day */
+static int g_upd_wanted;                          /* the user pressed Update */
+static wchar_t g_upd_fail[160];                   /* why the last apply failed */
+static wchar_t g_updated_to[32];                  /* --updated X: the update that just finished */
+static void poll_update(void);
 static settings_t g_set;
 static session_t g_last;
 static note_t g_note;
@@ -302,6 +312,8 @@ static void save_settings(void) {
     ini_put_int(L"advanced", L"lenient", g_set.lenient);
     ini_put_int(L"advanced", L"detailed_log", g_set.detailed_log);
     ini_put_int(L"advanced", L"log_cap", g_set.log_cap);
+    ini_put_int(L"update", L"check", g_set.check_updates);
+    ini_put_int(L"update", L"last_day", g_set.update_day);
 }
 
 static void game_refresh(void) {
@@ -348,6 +360,8 @@ static void load_settings(void) {
     g_set.lenient = ini_int(L"advanced", L"lenient", 0) != 0;
     g_set.detailed_log = ini_int(L"advanced", L"detailed_log", 0) != 0;
     g_set.log_cap = ini_int(L"advanced", L"log_cap", DEFAULT_LOG_CAP);
+    g_set.check_updates = ini_int(L"update", L"check", 1) != 0;
+    g_set.update_day = ini_int(L"update", L"last_day", 0);
     for (i = 0; i < (int)(sizeof k_logcap_vals / sizeof k_logcap_vals[0]); i++)
         ok |= k_logcap_vals[i] == g_set.log_cap;
     if (!ok)
@@ -1255,6 +1269,44 @@ static void play_import_card(int x, int y, int w, int h, const imp_status_t *st)
     txt(F_TINY, C_FAINT, x + 190, y + h - 58, w - 218, 38, DT_WORDBREAK | DT_VCENTER, tr(S_IMP_HINT));
 }
 
+/* Band over the hero art: a newer release, its download, a failure, or the update that just
+ * finished. Nothing when the check found nothing (or failed: offline is not news). */
+static void play_update_band(int x, int y, int w) {
+    upd_status_t us;
+    wchar_t line[200];
+    int bw1, bw2, h = 48;
+    upd_status(&us);
+    if (g_updated_to[0] && us.state != UPD_AVAILABLE) {
+        ui_card(x, y, w, h);
+        wfmt(line, 200, tr(S_UPD_DONE), g_updated_to);
+        txt(F_BOLD, C_TEXT, x + 20, y, w - 40, h, T_LINE, line);
+        return;
+    }
+    if (!(us.state == UPD_AVAILABLE || us.state == UPD_DOWNLOADING || us.state == UPD_READY ||
+          (us.state == UPD_ERROR && g_upd_wanted) || g_upd_fail[0]))
+        return;
+    ui_card(x, y, w, h);
+    bw1 = text_w(F_BOLD, tr(S_UPD_NOTES)) + 32;
+    bw2 = text_w(F_BOLD, tr(S_UPD_GO)) + 32;
+    if (us.state == UPD_DOWNLOADING) {
+        int permille = us.total > 0 ? (int)(us.done * 1000 / us.total) : 0;
+        wfmt(line, 200, tr(S_UPD_DOWNLOADING), us.man.version, permille / 10);
+        txt(F_BOLD, C_TEXT, x + 20, y, w / 2, h, T_LINE, line);
+        ui_progress(x + w / 2, y + h / 2 - 6, w / 2 - 20, 12, permille, 1);
+        return;
+    }
+    if (g_upd_fail[0] || us.state == UPD_ERROR) {
+        wfmt(line, 200, L"%ls %ls", tr(S_UPD_FAILED), g_upd_fail[0] ? g_upd_fail : tr(S_UPD_RETRY));
+        txt(F_BOLD, C_WARN, x + 20, y, w - 60 - bw1 - bw2, h, T_LINE, line);
+    } else {
+        wfmt(line, 200, tr(S_UPD_AVAILABLE), us.man.version);
+        txt(F_BOLD, C_TEXT, x + 20, y, w - 60 - bw1 - bw2, h, T_LINE, line);
+    }
+    ui_button(ID_UPD_NOTES, x + w - 20 - bw2 - 10 - bw1, y + 8, bw1, 32, tr(S_UPD_NOTES), 2, 1);
+    ui_button(ID_UPD_GO, x + w - 20 - bw2, y + 8, bw2, 32, tr(S_UPD_GO), 0,
+              !running() && !importing() && (us.state != UPD_READY || g_upd_fail[0]));
+}
+
 static void page_play(void) {
     imp_status_t st;
     int x = PANEL_X, w = PANEL_W, cw1 = 450, cw2 = PANEL_W - 450 - 20;
@@ -1269,6 +1321,8 @@ static void page_play(void) {
         play_game_card(x, HERO_CARD_Y, cw1, HERO_CARD_H);
         play_last_card(x + cw1 + 20, HERO_CARD_Y, cw2, HERO_CARD_H);
     }
+    if (st.state != IMP_RUNNING)
+        play_update_band(x, HERO_CARD_Y - 48 - 12, w);
 }
 
 /* -------------------------------------------------------------- other pages ---- */
@@ -1372,6 +1426,9 @@ static void page_advanced(void) {
     wchar_t cmd[4096];
     const wchar_t *copy_label = g_copied_until ? tr(S_BTN_COPIED) : tr(S_BTN_COPY_INFO);
     page_header(tr(S_NAV_ADVANCED), tr(S_ADV_SUB));
+    ui_check(ID_CHK_UPDATES, PANEL_X, y, PANEL_W, tr(S_ADV_UPDATES), tr(S_ADV_UPDATES_DESC),
+             g_set.check_updates);
+    y += ROW_H;
     section_title(y, tr(S_ADV_DEBUG));
     y += 52;
     ui_check(ID_CHK_RDOC, PANEL_X, y, PANEL_W, tr(S_ADV_RDOC), tr(S_ADV_RDOC_DESC), g_set.rdoc_key);
@@ -1401,6 +1458,8 @@ static void page_advanced(void) {
     bh = PANEL_BOTTOM - (y + 22); /* what is left; the box shrinks when the combo is shown */
     if (bh > 76)
         bh = 76;
+    if (bh < 40)
+        return; /* no room with the log-cap combo open: the command line stays hidden */
     fill_rrect(PANEL_X, y + 22, PANEL_W, bh, 5, C_FIELD);
     stroke_rrect(PANEL_X, y + 22, PANEL_W, bh, 5, C_LINE);
     txt(F_MONO, 0xb9bcc6, PANEL_X + 14, y + 28, PANEL_W - 28, bh - 12, DT_WORDBREAK | DT_END_ELLIPSIS, cmd);
@@ -1688,6 +1747,26 @@ static void activate(int id) {
     case ID_CHK_RDOC: g_set.rdoc_key = !g_set.rdoc_key; save_settings(); break;
     case ID_CHK_LENIENT: g_set.lenient = !g_set.lenient; save_settings(); break;
     case ID_CHK_DETAIL: g_set.detailed_log = !g_set.detailed_log; save_settings(); break;
+    case ID_CHK_UPDATES: g_set.check_updates = !g_set.check_updates; save_settings(); break;
+    case ID_UPD_NOTES: {
+        upd_status_t us;
+        wchar_t url[256];
+        upd_status(&us);
+        wfmt(url, 256, L"%hs", us.man.notes); /* https:// checked by upd_parse_manifest */
+        if (url[0])
+            ShellExecuteW(g_hwnd, L"open", url, NULL, NULL, SW_SHOWNORMAL);
+        break;
+    }
+    case ID_UPD_GO: {
+        upd_status_t us;
+        upd_status(&us);
+        g_upd_fail[0] = 0;
+        if (running() || importing() || !g_data[0])
+            break;
+        if (us.state == UPD_READY || upd_download_start(g_data)) /* READY: a failed apply, retried */
+            g_upd_wanted = 1;
+        break;
+    }
     case ID_LANG_EN: set_language(LANG_EN); break;
     case ID_LANG_ES: set_language(LANG_ES); break;
     default: break;
@@ -1831,6 +1910,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             int was_running = running(), was_importing = importing();
             g_tick++;
             poll_import();
+            poll_update();
             if (g_tick % SLOW_EVERY == 0) {
                 poll_game();
                 if (log_view() || running())
@@ -1899,6 +1979,59 @@ static void dark_title_bar(HWND hwnd) {
     FreeLibrary(dwm);
 }
 
+static void upd_remove_old_dir(void) {
+    wchar_t dir[MAX_PATH];
+    size_t n;
+    wfmt(dir, MAX_PATH, L"%ls", g_exe_dir);
+    n = wcslen(dir);
+    if (n && dir[n - 1] == L'\\')
+        dir[n - 1] = 0;
+    upd_remove_old(dir);
+}
+
+/* Update work driven by the tick: delete what a previous update left (the old launcher may
+ * still be exiting), redraw while downloading, and once the zip is verified and extracted,
+ * swap the binaries and restart into the new launcher. */
+static void poll_update(void) {
+    static int last_state = -1;
+    upd_status_t us;
+    wchar_t dir[MAX_PATH], exe[MAX_PATH], cmd[MAX_PATH + 64];
+    size_t n;
+    if (g_tick <= 50 && g_tick % 10 == 1)
+        upd_remove_old_dir();
+    upd_status(&us);
+    if (us.state != last_state || us.state == UPD_DOWNLOADING)
+        redraw();
+    last_state = us.state;
+    if (us.state != UPD_READY || !g_upd_wanted || running() || importing())
+        return;
+    g_upd_wanted = 0;
+    wfmt(dir, MAX_PATH, L"%ls", g_exe_dir);
+    n = wcslen(dir);
+    if (n && dir[n - 1] == L'\\')
+        dir[n - 1] = 0;
+    if (!upd_apply(dir, us.staged, g_upd_fail, 160)) {
+        redraw();
+        return;
+    }
+    wfmt(exe, MAX_PATH, L"%lsngb-launcher.exe", g_exe_dir);
+    wfmt(cmd, MAX_PATH + 64, L"\"%ls\" --updated %hs", exe, us.man.version);
+    {
+        STARTUPINFOW si;
+        PROCESS_INFORMATION pi;
+        memset(&si, 0, sizeof si);
+        si.cb = sizeof si;
+        if (CreateProcessW(exe, cmd, NULL, NULL, FALSE, 0, NULL, g_exe_dir, &si, &pi)) {
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+            DestroyWindow(g_hwnd);
+        } else { /* the new binaries are in place: they start with the next launch */
+            wfmt(g_upd_fail, 160, L"%ls", tr(S_UPD_RESTART));
+            redraw();
+        }
+    }
+}
+
 static void init_paths(void) {
     wchar_t *cut;
     GetModuleFileNameW(NULL, g_exe_dir, MAX_PATH);
@@ -1953,6 +2086,11 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show) {
             wfmt(g_shot_path, MAX_PATH, L"%ls", v);
         } else if (!wcscmp(a, L"--shot-delay")) {
             g_shot_delay = _wtoi(v);
+        } else if (!wcscmp(a, L"--update-url")) {
+            wfmt(g_upd_url, 1024, L"%ls", v);
+            g_upd_forced = 1;
+        } else if (!wcscmp(a, L"--updated")) {
+            wfmt(g_updated_to, 32, L"%ls", v);
         } else if (!wcscmp(a, L"--dpi")) {
             dpi = _wtoi(v); /* review aid: render as if the system DPI were this */
         } else if (!wcscmp(a, L"--demo")) {
@@ -1969,6 +2107,31 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show) {
     if (g_demo == 2)
         note_error(IMPE_NOT_NGB, L"Halo: Combat Evolved", 0);
     ui_init(dpi);
+    if (g_updated_to[0] && g_data[0]) { /* the update is in place: its zip and staging can go */
+        wchar_t upd[MAX_PATH];
+        wfmt(upd, MAX_PATH, L"%ls\\updates", g_data);
+        remove_tree(upd);
+    }
+    /* One check a day at most (or now with --update-url); silent when offline. */
+    if (!g_shot_path[0] || g_upd_forced) {
+        SYSTEMTIME now;
+        FILETIME ft;
+        ULARGE_INTEGER t;
+        int day;
+        GetSystemTime(&now);
+        SystemTimeToFileTime(&now, &ft);
+        t.LowPart = ft.dwLowDateTime;
+        t.HighPart = ft.dwHighDateTime;
+        day = (int)(t.QuadPart / (10000000ULL * 86400ULL));
+        if (g_upd_forced || (g_set.check_updates && day != g_set.update_day)) {
+            char ver[32];
+            WideCharToMultiByte(CP_UTF8, 0, TEXT(NGB_VERSION_STR), -1, ver, sizeof ver, NULL, NULL);
+            if (upd_check_start(g_upd_url, ver) && !g_upd_forced) {
+                g_set.update_day = day;
+                ini_put_int(L"update", L"last_day", day);
+            }
+        }
+    }
     if (!log_view())
         g_log_view = 0; /* --log-view only applies to the Advanced page */
     else

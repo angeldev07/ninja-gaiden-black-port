@@ -1,0 +1,123 @@
+name: release
+
+# Pushing a tag vX.Y.Z builds the port, packages it and creates a DRAFT release. The owner reviews
+# and publishes the draft by hand; only a published release is "latest", which is what launchers
+# see (docs/target/adr-07-releases-and-updater.md). Running it by hand (workflow_dispatch) is a
+# rehearsal: it builds and packages version.h as it is and uploads the zip as an artifact, with no
+# release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: build, package, draft
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The changelog needs the history and the previous tag.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Locate Visual Studio
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) { throw 'Visual Studio with the C++ x86/x64 tools was not found' }
+          $vcvarsall = Join-Path ($vs | Select-Object -First 1) 'VC\Auxiliary\Build\vcvarsall.bat'
+          if (-not (Test-Path $vcvarsall)) { throw "vcvarsall.bat not found at $vcvarsall" }
+          "VCVARSALL=$vcvarsall" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Output "VCVARSALL=$vcvarsall"
+
+      - name: Build the port (includes the C tests)
+        shell: cmd
+        run: port\build.cmd
+
+      - name: Python tests
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check -e .
+          python -m unittest discover -s tests -v
+
+      - name: Package
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            python -P -m ngb_tools.release --tag "$TAG" --build build/port --out build/release
+          else
+            python -P -m ngb_tools.release --dry-run --build build/port --out build/release
+          fi
+
+      - name: Upload the package (rehearsal)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-rehearsal
+          path: build/release/
+
+      - name: Write the release notes
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          previous="$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)"
+          if [ -n "$previous" ]; then
+            range="$previous..HEAD"
+          else
+            range="HEAD"
+          fi
+          {
+            echo "## How to play"
+            echo
+            echo "Unzip \`ngb-port-${TAG}-win32.zip\`, run \`ngb-launcher.exe\`, click **Import game** and pick the"
+            echo "image of your own disc, then click **PLAY**. Windows SmartScreen may warn because the binaries"
+            echo "are not code-signed (**More info**, then **Run anyway**); the source is public. The launcher"
+            echo "checks for updates and offers to install them (Advanced turns the check off)."
+            echo
+            echo "## Legal"
+            echo
+            echo "Unofficial, non-commercial fan project. Ninja Gaiden is a trademark of Koei Tecmo and Xbox and"
+            echo "Windows are trademarks of Microsoft; this project is not affiliated with them. It contains no"
+            echo "game data: you need your own copy of the game."
+            echo
+            echo "## Changes"
+            echo
+            if [ -n "$previous" ]; then
+              echo "Since $previous:"
+              echo
+            fi
+            git log --pretty="- %s" "$range"
+          } > "$RUNNER_TEMP/release-notes.md"
+          cat "$RUNNER_TEMP/release-notes.md"
+
+      - name: Create the draft release
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" build/release/* \
+            --draft \
+            --title "$TAG" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            --verify-tag

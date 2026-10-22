@@ -52,6 +52,7 @@ _(still empty)_
 - [[adr-03-game-data-outside-repo]]: the game data in `NGB_DATA`, outside the repo and any cloud-synced folder.
 - [[adr-05-native-runtime]]: fixed-base loader, shadow PE header, KPCR overlaid on the TEB, TLS, files and MMIO. Options for H7.
 - [[adr-06-hybrid-renderer]]: H7b. Emulated PGRAPH as the base, with HLE in Swap, KickOff, fences and vblank. Decided with the Ghidra data.
+- [[adr-07-releases-and-updater]]: tag-driven draft releases with an update manifest, and a launcher updater (check, SHA-256, rename-and-replace).
 - [[adr-04-version-control]]: trunk-based, Conventional Commits, squash PRs, review, CI gates and a tag per milestone.
 
 ## Team (`team/`)

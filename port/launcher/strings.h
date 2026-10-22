@@ -173,7 +173,18 @@
     X(CTL_KEY_RSTICK, L"R stick", L"Stick der.")                                                 \
     X(CTL_BOTH, L"Gamepad and keyboard add up: you can play with both at once.", L"El mando de PC y el teclado se suman: se puede jugar con los dos a la vez.") \
     /* advanced */                                                                               \
-    X(ADV_SUB, L"Debugging and logging. Usually best left as it is.", L"Depuración y registro. Lo normal es dejarlo como está.") \
+    X(ADV_SUB, L"Updates, debugging and logging. Usually best left as it is.", L"Actualizaciones, depuración y registro. Lo normal es dejarlo como está.") \
+    X(ADV_UPDATES, L"Check for updates", L"Buscar actualizaciones")                               \
+    X(ADV_UPDATES_DESC, L"Once a day the launcher asks GitHub for the latest release and tells you on the Play page. Nothing is installed until you press Update.", \
+      L"Una vez al día el launcher consulta en GitHub la última versión y te avisa en Jugar. No se instala nada hasta que pulses Actualizar.") \
+    X(UPD_AVAILABLE, L"Version %hs is available.", L"La versión %hs está disponible.")             \
+    X(UPD_NOTES, L"What's new", L"Novedades")                                                     \
+    X(UPD_GO, L"Update", L"Actualizar")                                                          \
+    X(UPD_DOWNLOADING, L"Downloading %hs: %d %%", L"Descargando %hs: %d %%")                     \
+    X(UPD_FAILED, L"The update failed.", L"La actualización falló.")                              \
+    X(UPD_RETRY, L"Nothing was changed; you can try again.", L"No se cambió nada; puedes reintentarlo.") \
+    X(UPD_DONE, L"Updated to version %ls.", L"Actualizado a la versión %ls.")                    \
+    X(UPD_RESTART, L"Close and open the launcher to finish.", L"Cierra y abre el launcher para terminar.") \
     X(ADV_DEBUG, L"Debugging", L"Depuración")                                                    \
     X(ADV_RDOC, L"RenderDoc capture (F11)", L"Captura con RenderDoc (F11)")                      \
     X(ADV_RDOC_DESC, L"Loads RenderDoc at start and F11 captures the next frame. Needs RenderDoc installed and the OpenGL renderer.", \

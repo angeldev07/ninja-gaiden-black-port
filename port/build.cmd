@@ -91,11 +91,15 @@ cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\texconv_test.pdb" /Fe"%OUT%\texconv_t
 rem 5a) Launcher XDVDFS reader test (synthetic images, no game data).
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\xdvdfs_test.pdb" /Fe"%OUT%\xdvdfs_test.exe" "%PORT%tests\xdvdfs_test.c" "%PORT%launcher\xdvdfs.c" || exit /b 1
 "%OUT%\xdvdfs_test.exe" || exit /b 1
+rem 5b) Launcher updater: manifest, versions, SHA-256 and a whole local update (no network).
+rem     Not named *update*.exe: Windows asks for elevation for such names without a manifest.
+cl %CFLAGS% /I"%PORT%res" /I"%PORT%launcher" /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\upd_test.pdb" /Fe"%OUT%\upd_test.exe" "%PORT%tests\update_test.c" "%PORT%launcher\update.c" "%PORT%launcher\import.c" "%PORT%launcher\xdvdfs.c" bcrypt.lib winhttp.lib || exit /b 1
+"%OUT%\upd_test.exe" || exit /b 1
 
-rem 5) ngb-launcher.exe: the graphical launcher (Win32 + GDI, no dependencies). See launcher\launcher.c.
+rem 5) ngb-launcher.exe: the graphical launcher (Win32 + GDI; bcrypt and winhttp for the updater). See launcher\launcher.c.
 rc /nologo /I"%PORT%res" /I"%PORT%launcher" /fo"%OUT%\obj\launcher.res" "%PORT%launcher\launcher.rc" || exit /b 1
 cl %CFLAGS% /I"%PORT%res" /I"%PORT%launcher" /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\launcher.pdb" /Fe"%OUT%\ngb-launcher.exe" ^
-  "%PORT%launcher\launcher.c" "%PORT%launcher\ui.c" "%PORT%launcher\art.c" "%PORT%launcher\import.c" "%PORT%launcher\xdvdfs.c" "%OUT%\obj\launcher.res" ^
-  /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib shell32.lib comdlg32.lib advapi32.lib ole32.lib || exit /b 1
+  "%PORT%launcher\launcher.c" "%PORT%launcher\ui.c" "%PORT%launcher\art.c" "%PORT%launcher\import.c" "%PORT%launcher\xdvdfs.c" "%PORT%launcher\update.c" "%OUT%\obj\launcher.res" ^
+  /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib shell32.lib comdlg32.lib advapi32.lib ole32.lib bcrypt.lib winhttp.lib || exit /b 1
 echo build: %OUT%\ngb-loader.exe + ngb-core.dll + ngb-launcher.exe
 endlocal

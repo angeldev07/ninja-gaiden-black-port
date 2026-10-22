@@ -572,3 +572,26 @@ Details in [[gpu-nv2a]].
   "(unofficial)".
 - `port/res/version.h` is now `0.3.0-dev`. It still said 0.1.0 after the v0.2.0 release; the release workflow will
   set it from the tag.
+
+## [2026-10-22] feat | Tag-driven releases and the launcher updater
+- Design: [[adr-07-releases-and-updater]].
+- **Releases:**
+  - Pushing `vX.Y.Z` runs `.github/workflows/release.yml`. It finds Visual Studio with vswhere, runs `build.cmd`
+    and the tests, and packages with `ngb_tools.release`. The package is a deterministic zip with the three binaries,
+    LICENSE, THIRD_PARTY and a README for players, checked by the hygiene guard, plus the `ngb-update.txt` manifest.
+  - The workflow creates a **draft** that the owner publishes. `workflow_dispatch` runs a rehearsal with no release.
+  - A local rehearsal with the real binaries gives a 0.9 MB zip and passes the guard.
+- **Updater** (`port/launcher/update.c`):
+  - Once a day it reads the latest manifest; the switch is Advanced > *Check for updates*.
+  - The Play page shows "Version X is available" with *What's new* and *Update*.
+  - The zip is downloaded to `NGB_DATA\updates`, its size and SHA-256 checked with BCrypt, and it is extracted with
+    Windows' `tar.exe`.
+  - The binaries are renamed to `*.old` and replaced, with rollback. The launcher restarts with `--updated` and cleans
+    up.
+- **Verified:**
+  - `upd_test.exe` covers the manifest, versions, SHA-256 vectors, a whole local update and a tampered zip.
+  - A real launcher, clicked through `--update-url` with a local fake v9.9.9, swapped its binaries, restarted itself
+    and showed "Updated to version 9.9.9".
+- **Gotcha:** Windows demands elevation for an unmanifested exe named `*update*`, so the C test is `upd_test.exe`.
+- **Not verified:** the workflow itself has not run on GitHub yet. The first run will be a `workflow_dispatch`
+  rehearsal.
