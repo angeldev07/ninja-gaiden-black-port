@@ -52,6 +52,7 @@ static void usage(void) {
             "  --audio-wav  save what plays to <log>-audio.wav\n"
             "  --rdoc-frame N  capture frame N with RenderDoc (GL render; .rdc next to the log)\n"
             "  --rdoc-key     load RenderDoc and F11 captures the next frame (play and capture)\n"
+            "  --debug-shots N  PNG of every Nth frame and of the first textures, next to the log (off)\n"
             "  --dump-ram FRAMES  guest RAM snapshots at those frames (\"2400,3000\"); F10 too\n"
             "  --watch LIST  watch game addresses (0xADDR[:1|2|4],...) and log the "
             "changes\n"
@@ -79,6 +80,47 @@ static int inside_git_repo(const char *path) {
     return 0;
 }
 
+/* Keeps runs\ from growing without bound: only the most recent KEEP_SESSIONS sessions with
+ * the default log name survive. A session is every file starting with its "h6-<date>"
+ * stem (log, PGRAPH log, debug PNGs, audio WAV); RenderDoc captures (.rdc) are kept. */
+#define KEEP_SESSIONS 10
+
+static int cmp_names(const void *a, const void *b) {
+    return strcmp((const char *)a, (const char *)b);
+}
+
+static void prune_old_sessions(const char *dir) {
+    static char stems[512][32];
+    char pattern[MAX_PATH], path[MAX_PATH];
+    WIN32_FIND_DATAA fd;
+    HANDLE h;
+    int n = 0, i;
+    snprintf(pattern, sizeof pattern, "%s\\h6-????????-??????.log", dir);
+    if ((h = FindFirstFileA(pattern, &fd)) == INVALID_HANDLE_VALUE)
+        return;
+    do {
+        if (n < 512 && strlen(fd.cFileName) == 22) { /* "h6-YYYYMMDD-HHMMSS.log" */
+            memcpy(stems[n], fd.cFileName, 18);
+            stems[n++][18] = 0;
+        }
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    qsort(stems, (size_t)n, sizeof stems[0], cmp_names); /* the timestamp sorts by name */
+    for (i = 0; i < n - (KEEP_SESSIONS - 1); i++) { /* room for the session starting now */
+        snprintf(pattern, sizeof pattern, "%s\\%s*", dir, stems[i]);
+        if ((h = FindFirstFileA(pattern, &fd)) == INVALID_HANDLE_VALUE)
+            continue;
+        do {
+            const char *ext = strrchr(fd.cFileName, '.');
+            if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || (ext && !_stricmp(ext, ".rdc")))
+                continue;
+            snprintf(path, sizeof path, "%s\\%s", dir, fd.cFileName);
+            DeleteFileA(path);
+        } while (FindNextFileA(h, &fd));
+        FindClose(h);
+    }
+}
+
 static void default_log_path(char *out, size_t outlen) {
     char dir[MAX_PATH];
     const char *data = getenv("NGB_DATA"), *home = getenv("USERPROFILE");
@@ -92,6 +134,7 @@ static void default_log_path(char *out, size_t outlen) {
         return;
     }
     CreateDirectoryA(dir, NULL);
+    prune_old_sessions(dir);
     GetLocalTime(&st);
     snprintf(out, outlen, "%s\\h6-%04u%02u%02u-%02u%02u%02u.log", dir, st.wYear, st.wMonth,
              st.wDay, st.wHour, st.wMinute, st.wSecond);
@@ -167,6 +210,8 @@ static int parse_args(void) {
             g_ngb_opts.rdoc_frame = (unsigned)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--rdoc-key"))
             g_ngb_opts.rdoc_key = 1;
+        else if (!strcmp(a, "--debug-shots") && more)
+            g_ngb_opts.debug_shots = (unsigned)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--dump-ram") && more)
             g_ngb_opts.dump_ram = _strdup(argv[++i]);
         else if (!strcmp(a, "--no-pacing"))

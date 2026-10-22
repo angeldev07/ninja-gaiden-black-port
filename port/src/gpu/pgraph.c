@@ -84,7 +84,8 @@ static int g_gl;
 static pgl_regs g_r;
 static uint32_t *g_aidx;
 static uint32_t g_aidx_n, g_aidx_cap;
-#define SHOT_EVERY 300 /* with --window, automatic capture every 300 presented frames */
+/* --debug-shots N: PNG of every Nth presented frame (0 = off, the default). */
+#define SHOT_DUE() (g_ngb_opts.debug_shots && g_flips % g_ngb_opts.debug_shots == 0 && g_png_base[0])
 
 /* H7c: per-frame measurements with QueryPerformanceCounter (cheap: ~20 ns per read). Ticks
  * are accumulated per phase and every PERF_EVERY frames a "perf:" line is written with the
@@ -471,6 +472,8 @@ static void dump_texture(uint32_t stage) {
 /* At the start of a primitive: dumps the active textures not seen yet. */
 static void dump_active_textures(void) {
     uint32_t s, i;
+    if (!g_ngb_opts.debug_shots) /* development aid: only with --debug-shots */
+        return;
     for (s = 0; s < 4 && g_tex_png < MAX_TEX_PNG; s++) {
         int seen = 0;
         if (!(g_tex_ctl0[s] & 0x40000000u)) /* SET_TEXTURE_CONTROL0_ENABLE */
@@ -846,7 +849,7 @@ static void present_and_pace(void) {
         pace();
     if (g_gl) {
         char path[MAX_PATH + 32];
-        int shot = g_flips % SHOT_EVERY == 0 && g_png_base[0];
+        int shot = SHOT_DUE();
         if (shot)
             snprintf(path, sizeof path, "%s-shot-%05u.png", g_png_base, g_flips);
         if (!pgl_flip(&g_r, shot ? path : NULL))
@@ -856,7 +859,7 @@ static void present_and_pace(void) {
         if (fb) {
             gfx_present(fb, (int)g_present_w, (int)g_present_h, (int)g_present_pitch,
                         GFX_FMT_X8R8G8B8);
-            if (g_flips % SHOT_EVERY == 0 && g_png_base[0]) {
+            if (SHOT_DUE()) {
                 char path[MAX_PATH + 32], used[MAX_PATH + 32];
                 snprintf(path, sizeof path, "%s-shot-%05u.png", g_png_base, g_flips);
                 if (!gfx_screenshot(path, used, sizeof used))

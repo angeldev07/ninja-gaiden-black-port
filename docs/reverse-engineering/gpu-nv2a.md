@@ -70,7 +70,8 @@ Everything that follows is `VERIFIED` by those logs.
 scrolling and fading. It is the game's code running natively.
 
 - Command: `build\port\ngb-loader.exe <default.xbe> --window`.
-- Captures: the loader saves one every 300 frames (`<log>-pgraph-shot-NNNNN.png`); the leader reviewed
+- Captures: with `--debug-shots N` (off by default since 2026-10-22) the loader saves one every N frames
+  (`<log>-pgraph-shot-NNNNN.png`); the leader reviewed
   `h7b-int-pgraph-shot-00600.png`.
 
 ### How it is drawn

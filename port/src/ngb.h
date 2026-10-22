@@ -59,7 +59,8 @@ typedef struct ngb_options {
     int audio_wav;            /* --audio-wav: saves the mix to <log>-audio.wav */
     unsigned rdoc_frame;      /* --rdoc-frame N: captures that frame with RenderDoc (gpu/rdoc.c) */
     int rdoc_key;             /* --rdoc-key: F11 captures the next frame with RenderDoc */
-    const char *dump_ram;     /* --dump-ram FRAMES: guest RAM snapshots at those frames (F10 too) */
+    unsigned debug_shots;     /* --debug-shots N: PNG every N frames + texture dumps (0 = off) */
+    const char *dump_ram;    /* --dump-ram FRAMES: guest RAM snapshots at those frames (F10 too) */
 } ngb_options_t;
 
 /* --renderer: AUTO = OpenGL if there is a window and a 4.x context; otherwise the rasterizer. */

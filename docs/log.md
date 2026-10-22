@@ -477,3 +477,12 @@ Details in [[gpu-nv2a]].
   - `SPECULAR_ENABLE` / `ALPHA_FROM_MATERIAL_SPECULAR` in the pixel shader for both pipelines.
 - Demo: mean frame brightness ~130 → ~70. The scene is dark and contrasted, like the console.
 - Detail in [[gpu-nv2a]].
+
+## [2026-10-22] chore | No more automatic screenshots; `runs\` keeps the last 10 sessions
+- The loader used to save a PNG every 300 frames and dump the first textures on every run. A long play session
+  filled `runs\` with 1.6 GB, almost all of it PNGs.
+- **Now:**
+  - `--debug-shots N` turns the periodic PNGs and texture dumps on; they are off by default. Benchmarks and
+    comparisons pass `--debug-shots 300`.
+  - With the default log name, the loader deletes the files of the sessions older than the 10 most recent. It
+    keeps the `.rdc` captures, and it never touches `hdd\` (the saves) or `shots\` (F12).
