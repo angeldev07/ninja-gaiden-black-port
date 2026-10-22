@@ -1,5 +1,5 @@
 /*
- * emit.c: escritura acotada de texto GLSL (ver emit.h).
+ * emit.c: bounded writing of GLSL text (see emit.h).
  */
 #include "emit.h"
 
@@ -30,7 +30,7 @@ void glsl_emit(glsl_buf *b, const char *fmt, ...) {
     va_end(args);
     if (n < 0 || (size_t)n >= room) {
         b->overflow = 1;
-        b->out[b->len] = 0; /* deshace la escritura parcial */
+        b->out[b->len] = 0; /* undoes the partial write */
         return;
     }
     b->len += (size_t)n;

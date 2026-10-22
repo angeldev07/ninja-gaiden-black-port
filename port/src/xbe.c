@@ -1,9 +1,9 @@
 /*
- * xbe.c: parseo mínimo de un XBE para cargarlo.
+ * xbe.c: minimal XBE parsing, enough to load it.
  *
- * Offsets de la cabecera: https://xboxdevwiki.net/Xbe y Cxbx-Reloaded
- * (src/common/xbe/Xbe.h). La deducción retail/debug sigue a ngb_tools.xbe.image:
- * la clave correcta deja el entry point dentro de una sección ejecutable.
+ * Header offsets: https://xboxdevwiki.net/Xbe and Cxbx-Reloaded
+ * (src/common/xbe/Xbe.h). The retail/debug detection follows ngb_tools.xbe.image:
+ * the right key leaves the entry point inside an executable section.
  */
 #include "xbe.h"
 
@@ -18,7 +18,7 @@ static uint32_t rd32(const uint8_t *p) {
 
 const uint8_t *xbe_va_ptr(const xbe_t *xbe, uint32_t va, uint32_t len) {
     uint32_t i;
-    /* Cabeceras: VA = base + offset de archivo. */
+    /* Headers: VA = base + file offset. */
     if (va >= xbe->base && va - xbe->base + (uint64_t)len <= xbe->size_of_headers &&
         va - xbe->base + (uint64_t)len <= xbe->size)
         return xbe->data + (va - xbe->base);
@@ -48,7 +48,7 @@ int xbe_parse(uint8_t *data, size_t size, xbe_t *out, char *err, size_t errlen) 
     out->data = data;
     out->size = size;
     if (size < 0x178 || rd32(data) != XBE_MAGIC) {
-        snprintf(err, errlen, "no es un XBE (magic o tamaño)");
+        snprintf(err, errlen, "not an XBE (magic or size)");
         return -1;
     }
     out->base = rd32(data + 0x104);
@@ -67,14 +67,14 @@ int xbe_parse(uint8_t *data, size_t size, xbe_t *out, char *err, size_t errlen) 
         out->sections_addr < out->base ||
         out->sections_addr - out->base + (uint64_t)out->section_count * 0x38 >
             out->size_of_headers) {
-        snprintf(err, errlen, "cabecera incoherente (headers 0x%X, %u secciones)",
+        snprintf(err, errlen, "inconsistent header (headers 0x%X, %u sections)",
                  out->size_of_headers, out->section_count);
         return -1;
     }
     out->sections = (xbe_section_t *)calloc(out->section_count ? out->section_count : 1,
                                             sizeof(xbe_section_t));
     if (!out->sections) {
-        snprintf(err, errlen, "sin memoria");
+        snprintf(err, errlen, "out of memory");
         return -1;
     }
     for (i = 0; i < out->section_count; i++) {
@@ -90,7 +90,7 @@ int xbe_parse(uint8_t *data, size_t size, xbe_t *out, char *err, size_t errlen) 
         s->header_va = out->sections_addr + i * 0x38;
         if ((uint64_t)s->raw + (s->rsize < s->vsize ? s->rsize : s->vsize) > size ||
             s->va < out->base || (uint64_t)s->va + s->vsize > (uint64_t)out->base + out->size_of_image) {
-            snprintf(err, errlen, "sección %u fuera del archivo o de la imagen", i);
+            snprintf(err, errlen, "section %u outside the file or the image", i);
             return -1;
         }
         name = (s->name_addr >= out->base && s->name_addr - out->base + 8 <= out->size_of_headers)
@@ -102,7 +102,7 @@ int xbe_parse(uint8_t *data, size_t size, xbe_t *out, char *err, size_t errlen) 
                 s->name[k] = (char)name[k];
         }
     }
-    /* Retail o debug: la clave buena deja el entry en código ejecutable. */
+    /* Retail or debug: the right key leaves the entry in executable code. */
     out->entry = entry_enc ^ XBE_KEY_ENTRY_RETAIL;
     out->thunk = thunk_enc ^ XBE_KEY_THUNK_RETAIL;
     out->build = "retail";
@@ -111,18 +111,18 @@ int xbe_parse(uint8_t *data, size_t size, xbe_t *out, char *err, size_t errlen) 
         out->thunk = thunk_enc ^ XBE_KEY_THUNK_DEBUG;
         out->build = "debug";
         if (!in_exec_section(out, out->entry)) {
-            snprintf(err, errlen, "ninguna clave XOR deja el entry point en código");
+            snprintf(err, errlen, "no XOR key leaves the entry point in code");
             return -1;
         }
     }
     if (!xbe_va_ptr(out, out->thunk, 4)) {
-        snprintf(err, errlen, "kernel thunk 0x%08X fuera de los datos del archivo", out->thunk);
+        snprintf(err, errlen, "kernel thunk 0x%08X outside the file data", out->thunk);
         return -1;
     }
     if (out->tls_addr) {
         const uint8_t *t = xbe_va_ptr(out, out->tls_addr, 0x18);
         if (!t) {
-            snprintf(err, errlen, "directorio TLS 0x%08X no legible", out->tls_addr);
+            snprintf(err, errlen, "TLS directory 0x%08X not readable", out->tls_addr);
             return -1;
         }
         out->has_tls = 1;
@@ -146,7 +146,7 @@ int xbe_load_file(const char *path, xbe_t *out, char *err, size_t errlen) {
     long len;
     uint8_t *data;
     if (fopen_s(&f, path, "rb") || !f) {
-        snprintf(err, errlen, "no se puede abrir %s", path);
+        snprintf(err, errlen, "cannot open %s", path);
         return -1;
     }
     fseek(f, 0, SEEK_END);
@@ -154,14 +154,14 @@ int xbe_load_file(const char *path, xbe_t *out, char *err, size_t errlen) {
     fseek(f, 0, SEEK_SET);
     if (len <= 0 || len > 256L * 1024 * 1024) {
         fclose(f);
-        snprintf(err, errlen, "tamaño de archivo inválido (%ld)", len);
+        snprintf(err, errlen, "invalid file size (%ld)", len);
         return -1;
     }
     data = (uint8_t *)malloc((size_t)len);
     if (!data || fread(data, 1, (size_t)len, f) != (size_t)len) {
         fclose(f);
         free(data);
-        snprintf(err, errlen, "error leyendo %s", path);
+        snprintf(err, errlen, "error reading %s", path);
         return -1;
     }
     fclose(f);

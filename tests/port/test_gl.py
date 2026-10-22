@@ -66,7 +66,7 @@ class GlBackendTest(unittest.TestCase):
 
     def test_every_generated_variant_compiles(self) -> None:
         result = self.run_or_skip("--stress")
-        self.assertRegex(result.stdout, r"--stress compilan (\d+) de \1 variantes")
+        self.assertRegex(result.stdout, r"--stress compiled (\d+) of \1 variants")
 
 
 if __name__ == "__main__":

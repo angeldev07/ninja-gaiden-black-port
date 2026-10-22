@@ -1,5 +1,5 @@
 /*
- * vp.c: procesador de voces mínimo de la APU. Ver vp.h.
+ * vp.c: minimal APU voice processor. See vp.h.
  */
 #include "apu/vp.h"
 
@@ -56,17 +56,17 @@ void vp_method(vp_state_t *s, uint32_t method, uint32_t value) {
         }
         return;
     case VP_PIO_VOICE_OFF:
-    case VP_PIO_VOICE_RELEASE: /* sin envolventes: soltar es apagar */
+    case VP_PIO_VOICE_RELEASE: /* no envelopes: releasing is turning off */
         if (handle < VP_MAX_VOICES) {
             s->active[handle] = 0;
             if ((v = voice_at(s, handle)) != NULL)
                 *word(v, VP_VOICE_PAR_STATE) &= ~(VP_STATE_ACTIVE | VP_STATE_NEW_VOICE);
-            push_idle(s, handle); /* como xemu: todo VOICE_OFF avisa, estuviera activa o no */
+            push_idle(s, handle); /* like xemu: every VOICE_OFF notifies, whether it was active or not */
         }
         return;
     case VP_PIO_VOICE_PAUSE:
         if ((v = voice_at(s, handle)) != NULL) {
-            if (value & VP_STATE_PAUSED) /* el bit de acción coincide con el de estado */
+            if (value & VP_STATE_PAUSED) /* the action bit matches the state bit */
                 *word(v, VP_VOICE_PAR_STATE) |= VP_STATE_PAUSED;
             else
                 *word(v, VP_VOICE_PAR_STATE) &= ~VP_STATE_PAUSED;
@@ -93,7 +93,7 @@ void vp_method(vp_state_t *s, uint32_t method, uint32_t value) {
         return;
     }
     switch (method) {
-    case VP_PIO_SET_VOICE_TAR_PITCH: /* el pitch va en los 16 bits altos; el enlace se queda */
+    case VP_PIO_SET_VOICE_TAR_PITCH: /* the pitch goes in the upper 16 bits; the link stays */
         *word(v, VP_VOICE_TAR_PITCH_LINK) =
             (value & 0xFFFF0000u) | (*word(v, VP_VOICE_TAR_PITCH_LINK) & 0xFFFFu);
         break;
@@ -111,7 +111,7 @@ void vp_method(vp_state_t *s, uint32_t method, uint32_t value) {
         set_low24(v, VP_VOICE_PAR_NEXT, value);
         break;
     default:
-        break; /* volúmenes, filtros, envolventes...: sin efecto en la posición */
+        break; /* volumes, filters, envelopes...: no effect on the position */
     }
 }
 
@@ -131,7 +131,7 @@ void vp_advance(vp_state_t *s, double seconds) {
         if ((v = vp_voice_begin(s, h)) == NULL)
             continue;
         total = s->frac[h] + seconds * vp_voice_rate(v);
-        step = (uint32_t)floor(total + 1e-7); /* 99,9999999 muestras son 100 */
+        step = (uint32_t)floor(total + 1e-7); /* 99.9999999 samples are 100 */
         s->frac[h] = total > step ? total - step : 0.0;
         vp_voice_move(s, h, v, step);
     }
@@ -144,11 +144,11 @@ uint8_t *vp_voice_begin(vp_state_t *s, uint32_t h) {
         return NULL;
     v = voice_at(s, h);
     state = *word(v, VP_VOICE_PAR_STATE);
-    if (!(state & VP_STATE_ACTIVE)) { /* DirectSound la apagó escribiendo en la tabla */
+    if (!(state & VP_STATE_ACTIVE)) { /* DirectSound turned it off by writing to the table */
         s->active[h] = 0;
         return NULL;
     }
-    /* El hardware empieza a procesar la voz: deja de ser nueva y su posición es válida. */
+    /* The hardware starts processing the voice: it is no longer new and its position is valid. */
     state &= ~VP_STATE_NEW_VOICE;
     *word(v, VP_VOICE_PAR_STATE) = state;
     return (state & VP_STATE_PAUSED) ? NULL : v;
@@ -163,7 +163,7 @@ int vp_voice_move(vp_state_t *s, uint32_t h, uint8_t *v, uint32_t step) {
     if (cbo > ebo) {
         if ((*word(v, VP_VOICE_CFG_FMT) & VP_FMT_LOOP) && lbo <= ebo) {
             cbo = lbo + (cbo - ebo - 1) % (ebo - lbo + 1);
-        } else { /* fin del búfer: la voz se apaga sola */
+        } else { /* end of buffer: the voice turns itself off */
             cbo = ebo;
             *word(v, VP_VOICE_PAR_STATE) &= ~VP_STATE_ACTIVE;
             s->active[h] = 0;

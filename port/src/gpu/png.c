@@ -1,6 +1,6 @@
 /*
- * png.c: escritor PNG mínimo (RGB de 8 bits, zlib con bloques "stored", sin compresión).
- * Basta para volcar el búfer de color; especificación: RFC 2083 (PNG) y RFC 1950/1951.
+ * png.c: minimal PNG writer (8-bit RGB, zlib with "stored" blocks, no compression).
+ * Enough to dump the color buffer; spec: RFC 2083 (PNG) and RFC 1950/1951.
  */
 #include "png.h"
 
@@ -66,16 +66,16 @@ int png_write_rgb(const char *path, uint32_t width, uint32_t height, const uint8
     if (!z)
         return -1;
     p = z;
-    *p++ = 0x78; /* zlib: deflate, ventana de 32 KB */
+    *p++ = 0x78; /* zlib: deflate, 32 KB window */
     *p++ = 0x01;
     for (y = 0; y < height; y++) {
         uint32_t row = width * 3u + 1u;
         for (x = 0; x < row; x++) {
-            uint8_t v = x ? rgb[(size_t)y * width * 3u + x - 1u] : 0; /* filtro 0 */
+            uint8_t v = x ? rgb[(size_t)y * width * 3u + x - 1u] : 0; /* filter 0 */
             if (done % 65535u == 0) {
                 uint64_t left = raw_len - done;
                 uint16_t len = (uint16_t)(left < 65535u ? left : 65535u);
-                *p++ = left <= 65535u ? 1 : 0; /* BFINAL en el último bloque, BTYPE 00 */
+                *p++ = left <= 65535u ? 1 : 0; /* BFINAL on the last block, BTYPE 00 */
                 *p++ = (uint8_t)len;
                 *p++ = (uint8_t)(len >> 8);
                 *p++ = (uint8_t)~len;
@@ -91,11 +91,11 @@ int png_write_rgb(const char *path, uint32_t width, uint32_t height, const uint8
     p += 4;
     put_be32(ihdr, width);
     put_be32(ihdr + 4, height);
-    ihdr[8] = 8;  /* bits por canal */
+    ihdr[8] = 8;  /* bits per channel */
     ihdr[9] = 2;  /* RGB */
     ihdr[10] = 0; /* deflate */
-    ihdr[11] = 0; /* filtros estándar */
-    ihdr[12] = 0; /* sin entrelazado */
+    ihdr[11] = 0; /* standard filters */
+    ihdr[12] = 0; /* no interlacing */
     if (fopen_s(&f, path, "wb") || !f) {
         free(z);
         return -1;

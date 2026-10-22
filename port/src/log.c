@@ -1,9 +1,9 @@
 /*
- * log.c: log de la ejecución (una línea por llamada al kernel) y parada ordenada.
+ * log.c: execution log (one line per kernel call) and orderly stop.
  *
- * Todas las escrituras pasan por un CRITICAL_SECTION. ngb_stop() escribe el motivo y el
- * resumen y termina el proceso con TerminateProcess: así no se ejecutan los
- * DLL_PROCESS_DETACH mientras otros hilos Xbox siguen vivos (o bloqueados) a medias.
+ * All writes go through a CRITICAL_SECTION. ngb_stop() writes the reason and the summary
+ * and ends the process with TerminateProcess: that way DLL_PROCESS_DETACH does not run while
+ * other Xbox threads are still alive (or blocked) halfway through something.
  */
 #include "ngb.h"
 
@@ -19,7 +19,7 @@ static CRITICAL_SECTION g_log_lock;
 static FILE *g_log_file;
 static volatile LONG g_stopping;
 static LARGE_INTEGER g_t0, g_freq;
-static volatile LONG64 g_log_ticks; /* tiempo dentro de ngb_log_raw (lock incluido) */
+static volatile LONG64 g_log_ticks; /* time inside ngb_log_raw (lock included) */
 
 long long ngb_log_ticks(void) { return (long long)g_log_ticks; }
 
@@ -29,7 +29,7 @@ int ngb_log_open(const char *path) {
     QueryPerformanceCounter(&g_t0);
     if (fopen_s(&g_log_file, path, "wb") || !g_log_file)
         return -1;
-    /* NGB_LOG_UNBUFFERED=1: cada línea llega al disco (para depurar muertes sin informe). */
+    /* NGB_LOG_UNBUFFERED=1: every line reaches the disk (to debug deaths without a report). */
     if (getenv("NGB_LOG_UNBUFFERED"))
         setvbuf(g_log_file, NULL, _IONBF, 0);
     else
@@ -43,7 +43,7 @@ double ngb_elapsed(void) {
     return (double)(now.QuadPart - g_t0.QuadPart) / (double)g_freq.QuadPart;
 }
 
-/* Si el hilo que tiene el lock ha muerto a medias (crash dentro del log), no esperar. */
+/* If the thread holding the lock died halfway (crash inside the log), do not wait. */
 static int log_lock(void) {
     int tries;
     for (tries = 0; tries < 2000; tries++) {
@@ -118,7 +118,7 @@ __declspec(noreturn) void ngb_stop(int code, const char *fmt, ...) {
     char reason[1024];
     va_list ap;
     if (InterlockedExchange(&g_stopping, 1)) {
-        /* Otro hilo ya está parando: esperar a que termine el proceso. */
+        /* Another thread is already stopping: wait for the process to end. */
         for (;;)
             Sleep(1000);
     }
@@ -126,14 +126,14 @@ __declspec(noreturn) void ngb_stop(int code, const char *fmt, ...) {
     vsnprintf(reason, sizeof reason, fmt, ap);
     va_end(ap);
     ngb_log("");
-    ngb_log("==== STOP %s (%d) a los %.3f s: %s", exit_name(code), code, ngb_elapsed(), reason);
-    /* El resumen del NV2A toma su lock: va ANTES de suspender los hilos para el volcado. */
+    ngb_log("==== STOP %s (%d) at %.3f s: %s", exit_name(code), code, ngb_elapsed(), reason);
+    /* The NV2A summary takes its lock: it goes BEFORE suspending the threads for the dump. */
     nv2a_summary();
     ngb_thread_dump_all();
     ngb_kernel_summary();
     ngb_input_summary();
     ngb_apu_summary();
-    ngb_log("==== FIN");
+    ngb_log("==== END");
     ngb_log_flush();
     fprintf(stderr, "ngb-loader: STOP %s: %s\nlog: %s\n", exit_name(code), reason,
             g_ngb_opts.log_path);

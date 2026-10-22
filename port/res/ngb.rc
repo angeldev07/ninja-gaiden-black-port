@@ -1,7 +1,7 @@
-/* ngb.rc: recursos de ngb-loader.exe (/DNGB_RC_LOADER) y de ngb-core.dll (/DNGB_RC_CORE).
- * El icono va en los dos: el exe lo enseña el Explorador y la DLL lo carga la ventana del
- * juego (el exe pierde su cabecera PE cuando el XBE ocupa 0x10000, la DLL no). Solo ASCII
- * en los textos: rc.exe no lee UTF-8 sin banderas extra. */
+/* ngb.rc: resources of ngb-loader.exe (/DNGB_RC_LOADER) and ngb-core.dll (/DNGB_RC_CORE).
+ * The icon goes in both: Explorer shows the exe's and the game window loads the DLL's
+ * (the exe loses its PE header when the XBE occupies 0x10000, the DLL does not). ASCII only
+ * in the texts: rc.exe does not read UTF-8 without extra flags. */
 #include <winver.h>
 #include "version.h"
 

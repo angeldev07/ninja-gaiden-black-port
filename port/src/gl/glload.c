@@ -1,5 +1,5 @@
 /*
- * glload.c: los punteros de glload.h y su carga con wglGetProcAddress.
+ * glload.c: the glload.h pointers and their loading with wglGetProcAddress.
  */
 #include "glload.h"
 
@@ -7,7 +7,7 @@
 NGL_FUNCTIONS(NGL_DEFINE)
 #undef NGL_DEFINE
 
-/* wglGetProcAddress devuelve 0, 1, 2, 3 o -1 en algunos drivers cuando no hay función. */
+/* wglGetProcAddress returns 0, 1, 2, 3 or -1 on some drivers when the function does not exist. */
 static PROC lookup(const char *name) {
     PROC proc = wglGetProcAddress(name);
     INT_PTR value = (INT_PTR)proc;

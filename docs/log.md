@@ -428,3 +428,13 @@ Detalle en [[gpu-nv2a]].
 - **Carpeta de datos:** la de `ngb.ini`, luego `NGB_DATA`, luego `%USERPROFILE%\ngb-data` si ya trae el juego, y si
   no `%LOCALAPPDATA%\NGBPort`. PLAY pasa `NGB_DATA` al loader.
 - Lo hizo un subagente (Sonnet) en un worktree; lo revisó e integró el líder.
+
+## [2026-10-22] chore | English translation, phase 1: `port/`
+- Everything under `port/` is now in English: C comments, log and help strings, tests, `build.cmd` and the README.
+  The goal is an open-source release.
+- The loader log is English now. The Python matchers in `tests/port/` and the launcher's log colouring follow it.
+- The project is no longer described as "pedagógico". The legal note reads: unofficial fan port, own copy of the
+  game required, not affiliated with Koei Tecmo or Microsoft.
+- Checked: zero warnings, 807 Python tests pass, and code and format specifiers are identical once comments and
+  strings are stripped.
+- Next: phase 2 (Python tooling), then phase 3 (vault, root README, CLAUDE.md rules).

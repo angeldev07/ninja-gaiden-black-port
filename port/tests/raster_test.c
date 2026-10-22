@@ -1,6 +1,6 @@
 /*
- * raster_test.c: pruebas del rasterizador por software con esperados calculados a mano.
- * Lo compila y ejecuta port\build.cmd; termina con código 1 si algo falla.
+ * raster_test.c: software rasterizer tests with hand-computed expected values.
+ * Built and run by port\build.cmd; exits with code 1 if anything fails.
  */
 #include <stdio.h>
 #include <string.h>
@@ -13,7 +13,7 @@ static int g_failures, g_checks;
     do {                                                                            \
         g_checks++;                                                                 \
         if (!(cond)) {                                                              \
-            fprintf(stderr, "FALLO %s:%d: %s\n", __FILE__, __LINE__, #cond);        \
+            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);        \
             g_failures++;                                                           \
         }                                                                           \
     } while (0)
@@ -50,7 +50,7 @@ static uint32_t px(int x, int y) {
     return g_fb[y * 8 + x];
 }
 
-/* Triángulo (0,0) (4,0) (0,4): entran los centros con x + y + 1 <= 4 -> 4+3+2+1 = 10. */
+/* Triangle (0,0) (4,0) (0,4): the centers with x + y + 1 <= 4 are in -> 4+3+2+1 = 10. */
 static void test_triangle_coverage(void) {
     rs_target_t t = target();
     rs_state_t st;
@@ -63,16 +63,16 @@ static void test_triangle_coverage(void) {
     CHECK(n == 10);
     CHECK(px(0, 0) == 0xFFFFFFFFu && px(3, 0) == 0xFFFFFFFFu && px(0, 3) == 0xFFFFFFFFu);
     CHECK(px(4, 0) == 0 && px(3, 1) == 0 && px(1, 3) == 0);
-    /* Mismo triángulo con el otro orden de vértices: misma cobertura. */
+    /* Same triangle with the other vertex order: same coverage. */
     memset(g_fb, 0, sizeof g_fb);
     CHECK(rs_draw_triangle(&t, NULL, &st, &a, &c, &b) == 10);
-    /* Recorte: con clip_x1 = 2 solo quedan las columnas 0 y 1 (4 + 3 -> 2 + 2 + 2 + 1). */
+    /* Clipping: with clip_x1 = 2 only columns 0 and 1 remain (4 + 3 -> 2 + 2 + 2 + 1). */
     memset(g_fb, 0, sizeof g_fb);
     t.clip_x1 = 2;
     CHECK(rs_draw_triangle(&t, NULL, &st, &a, &b, &c) == 7);
 }
 
-/* Color interpolado: en un quad de color uniforme (dos triángulos) el resultado es exacto. */
+/* Interpolated color: in a uniform-color quad (two triangles) the result is exact. */
 static void test_flat_color_quad(void) {
     rs_target_t t = target();
     rs_state_t st;
@@ -84,7 +84,7 @@ static void test_flat_color_quad(void) {
     CHECK(px(0, 0) == 0xFFFF0000u && px(7, 7) == 0xFFFF0000u && px(7, 0) == 0xFFFF0000u);
 }
 
-/* Textura 2x2 A8R8G8B8: cada cuadrante de un quad de 8x8 toma su texel. */
+/* A8R8G8B8 2x2 texture: each quadrant of an 8x8 quad takes its texel. */
 static void test_texture_2x2(void) {
     static const uint32_t texels[4] = {0xFF0000FFu, 0xFF00FF00u, 0xFFFF0000u, 0xFFFFFFFFu};
     rs_target_t t = target();
@@ -104,13 +104,13 @@ static void test_texture_2x2(void) {
     CHECK(rs_sample(&tex, 0.75f, 0.25f) == 0xFF00FF00u);
     CHECK(rs_sample(&tex, 0.25f, 0.75f) == 0xFFFF0000u);
     CHECK(rs_sample(&tex, 0.75f, 0.75f) == 0xFFFFFFFFu);
-    CHECK(rs_sample(&tex, -3.0f, 9.0f) == 0xFFFF0000u); /* coordenadas acotadas */
+    CHECK(rs_sample(&tex, -3.0f, 9.0f) == 0xFFFF0000u); /* clamped coordinates */
     memset(g_fb, 0, sizeof g_fb);
     rs_draw_triangle(&t, &tex, &st, &a, &b, &c);
     rs_draw_triangle(&t, &tex, &st, &b, &d, &c);
     CHECK(px(1, 1) == 0xFF0000FFu && px(6, 1) == 0xFF00FF00u);
     CHECK(px(1, 6) == 0xFFFF0000u && px(6, 6) == 0xFFFFFFFFu);
-    /* Swizzle 2x2 = lineal; en 4x4, (2,0) -> 4, (0,2) -> 8, (3,3) -> 15. */
+    /* Swizzle 2x2 = linear; in 4x4, (2,0) -> 4, (0,2) -> 8, (3,3) -> 15. */
     tex.swizzled = 1;
     CHECK(rs_sample(&tex, 0.75f, 0.25f) == 0xFF00FF00u);
     CHECK(rs_swizzle_offset(2, 0, 4, 4) == 4 && rs_swizzle_offset(0, 2, 4, 4) == 8);
@@ -135,7 +135,7 @@ static void test_a8_and_palette(void) {
     CHECK(rs_sample(&tex, 0.5f, 0.5f) == 0xFF336699u);
 }
 
-/* Mezcla SRC_ALPHA / ONE_MINUS_SRC_ALPHA de rojo al 50 % sobre azul, y prueba de alfa. */
+/* 50 % red SRC_ALPHA / ONE_MINUS_SRC_ALPHA blend over blue, and alpha test. */
 static void test_blend_and_alpha_test(void) {
     rs_target_t t = target();
     rs_state_t st;
@@ -151,13 +151,13 @@ static void test_blend_and_alpha_test(void) {
     st.dfactor = 0x303;
     rs_draw_triangle(&t, NULL, &st, &a, &b, &c);
     p = px(0, 0);
-    CHECK(((p >> 16) & 0xFF) >= 0x7E && ((p >> 16) & 0xFF) <= 0x81); /* rojo ~0.5 */
-    CHECK((p & 0xFF) >= 0x7E && (p & 0xFF) <= 0x81);                 /* azul ~0.5 */
+    CHECK(((p >> 16) & 0xFF) >= 0x7E && ((p >> 16) & 0xFF) <= 0x81); /* red ~0.5 */
+    CHECK((p & 0xFF) >= 0x7E && (p & 0xFF) <= 0x81);                 /* blue ~0.5 */
     st.blend = 0;
     st.alpha_test = 1;
     st.alpha_func = 0x204; /* GREATER */
     st.alpha_ref = 0x90;
-    CHECK(rs_draw_triangle(&t, NULL, &st, &a, &b, &c) == 0); /* 0x80 no pasa */
+    CHECK(rs_draw_triangle(&t, NULL, &st, &a, &b, &c) == 0); /* 0x80 does not pass */
     st.alpha_ref = 0x10;
     CHECK(rs_draw_triangle(&t, NULL, &st, &a, &b, &c) > 0);
 }
@@ -169,9 +169,9 @@ int main(void) {
     test_a8_and_palette();
     test_blend_and_alpha_test();
     if (g_failures) {
-        fprintf(stderr, "raster_test: %d de %d comprobaciones fallan\n", g_failures, g_checks);
+        fprintf(stderr, "raster_test: %d of %d checks fail\n", g_failures, g_checks);
         return 1;
     }
-    printf("raster_test: OK (%d comprobaciones)\n", g_checks);
+    printf("raster_test: OK (%d checks)\n", g_checks);
     return 0;
 }

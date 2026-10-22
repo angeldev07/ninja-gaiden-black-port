@@ -1,13 +1,13 @@
 /*
- * glpng.h: escritor PNG mínimo (RGBA8, sin dependencias) para guardar capturas del FBO.
+ * glpng.h: minimal PNG writer (RGBA8, no dependencies) to save FBO captures.
  *
- * Usa bloques deflate "stored" (sin comprimir): el archivo es más grande que uno
- * comprimido, pero cualquier visor lo abre y no hace falta zlib.
+ * Uses "stored" (uncompressed) deflate blocks: the file is larger than a compressed
+ * one, but any viewer opens it and zlib is not needed.
  */
 #pragma once
 
 #include <stddef.h>
 #include <stdint.h>
 
-/* Escribe `rgba` (width * height * 4, filas de arriba abajo) en `path`. 0 = bien, -1 = error. */
+/* Writes `rgba` (width * height * 4, rows top to bottom) to `path`. 0 = ok, -1 = error. */
 int glb_write_png(const char *path, int width, int height, const uint8_t *rgba);

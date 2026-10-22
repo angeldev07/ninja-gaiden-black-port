@@ -1,24 +1,24 @@
 /*
- * nv2a.c: registros MMIO del NV2A atendidos desde el VEH.
+ * nv2a.c: NV2A MMIO registers served from the VEH.
  *
- * Mecanismo (el mismo de H6 para el MMIO trazado, ahora con modelo):
- *   1. La región [0xFD000000, 0xFE000000) está reservada sin acceso. Un acceso falla.
- *   2. El VEH escribe en la página el valor modelado del registro (nv2a_value), la abre,
- *      pone TF y deja ejecutar esa única instrucción.
- *   3. En el SINGLE_STEP lee lo que quedó en la página: si era una escritura, aplica sus
- *      efectos (nv2a_write: W1C de interrupciones, DMA_PUT -> decodificar el FIFO...),
- *      guarda el valor en la sombra g_regs y vuelve a cerrar la página.
- * Coste: dos excepciones por acceso. En la init de D3D son unos miles; por frame D3D solo
- * toca PUT/GET y unos pocos registros, así que no compensa mapear "RAM salvo registros
- * con efectos". Un lock serializa los accesos de varios hilos.
+ * Mechanism (same as H6 for traced MMIO, now with a model):
+ *   1. The region [0xFD000000, 0xFE000000) is reserved with no access. An access faults.
+ *   2. The VEH writes the register's modeled value (nv2a_value) into the page, opens it,
+ *      sets TF and lets that single instruction run.
+ *   3. On SINGLE_STEP it reads what is left in the page: if it was a write, it applies its
+ *      effects (nv2a_write: W1C of interrupts, DMA_PUT -> decode the FIFO...), stores the
+ *      value in the g_regs shadow and closes the page again.
+ * Cost: two exceptions per access. In the D3D init that is a few thousand; per frame D3D
+ * only touches PUT/GET and a few registers, so mapping "RAM except registers with side
+ * effects" does not pay off. A lock serializes accesses from several threads.
  *
- * PRAMIN (0xFD700000, 1 MB) no pasa por aquí: es la RAM de instancias (RAMHT, RAMFC,
- * objetos DMA y de clase), el último MB de la RAM física. Una sección de 1 MB se mapea a
- * la vez en 0xFD700000 y en 0x83F00000 (su dirección en la ventana contigua), así que
- * D3D y nosotros vemos los mismos bytes por las dos rutas.
+ * PRAMIN (0xFD700000, 1 MB) does not go through here: it is the instance RAM (RAMHT, RAMFC,
+ * DMA and class objects), the last MB of physical RAM. A 1 MB section is mapped at both
+ * 0xFD700000 and 0x83F00000 (its address in the contiguous window), so D3D and we see the
+ * same bytes through both paths.
  *
- * Offsets: xemu hw/xbox/nv2a/nv2a_regs.h y nv2a.c (tabla de bloques); valores de lectura:
- * pmc.c, pbus.c, pfb.c, ptimer.c, pcrtc.c, pramdac.c, pfifo.c y user.c de xemu.
+ * Offsets: xemu hw/xbox/nv2a/nv2a_regs.h and nv2a.c (block table); read values:
+ * pmc.c, pbus.c, pfb.c, ptimer.c, pcrtc.c, pramdac.c, pfifo.c and user.c from xemu.
  */
 #include "nv2a.h"
 
@@ -28,7 +28,7 @@
 #include "../kernel/kernel.h"
 #include "../ngb.h"
 
-/* Registros con comportamiento propio (offset desde 0xFD000000). */
+/* Registers with their own behavior (offset from 0xFD000000). */
 #define PMC_BOOT_0 0x000000u
 #define PMC_INTR_0 0x000100u
 #define PMC_INTR_EN_0 0x000140u
@@ -70,7 +70,7 @@ typedef struct block {
     const char *name;
 } block_t;
 
-/* Tabla de bloques de xemu (nv2a.c, blocktable). */
+/* xemu block table (nv2a.c, blocktable). */
 static const block_t k_blocks[] = {
     {0x000000, 0x001000, "PMC"},     {0x001000, 0x001000, "PBUS"},
     {0x002000, 0x002000, "PFIFO"},   {0x007000, 0x001000, "PRMA"},
@@ -85,21 +85,21 @@ static const block_t k_blocks[] = {
 };
 #define NBLOCKS (sizeof k_blocks / sizeof k_blocks[0])
 
-static uint32_t g_regs[NV2A_MMIO_SIZE / 4];     /* sombra de lo escrito (BSS, bajo demanda) */
-static uint8_t g_seen[NV2A_MMIO_SIZE / 4 / 8];  /* registros ya anotados en el log */
+static uint32_t g_regs[NV2A_MMIO_SIZE / 4];     /* shadow of what was written (BSS, on demand) */
+static uint8_t g_seen[NV2A_MMIO_SIZE / 4 / 8];  /* registers already noted in the log */
 static uint32_t g_reads[NBLOCKS + 1], g_writes[NBLOCKS + 1];
 static CRITICAL_SECTION g_lock;
 static int g_ready;
-static uint8_t *g_ramin;        /* RAMIN accesible por el loader */
-static int g_pramin_mapped;     /* PRAMIN es RAM real (alias) y no pasa por el VEH */
-static uint32_t g_put, g_get;   /* canal 0 del FIFO (offsets en el objeto DMA) */
-static int g_push0_off, g_dmapush_off, g_fifo_off; /* pusher parado (CACHE1_PUSH0/DMA_PUSH bit 0 = 0) */
+static uint8_t *g_ramin;        /* RAMIN reachable by the loader */
+static int g_pramin_mapped;     /* PRAMIN is real RAM (alias) and does not go through the VEH */
+static uint32_t g_put, g_get;   /* FIFO channel 0 (offsets in the DMA object) */
+static int g_push0_off, g_dmapush_off, g_fifo_off; /* pusher stopped (CACHE1_PUSH0/DMA_PUSH bit 0 = 0) */
 static uint32_t g_pcrtc_pending, g_pmc_pending;
 static uint32_t g_raster;
 static LARGE_INTEGER g_t0, g_freq;
 static volatile LONG g_vblanks;
 
-/* Acceso en curso del hilo (entre el fallo y el paso a paso). */
+/* Access in progress for the thread (between the fault and the single step). */
 static __declspec(thread) uint32_t t_off, t_page, t_is_write, t_pending;
 
 static int block_index(uint32_t off) {
@@ -137,23 +137,23 @@ static int is_modelled(uint32_t off) {
     }
 }
 
-/* Reloj del PTIMER: nanosegundos desde el arranque (bits bajos de TIME_0 a cero). */
+/* PTIMER clock: nanoseconds since boot (low bits of TIME_0 zero). */
 static uint64_t ptimer_ns(void) {
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
     return (uint64_t)(now.QuadPart - g_t0.QuadPart) * 1000000000ull / (uint64_t)g_freq.QuadPart;
 }
 
-/* Valor que ve una lectura del registro `off` (alineado a 4). */
+/* Value seen by a read of register `off` (4-aligned). */
 static uint32_t nv2a_value(uint32_t off) {
     switch (off) {
     case PMC_BOOT_0: return 0x02A000A3u; /* NV2A, A03 (xemu pmc.c) */
     case PMC_INTR_0: return g_pmc_pending | (g_pcrtc_pending ? PMC_INTR_0_PCRTC : 0);
-    case PBUS_PCI_NV_0: return 0x02A010DEu; /* NVIDIA 10DE, dispositivo 02A0 */
-    case PBUS_PCI_NV_2: return 0x030000A1u; /* clase VGA, revisión A1 */
-    case PFIFO_RUNOUT_STATUS: return 1u << 4;              /* LOW_MARK: vacío */
-    case PFIFO_CACHE1_STATUS: return 1u << 4;              /* LOW_MARK: vacío */
-    case PFIFO_CACHE1_DMA_PUSH: return g_regs[off / 4] & ~(1u << 12); /* sin STATUS de parada */
+    case PBUS_PCI_NV_0: return 0x02A010DEu; /* NVIDIA 10DE, device 02A0 */
+    case PBUS_PCI_NV_2: return 0x030000A1u; /* VGA class, revision A1 */
+    case PFIFO_RUNOUT_STATUS: return 1u << 4;              /* LOW_MARK: empty */
+    case PFIFO_CACHE1_STATUS: return 1u << 4;              /* LOW_MARK: empty */
+    case PFIFO_CACHE1_DMA_PUSH: return g_regs[off / 4] & ~(1u << 12); /* no stop STATUS */
     case PFIFO_CACHE1_DMA_CTL: return g_regs[off / 4] | 0x80000000u;  /* VALID */
     case PFIFO_CACHE1_DMA_PUT: case USER_DMA_PUT: return g_put;
     case PFIFO_CACHE1_DMA_GET: case USER_DMA_GET: return pgraph_fifo_get(g_get);
@@ -162,23 +162,23 @@ static uint32_t nv2a_value(uint32_t off) {
     case PTIMER_TIME_0: return (uint32_t)(ptimer_ns() << 5);
     case PTIMER_TIME_1: return (uint32_t)(ptimer_ns() >> 27) & 0x1FFFFFFFu;
     case PFB_CSTATUS: return NGB_CONTIG_SIZE; /* 64 MB */
-    case PFB_WBC: return g_regs[off / 4] & ~(1u << 16); /* el flush termina al instante */
+    case PFB_WBC: return g_regs[off / 4] & ~(1u << 16); /* the flush finishes instantly */
     case PGRAPH_INTR: return 0;
-    case PGRAPH_STATUS: return 0; /* ocioso */
+    case PGRAPH_STATUS: return 0; /* idle */
     case PCRTC_INTR_0: return g_pcrtc_pending;
-    case PCRTC_RASTER: return (g_raster += 7) % 625; /* barrido que avanza */
-    case PRAMDAC_PLL_TEST_COUNTER: return 0xE8000000u; /* VPLL2, NVPLL, MPLL y VPLL enganchados */
+    case PCRTC_RASTER: return (g_raster += 7) % 625; /* advancing scan */
+    case PRAMDAC_PLL_TEST_COUNTER: return 0xE8000000u; /* VPLL2, NVPLL, MPLL and VPLL locked */
     default: return g_regs[off / 4];
     }
 }
 
-/* Efectos de una escritura; devuelve el valor que queda en el registro. */
+/* Effects of a write; returns the value left in the register. */
 static uint32_t nv2a_write(uint32_t off, uint32_t val) {
     if (off == PMC_INTR_EN_0 || off == PCRTC_INTR_EN_0 || off == 0x400140u || off == 0x002140u)
-        ngb_log("    · NV2A: habilitación de interrupciones %s = 0x%08X",
+        ngb_log("    · NV2A: interrupt enable %s = 0x%08X",
                 off == PMC_INTR_EN_0 ? "PMC_INTR_EN_0" : off == PCRTC_INTR_EN_0 ? "PCRTC_INTR_EN_0"
                 : off == 0x400140u ? "PGRAPH_INTR_EN" : "PFIFO_INTR_EN_0", val);
-    /* Traza del FIFO: todo lo que no es un PUT normal (reinicios de D3D, GET, instancia). */
+    /* FIFO trace: everything that is not a normal PUT (D3D resets, GET, instance). */
     if ((off >= 0x003200u && off < 0x003250u && off != PFIFO_CACHE1_DMA_PUT) || off == USER_DMA_GET ||
         ((off == PFIFO_CACHE1_DMA_PUT || off == USER_DMA_PUT) && val < g_put))
         ngb_log("    · NV2A: FIFO 0x%06X = 0x%08X (GET 0x%08X, PUT 0x%08X)", off, val, g_get, g_put);
@@ -187,7 +187,7 @@ static uint32_t nv2a_write(uint32_t off, uint32_t val) {
         g_pmc_pending &= ~val;
         return 0;
     case PCRTC_INTR_0:
-        g_pcrtc_pending &= ~val; /* W1C: D3D reconoce el vblank */
+        g_pcrtc_pending &= ~val; /* W1C: D3D acknowledges the vblank */
         return g_pcrtc_pending;
     case PFIFO_INTR_0: case PGRAPH_INTR: case PTIMER_INTR_0:
         return 0;
@@ -197,13 +197,13 @@ static uint32_t nv2a_write(uint32_t off, uint32_t val) {
         return val;
     case PFIFO_CACHE1_DMA_PUT: case USER_DMA_PUT:
         g_put = val;
-        if (!g_fifo_off) /* con el pusher parado, PUT solo se guarda (reinicio de D3D) */
+        if (!g_fifo_off) /* with the pusher stopped, PUT is only stored (D3D reset) */
             g_get = pgraph_kick(g_regs[PFIFO_CACHE1_DMA_INSTANCE / 4] & 0xFFFFu, g_get, g_put);
         return val;
     case PFIFO_CACHE1_PUSH0: case PFIFO_CACHE1_DMA_PUSH:
-        /* Bit 0 = ACCESS. Al reiniciar D3D lo baja, mueve GET/PUT a un push buffer nuevo
-         * (PUT = 0 antes que GET) y lo vuelve a subir: ejecutar ese PUT con el pusher parado
-         * recorría el push buffer viejo, ya liberado, durante millones de palabras. */
+        /* Bit 0 = ACCESS. On reset D3D lowers it, moves GET/PUT to a new push buffer
+         * (PUT = 0 before GET) and raises it again: executing that PUT with the pusher
+         * stopped walked the old, already freed push buffer for millions of words. */
         if (off == PFIFO_CACHE1_PUSH0)
             g_push0_off = !(val & 1u);
         else
@@ -216,7 +216,7 @@ static uint32_t nv2a_write(uint32_t off, uint32_t val) {
         g_regs[PFIFO_CACHE1_REF / 4] = val;
         return val;
     case PCRTC_START:
-        ngb_log("    · NV2A: PCRTC_START = 0x%08X (búfer que se muestra)", val & 0x07FFFFFFu);
+        ngb_log("    · NV2A: PCRTC_START = 0x%08X (displayed buffer)", val & 0x07FFFFFFu);
         return val & 0x07FFFFFFu;
     default:
         return val;
@@ -230,9 +230,9 @@ static void note_first_access(uint32_t off, int is_write, uint32_t value, uint32
         return;
     g_seen[idx / 8] |= (uint8_t)(1u << (idx % 8));
     name = block_name(off, &rel);
-    ngb_log("    · NV2A %s %s+0x%04X (0x%08X) = 0x%08X desde EIP 0x%08X%s",
-            is_write ? "escritura" : "lectura", name, rel, NV2A_MMIO_BASE + off, value, eip,
-            is_modelled(off) ? "" : " (desconocido: RAM, se lee lo último escrito)");
+    ngb_log("    · NV2A %s %s+0x%04X (0x%08X) = 0x%08X from EIP 0x%08X%s",
+            is_write ? "write" : "read", name, rel, NV2A_MMIO_BASE + off, value, eip,
+            is_modelled(off) ? "" : " (unknown: RAM, last written value is read)");
 }
 
 static int commit_page(uint32_t page) {
@@ -250,8 +250,8 @@ LONG nv2a_mmio_fault(EXCEPTION_RECORD *rec, CONTEXT *ctx) {
     if (!g_ready || addr < NV2A_MMIO_BASE || off >= NV2A_MMIO_SIZE || t_pending)
         return EXCEPTION_CONTINUE_SEARCH;
     if (g_pramin_mapped && off >= NV2A_PRAMIN && off - NV2A_PRAMIN < NV2A_PRAMIN_SIZE)
-        return EXCEPTION_CONTINUE_SEARCH; /* PRAMIN es RAM: un fallo ahí es un bug real */
-    ngb_kernel_enter(ngb_thread_current()); /* hasta el paso a paso: lock tomado */
+        return EXCEPTION_CONTINUE_SEARCH; /* PRAMIN is RAM: a fault there is a real bug */
+    ngb_kernel_enter(ngb_thread_current()); /* until the single step: lock held */
     EnterCriticalSection(&g_lock);
     if (!commit_page(page) ||
         !VirtualProtect((void *)(uintptr_t)page, 0x1000, PAGE_READWRITE, &old)) {
@@ -272,8 +272,8 @@ LONG nv2a_mmio_fault(EXCEPTION_RECORD *rec, CONTEXT *ctx) {
         g_reads[b < 0 ? NBLOCKS : (uint32_t)b]++;
     if (!t_is_write)
         note_first_access(aligned, 0, value, ctx->Eip);
-    ctx->EFlags |= 0x100; /* TF: vuelve en nv2a_single_step tras esta instrucción */
-    return EXCEPTION_CONTINUE_EXECUTION; /* el lock sigue tomado hasta el paso a paso */
+    ctx->EFlags |= 0x100; /* TF: comes back in nv2a_single_step after this instruction */
+    return EXCEPTION_CONTINUE_EXECUTION; /* the lock stays held until the single step */
 }
 
 int nv2a_single_step(CONTEXT *ctx) {
@@ -294,12 +294,12 @@ int nv2a_single_step(CONTEXT *ctx) {
     t_pending = 0;
     LeaveCriticalSection(&g_lock);
     ngb_kernel_leave(ngb_thread_current());
-    if (t_is_write) /* PUT o reactivación del pusher: puede haber un FLIP pendiente */
-        pgraph_pace(); /* fuera del lock del NV2A y de g_pg_lock (issue #35) */
+    if (t_is_write) /* PUT or pusher re-enable: a FLIP may be pending */
+        pgraph_pace(); /* outside the NV2A lock and g_pg_lock (issue #35) */
     return 1;
 }
 
-/* Accesos MMIO atendidos por el VEH (cada uno cuesta dos excepciones). */
+/* MMIO accesses served by the VEH (each one costs two exceptions). */
 uint32_t nv2a_mmio_count(void) {
     uint32_t i, n = 0;
     for (i = 0; i <= NBLOCKS; i++)
@@ -311,7 +311,7 @@ uint32_t nv2a_reg_read(uint32_t off) {
     return off < NV2A_MMIO_SIZE ? nv2a_value(off & ~3u) : 0;
 }
 
-/* Bytes accesibles desde la física dada (misma traducción que nv2a_phys), 0 si ninguno. */
+/* Bytes reachable from the given physical address (same translation as nv2a_phys), 0 if none. */
 uint32_t nv2a_phys_span(uint32_t phys) {
     MEMORY_BASIC_INFORMATION m;
     if (phys < NGB_CONTIG_SIZE)
@@ -325,13 +325,13 @@ uint32_t nv2a_phys_span(uint32_t phys) {
 
 uint8_t *nv2a_phys(uint32_t phys, uint32_t len) {
     MEMORY_BASIC_INFORMATION m;
-    if (phys < NGB_CONTIG_SIZE) /* RAM física: la arena contigua */
+    if (phys < NGB_CONTIG_SIZE) /* physical RAM: the contiguous arena */
         return NGB_CONTIG_SIZE - phys < len ? NULL : (uint8_t *)(uintptr_t)(NGB_CONTIG_BASE + phys);
     if (phys >= NGB_PHYS_XBE + NGB_RESERVE_BASE && phys < NGB_PHYS_XBE + NGB_RESERVE_END) {
-        uint32_t va = phys - NGB_PHYS_XBE; /* imagen del XBE (ver MmGetPhysicalAddress) */
+        uint32_t va = phys - NGB_PHYS_XBE; /* XBE image (see MmGetPhysicalAddress) */
         return NGB_RESERVE_END - va < len ? NULL : (uint8_t *)(uintptr_t)va;
     }
-    /* Memoria de NtAllocateVirtualMemory: MmGetPhysicalAddress devolvió la propia VA. */
+    /* NtAllocateVirtualMemory memory: MmGetPhysicalAddress returned the VA itself. */
     if (VirtualQuery((void *)(uintptr_t)phys, &m, sizeof m) && m.State == MEM_COMMIT &&
         (uintptr_t)m.BaseAddress + m.RegionSize - phys >= len)
         return (uint8_t *)(uintptr_t)phys;
@@ -367,7 +367,7 @@ int nv2a_init(const char *pgraph_log_path) {
     QueryPerformanceCounter(&g_t0);
     g_regs[PTIMER_NUMERATOR / 4] = 1;
     g_regs[PTIMER_DENOMINATOR / 4] = 1;
-    /* PRAMIN: una sección de 1 MB vista en 0x83F00000 (ventana contigua) y en 0xFD700000. */
+    /* PRAMIN: a 1 MB section seen at 0x83F00000 (contiguous window) and at 0xFD700000. */
     section = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, NV2A_PRAMIN_SIZE,
                                  NULL);
     a = section ? MapViewOfFileEx(section, FILE_MAP_ALL_ACCESS, 0, 0, NV2A_PRAMIN_SIZE,
@@ -378,15 +378,15 @@ int nv2a_init(const char *pgraph_log_path) {
           : NULL;
     g_ramin = (uint8_t *)a;
     g_pramin_mapped = b != NULL;
-    /* El resto del MMIO: reservado sin acceso (cada página se confirma al primer uso). */
+    /* The rest of the MMIO: reserved with no access (each page is confirmed on first use). */
     VirtualAlloc((void *)(uintptr_t)NV2A_MMIO_BASE, NV2A_PRAMIN, MEM_RESERVE, PAGE_NOACCESS);
     VirtualAlloc((void *)(uintptr_t)(NV2A_MMIO_BASE + NV2A_USER),
                  NV2A_MMIO_SIZE - NV2A_USER, MEM_RESERVE, PAGE_NOACCESS);
     if (!g_pramin_mapped)
         VirtualAlloc((void *)(uintptr_t)(NV2A_MMIO_BASE + NV2A_PRAMIN), NV2A_PRAMIN_SIZE,
                      MEM_RESERVE, PAGE_NOACCESS);
-    ngb_log("nv2a: MMIO en 0x%08X modelado; PRAMIN %s (RAMIN física 0x%08X en %p)",
-            NV2A_MMIO_BASE, g_pramin_mapped ? "alias de RAM" : "por el VEH (sin alias)",
+    ngb_log("nv2a: MMIO at 0x%08X modeled; PRAMIN %s (physical RAMIN 0x%08X at %p)",
+            NV2A_MMIO_BASE, g_pramin_mapped ? "RAM alias" : "via the VEH (no alias)",
             NV2A_RAMIN_PHYS, (void *)g_ramin);
     g_ready = 1;
     return pgraph_init(pgraph_log_path);
@@ -396,11 +396,11 @@ void nv2a_summary(void) {
     uint32_t i;
     if (!g_ready)
         return;
-    ngb_log("nv2a: accesos por bloque (lecturas/escrituras), %ld vblanks, GET 0x%08X PUT 0x%08X:",
+    ngb_log("nv2a: accesses per block (reads/writes), %ld vblanks, GET 0x%08X PUT 0x%08X:",
             (long)g_vblanks, g_get, g_put);
     for (i = 0; i <= NBLOCKS; i++)
         if (g_reads[i] || g_writes[i])
-            ngb_log("  %-8s %8u / %8u", i < NBLOCKS ? k_blocks[i].name : "otros", g_reads[i],
+            ngb_log("  %-8s %8u / %8u", i < NBLOCKS ? k_blocks[i].name : "other", g_reads[i],
                     g_writes[i]);
     pgraph_summary();
 }

@@ -1,15 +1,15 @@
 /*
- * rdoc.h: captura de un frame con RenderDoc (--rdoc-frame N). Ver rdoc.c.
+ * rdoc.h: single-frame capture with RenderDoc (--rdoc-frame N). See rdoc.c.
  */
 #ifndef NGB_RDOC_H
 #define NGB_RDOC_H
 
 #include <stdint.h>
 
-/* Carga la DLL de RenderDoc (antes de crear el contexto GL) si se pide el frame `frame` o la
- * tecla de captura (`hotkey`). 0 si queda lista o no se pidió nada. */
+/* Loads the RenderDoc DLL (before creating the GL context) if frame `frame` or the capture
+ * key (`hotkey`) is requested. 0 if it is ready or nothing was requested. */
 int rdoc_load(uint32_t frame, int hotkey);
-/* Tras presentar el frame `presented` (en el hilo de render): empieza o termina la captura. */
+/* After presenting frame `presented` (on the render thread): starts or ends the capture. */
 void rdoc_after_present(uint32_t presented);
 
 #endif

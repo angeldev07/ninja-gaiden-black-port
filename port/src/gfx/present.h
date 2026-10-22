@@ -1,25 +1,25 @@
 /*
- * present.h: presentador de frames del port (H7). Ventana Win32 + GDI en su propio hilo.
+ * present.h: port frame presenter (H7). Win32 window + GDI on its own thread.
  *
- * El juego (o el HLE de D3D) entrega cada frame con gfx_present(). La copia va a un back
- * buffer BGRA protegido con una sección crítica y la ventana la pinta con StretchDIBits:
- * escalado entero en vertical y aspecto 4:3 o 16:9, con bandas negras. Nada bloquea al
- * llamante más que la conversión del frame.
+ * The game (or the D3D HLE) hands over each frame with gfx_present(). The copy goes to a BGRA
+ * back buffer protected by a critical section and the window paints it with StretchDIBits:
+ * integer vertical scaling and 4:3 or 16:9 aspect, with black bars. Nothing blocks the
+ * caller except the frame conversion.
  *
- *   gfx_init("ngb", 720, 480, 2);                      // ventana de 1280x960 (4:3)
+ *   gfx_init("ngb", 720, 480, 2);                      // 1280x960 window (4:3)
  *   gfx_present(fb, 720, 480, 3072, GFX_FMT_A8R8G8B8);
- *   if (gfx_should_close()) ...                        // el usuario cerró la ventana
+ *   if (gfx_should_close()) ...                        // the user closed the window
  *
- * Teclas: F12 guarda el frame actual en %NGB_DATA%\runs\shots\shot-<fecha>.png (PNG de C
- * sin compresión; RGB, el alfa se ignora). El título muestra los FPS de gfx_present.
+ * Keys: F12 saves the current frame to %NGB_DATA%\runs\shots\shot-<date>.png (C PNG
+ * without compression; RGB, alpha is ignored). The title shows the FPS of gfx_present.
  *
- * Formatos (los nombres son los D3DFORMAT de Xbox; píxeles little endian):
- *   GFX_FMT_A8R8G8B8, GFX_FMT_X8R8G8B8: u32 0xAARRGGBB (en memoria: B, G, R, A)
+ * Formats (the names are the Xbox D3DFORMATs; little-endian pixels):
+ *   GFX_FMT_A8R8G8B8, GFX_FMT_X8R8G8B8: u32 0xAARRGGBB (in memory: B, G, R, A)
  *   GFX_FMT_R5G6B5: u16 RRRRRGGGGGGBBBBB
- * Con GFX_SWIZZLED (OR con el formato), los píxeles van en orden Morton de la NV2A (como
- * las superficies de color swizzled): se intercala un bit de x y otro de y empezando por el
- * menos significativo (xemu, generate_swizzle_masks). Las dimensiones deben ser potencias
- * de dos y `pitch` se ignora.
+ * With GFX_SWIZZLED (ORed with the format), pixels are in NV2A Morton order (like
+ * swizzled color surfaces): one bit of x and one of y are interleaved starting from the
+ * least significant (xemu, generate_swizzle_masks). Dimensions must be powers
+ * of two and `pitch` is ignored.
  */
 #pragma once
 
@@ -35,7 +35,7 @@ enum gfx_format {
     GFX_FMT_R5G6B5 = 3,
 };
 #define GFX_FMT_MASK 0xFFu
-#define GFX_SWIZZLED 0x100u /* flag: superficie en orden Morton (NV2A) */
+#define GFX_SWIZZLED 0x100u /* flag: surface in Morton order (NV2A) */
 
 enum gfx_aspect {
     GFX_ASPECT_4_3 = 0,
@@ -46,46 +46,46 @@ enum gfx_aspect {
 
 typedef struct gfx_config {
     const char *title;  /* UTF-8 */
-    int width, height;  /* tamaño lógico del frame (720x480 en NTSC) */
-    int scale;          /* escala entera inicial de la ventana (1..8) */
-    int aspect;         /* GFX_ASPECT_4_3 o GFX_ASPECT_16_9 */
-    int hidden;         /* 1: la ventana existe pero no se muestra (tests sin pantalla) */
+    int width, height;  /* logical frame size (720x480 on NTSC) */
+    int scale;          /* initial integer window scale (1..8) */
+    int aspect;         /* GFX_ASPECT_4_3 or GFX_ASPECT_16_9 */
+    int hidden;         /* 1: the window exists but is not shown (screenless tests) */
 } gfx_config_t;
 
-/* Crea la ventana en su propio hilo. 0 si todo fue bien. Solo una ventana por proceso. */
+/* Creates the window on its own thread. 0 if all went well. Only one window per process. */
 int gfx_init(const char *title, int width, int height, int scale);
 int gfx_init_ex(const gfx_config_t *config);
 
-/* Copia y convierte un frame. `format` = GFX_FMT_* [| GFX_SWIZZLED]. 0 si se aceptó; -1 si
- * el formato o las dimensiones no son válidos o la ventana no existe. */
+/* Copies and converts a frame. `format` = GFX_FMT_* [| GFX_SWIZZLED]. 0 if accepted; -1 if
+ * the format or the dimensions are not valid or the window does not exist. */
 int gfx_present(const void *pixels, int width, int height, int pitch, unsigned format);
 
-/* Atiende peticiones pendientes (captura). Devuelve lo mismo que gfx_should_close(). */
+/* Serves pending requests (capture). Returns the same as gfx_should_close(). */
 int gfx_poll(void);
-/* 1 cuando el usuario cerró la ventana: el loader debe parar limpio. */
+/* 1 when the user closed the window: the loader must stop cleanly. */
 int gfx_should_close(void);
 
-/* Guarda el último frame como PNG. `path` NULL = %NGB_DATA%\runs\shots\shot-<fecha>.png.
- * La ruta usada va a `out_path` si no es NULL. 0 si se escribió. */
+/* Saves the last frame as PNG. `path` NULL = %NGB_DATA%\runs\shots\shot-<date>.png.
+ * The path used goes to `out_path` if it is not NULL. 0 if it was written. */
 int gfx_screenshot(const char *path, char *out_path, size_t out_len);
 
-/* Copia el último frame (BGRA, 4 bytes por píxel, fila a fila) a `dst` si caben
- * `dst_pixels` píxeles; devuelve sus dimensiones. 0 si había frame. Para los tests. */
+/* Copies the last frame (BGRA, 4 bytes per pixel, row by row) to `dst` if `dst_pixels`
+ * pixels fit; returns its dimensions. 0 if there was a frame. For the tests. */
 int gfx_copy_frame(void *dst, size_t dst_pixels, int *width, int *height);
 
-/* Render externo (OpenGL, H7c): otro hilo dibuja en la ventana. Con `on` = 1, WM_PAINT ya
- * no pinta con GDI y gfx_note_frame() cuenta los frames para los FPS del título. */
-void *gfx_hwnd(void); /* HWND de la ventana, o NULL */
+/* External render (OpenGL, H7c): another thread draws in the window. With `on` = 1, WM_PAINT
+ * no longer paints with GDI and gfx_note_frame() counts the frames for the title FPS. */
+void *gfx_hwnd(void); /* HWND of the window, or NULL */
 void gfx_set_external(int on);
 void gfx_note_frame(void);
 
-/* FPS medidos en el último segundo. */
+/* FPS measured over the last second. */
 double gfx_fps(void);
 
-/* Cierra la ventana y espera a su hilo. */
+/* Closes the window and waits for its thread. */
 void gfx_shutdown(void);
 
-/* Utilidades públicas (las usan los tests). */
+/* Public utilities (used by the tests). */
 size_t gfx_swizzle_offset(unsigned x, unsigned y, unsigned width, unsigned height);
 int gfx_write_png(const char *path, const void *bgra, int width, int height);
 

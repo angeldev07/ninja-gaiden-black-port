@@ -1,24 +1,24 @@
 /*
- * pgraph_gl.c: render de PGRAPH con OpenGL 4.x (H7c). Ver pgraph_gl.h.
+ * pgraph_gl.c: PGRAPH render with OpenGL 4.x (H7c). See pgraph_gl.h.
  *
- * Hilos y contexto. El kick del push buffer llega desde el VEH, en el hilo del juego que
- * escribió DMA_PUT, con el lock del NV2A tomado. Ese hilo tiene el TEB parcheado (fs:[0x20]
- * y fs:[0x28] son del KPCR falso), una pila propia y puede ser cualquiera de los hilos Xbox.
- * Un contexto GL solo puede estar actual en un hilo, y el driver no debería ejecutarse con
- * un TEB así. Por eso hay un hilo de render limpio, el único que llama a GL: pgraph_kick le
- * pasa el kick entero (decodificación incluida) y espera con un par de eventos. Cuesta dos
- * cambios de hilo por kick (unos 5 por frame en el menú), a cambio de no tener que copiar
- * el estado a una cola de comandos.
+ * Threads and context. The push buffer kick arrives from the VEH, on the game thread that
+ * wrote DMA_PUT, with the NV2A lock held. That thread has a patched TEB (fs:[0x20]
+ * and fs:[0x28] belong to the fake KPCR), its own stack, and may be any of the Xbox threads.
+ * A GL context can only be current on one thread, and the driver should not run with
+ * such a TEB. That is why there is a clean render thread, the only one that calls GL:
+ * pgraph_kick hands it the whole kick (decoding included) and waits with a pair of events.
+ * It costs two thread switches per kick (about 5 per frame in the menu), in exchange for not
+ * having to copy the state into a command queue.
  *
- * Superficies. Cada render target (color o zeta) es una textura GL indexada por su
- * dirección física (rcache.c). Se dibuja con la fila 0 arriba, como en la memoria de la
- * Xbox: así una superficie se puede muestrear como textura con las mismas coordenadas que
- * una textura subida desde la RAM, y el present la voltea al copiarla a la ventana.
+ * Surfaces. Each render target (color or zeta) is a GL texture indexed by its
+ * physical address (rcache.c). It is drawn with row 0 at the top, as in Xbox memory:
+ * this way a surface can be sampled as a texture with the same coordinates as
+ * a texture uploaded from RAM, and the present flips it when copying it to the window.
  *
- * Shaders. Los vertex programs (0x0B00 + LOAD/START) se traducen con nv2a_vsh_to_glsl y
- * los register combiners con nv2a_psh_to_glsl; con el modo de transformación fijo se usa un
- * shader propio con la matriz compuesta (0x0680). Se cachean por el hash del microcódigo y
- * de las palabras de los combiners.
+ * Shaders. Vertex programs (0x0B00 + LOAD/START) are translated with nv2a_vsh_to_glsl and
+ * the register combiners with nv2a_psh_to_glsl; in fixed transform mode its own
+ * shader with the composite matrix (0x0680) is used. They are cached by the hash of the
+ * microcode and of the combiner words.
  */
 #include "pgraph_gl.h"
 
@@ -51,23 +51,23 @@
 
 typedef BOOL(WINAPI *swap_interval_fn)(int);
 
-/* Grupos de uniforms y los métodos de los que salen (rangos [lo, hi) en bytes, hasta dos).
- * Un grupo se sube cuando alguno de sus bloques de métodos ha cambiado desde la última subida
- * a ese programa: así un draw que solo cambia la model-view sube 16 vec4, no 250. */
+/* Uniform groups and the methods they come from (ranges [lo, hi) in bytes, up to two).
+ * A group is uploaded when any of its method blocks has changed since the last upload
+ * to that program: this way a draw that only changes the model-view uploads 16 vec4, not 250. */
 enum { UG_COMP, UG_MV, UG_INV, UG_TM, UG_PLANE, UG_LIGHT, UG_MAT, UG_FFI, UG_PSC, UG_BUMP, UG_N };
 static const struct {
     uint16_t lo, hi, lo2, hi2;
 } k_ug[UG_N] = {
-    {0x0680, 0x06C0, 0, 0},           /* matriz compuesta */
+    {0x0680, 0x06C0, 0, 0},           /* composite matrix */
     {0x0480, 0x0580, 0, 0},           /* 4 model-view */
-    {0x0580, 0x0680, 0, 0},           /* sus inversas */
-    {0x06C0, 0x07C0, 0, 0},           /* matrices de textura */
-    {0x0840, 0x0940, 0, 0},           /* planos de texgen */
-    {0x1000, 0x1400, 0, 0},           /* 8 luces */
-    {0x03A8, 0x03B8, 0x0A10, 0x0A20}, /* material y ambiente de escena */
-    {0x0280, 0x0440, 0, 0},           /* control, color material, texgen y skinning (ffI) */
-    {0x0A60, 0x0AA0, 0, 0},           /* psC0 y psC1 */
-    {0x1B00, 0x1C00, 0, 0},           /* bump de las 4 etapas */
+    {0x0580, 0x0680, 0, 0},           /* their inverses */
+    {0x06C0, 0x07C0, 0, 0},           /* texture matrices */
+    {0x0840, 0x0940, 0, 0},           /* texgen planes */
+    {0x1000, 0x1400, 0, 0},           /* 8 lights */
+    {0x03A8, 0x03B8, 0x0A10, 0x0A20}, /* material and scene ambient */
+    {0x0280, 0x0440, 0, 0},           /* control, color material, texgen and skinning (ffI) */
+    {0x0A60, 0x0AA0, 0, 0},           /* psC0 and psC1 */
+    {0x1B00, 0x1C00, 0, 0},           /* bump of the 4 stages */
 };
 
 typedef struct gl_prog {
@@ -75,14 +75,14 @@ typedef struct gl_prog {
     GLuint prog;
     int failed;
     GLint u_c, u_surface, u_clip, u_ffmat;
-    GLint u_ffmv, u_ffinv, u_fftm, u_ffplane, u_ffl, u_ffm, u_ffi; /* pipeline fijo */
+    GLint u_ffmv, u_ffinv, u_fftm, u_ffplane, u_ffl, u_ffm, u_ffi; /* fixed pipeline */
     GLint u_psc0, u_psc1, u_fc0, u_fc1, u_fog, u_bump, u_bscale, u_boff;
     GLint u_atest, u_afunc, u_aref, u_texscale, u_tex[4], u_fogcfg, u_fogparam;
-    uint32_t ug_mask;      /* grupos de uniforms que usa el programa (bits UG_*) */
-    uint64_t ug_up[UG_N];  /* sello + 1 de cada grupo en su última subida (0 = nunca) */
-    uint64_t c_up;         /* sello + 1 de la última subida de c[] (0 = nunca) */
-    int c_n;               /* elementos activos de c[] con locations seguidas (0 = se sube entero) */
-    uint64_t misc_hash;    /* del resto de uniforms subidos por última vez (0 = nunca) */
+    uint32_t ug_mask;      /* uniform groups the program uses (UG_* bits) */
+    uint64_t ug_up[UG_N];  /* stamp + 1 of each group at its last upload (0 = never) */
+    uint64_t c_up;         /* stamp + 1 of the last upload of c[] (0 = never) */
+    int c_n;               /* active elements of c[] with consecutive locations (0 = uploaded whole) */
+    uint64_t misc_hash;    /* of the rest of the uniforms last uploaded (0 = never) */
 } gl_prog;
 
 static struct {
@@ -97,7 +97,7 @@ static struct {
     uint32_t copy_w, copy_h;
     rc_surfaces surf;
     rc_textures tex;
-    uint32_t color_addr, zeta_addr; /* destino actual (0 = ninguno) */
+    uint32_t color_addr, zeta_addr; /* current target (0 = none) */
     uint32_t target_w, target_h;
     int has_color, has_zeta;
     uint32_t present_addr;
@@ -111,25 +111,25 @@ static struct {
     char vs_text[SHADER_TEXT], fs_text[SHADER_TEXT];
     vsh_program vp;
     swap_interval_fn swap_interval;
-    /* estadísticas */
+    /* statistics */
     uint32_t draws, clears, flips, skipped, prog_errors, tex_errors, state_errors;
     uint32_t surf_created, surf_dropped, tex_uploads, rtt_binds, feedback_copies, ff_draws;
     uint32_t present_other, tex_hash_skipped, trace_n;
-    uint32_t epoch; /* sube en cada frame (scan_written_pages) */
-    /* Estado incremental: lo último que se aplicó a GL. */
+    uint32_t epoch; /* increases every frame (scan_written_pages) */
+    /* Incremental state: the last thing applied to GL. */
     int state_valid, target_valid;
     uint32_t target_key[8];
     nv2a_state last_state;
     gl_state last_gl;
     GLuint cur_prog;
     char first_error[256];
-    /* Páginas escritas por la CPU (write watch de la arena, ngb_contig_written). */
+    /* Pages written by the CPU (arena write watch, ngb_contig_written). */
     int ww_ok;
     uint32_t ww_buf[RC_DIRTY_PAGES];
     rc_dirty dirty;
 } R;
 
-/* Desglose del dibujo con QPC (pgl_perf_take): dónde se va el tiempo de cada draw. */
+/* Breakdown of the draw with QPC (pgl_perf_take): where the time of each draw goes. */
 enum { PF_TARGET, PF_INDEX, PF_PROG, PF_STATE, PF_TEX, PF_UNIF, PF_VERT, PF_DRAW, PF_FLIP, PF_WATCH, PF_N };
 static struct {
     LONGLONG t[PF_N];
@@ -142,7 +142,7 @@ static LONGLONG pf_now(void) {
     return t.QuadPart;
 }
 
-/* Suma a la fase `k` el tiempo desde `*t0` y deja `*t0` en ahora. */
+/* Adds to phase `k` the time since `*t0` and sets `*t0` to now. */
 static void pf_lap(int k, LONGLONG *t0) {
     LONGLONG now = pf_now();
     P.t[k] += now - *t0;
@@ -150,8 +150,8 @@ static void pf_lap(int k, LONGLONG *t0) {
 }
 
 void pgl_perf_take(char *out, size_t outlen, uint32_t frames) {
-    static const char *names[PF_N] = {"destino", "índices", "programa", "estado", "texturas",
-                                      "uniforms", "vértices", "draw", "flip", "write-watch"};
+    static const char *names[PF_N] = {"target", "indices", "program", "state", "textures",
+                                      "uniforms", "vertices", "draw", "flip", "write-watch"};
     LARGE_INTEGER f;
     size_t n;
     int k;
@@ -165,8 +165,8 @@ void pgl_perf_take(char *out, size_t outlen, uint32_t frames) {
         n += (size_t)snprintf(out + n, outlen - n, " %s %.2f", names[k], (double)P.t[k] * per);
     if (n < outlen)
         snprintf(out + n, outlen - n,
-                 "; por frame: %.0f draws (%.0f con los vértices ya en la GPU), %.0f vértices subidos, %.1f superficies nuevas, %.1f "
-                 "texturas subidas, %.0f hashes de textura, %.0f cambios de estado, %.0f de uniforms (%.0f vec4)",
+                 "; per frame: %.0f draws (%.0f with the vertices already on the GPU), %.0f vertices uploaded, %.1f new surfaces, %.1f "
+                 "textures uploaded, %.0f texture hashes, %.0f state changes, %.0f uniforms (%.0f vec4)",
                  (double)P.draws / frames, (double)P.vc_hits / frames, (double)P.verts / frames, (double)P.surf_new / frames,
                  (double)P.tex_up / frames, (double)P.tex_hash / frames, (double)P.state_sets / frames,
                  (double)P.unif_sets / frames, (double)P.unif_vec4 / frames);
@@ -194,7 +194,7 @@ static void *grow(void *p, size_t *cap, size_t need) {
     return q;
 }
 
-/* ---------------------------------------------------------------- hilo de render ---- */
+/* ---------------------------------------------------------------- render thread ---- */
 
 static int setup_objects(void) {
     ngl_glGenFramebuffers(1, &R.fbo);
@@ -206,7 +206,7 @@ static int setup_objects(void) {
     R.ww_ok = ngb_contig_written(R.ww_buf, RC_DIRTY_PAGES) != (size_t)-1;
     R.swap_interval = (swap_interval_fn)(void *)wglGetProcAddress("wglSwapIntervalEXT");
     if (R.swap_interval)
-        R.swap_interval(0); /* el ritmo lo pone el pacing de FLIP_STALL, no el vsync */
+        R.swap_interval(0); /* the pace is set by the FLIP_STALL pacing, not by vsync */
     return glGetError() == GL_NO_ERROR ? 0 : GLB_ERR_GL;
 }
 
@@ -232,16 +232,16 @@ static DWORD WINAPI render_main(LPVOID param) {
 int pgl_start(HWND hwnd, char *why, size_t whylen) {
     const glb_info *info;
     if (!hwnd) {
-        snprintf(why, whylen, "sin ventana");
+        snprintf(why, whylen, "no window");
         return GLB_ERR_ARGS;
     }
     R.hwnd = hwnd;
-    rdoc_load(g_ngb_opts.rdoc_frame, g_ngb_opts.rdoc_key); /* antes de crear el contexto GL */
+    rdoc_load(g_ngb_opts.rdoc_frame, g_ngb_opts.rdoc_key); /* before creating the GL context */
     R.req = CreateEventA(NULL, FALSE, FALSE, NULL);
     R.done = CreateEventA(NULL, FALSE, FALSE, NULL);
     R.thread = R.req && R.done ? CreateThread(NULL, 1 << 20, render_main, NULL, 0, NULL) : NULL;
     if (!R.thread) {
-        snprintf(why, whylen, "no se pudo crear el hilo de render");
+        snprintf(why, whylen, "could not create the render thread");
         return GLB_ERR_ARGS;
     }
     ngb_pin_hardware_thread(R.thread);
@@ -269,10 +269,10 @@ void pgl_call(void (*fn)(void *), void *arg) {
 void pgl_post(void (*fn)(void *), void *arg) {
     R.fn = fn;
     R.arg = arg;
-    SetEvent(R.req); /* R.done queda señalado al volver y nadie lo espera */
+    SetEvent(R.req); /* R.done is left signaled on return and nobody waits for it */
 }
 
-/* ---------------------------------------------------------------- estado ---- */
+/* ---------------------------------------------------------------- state ---- */
 
 void pgl_regs_defaults(pgl_regs *r) {
     nv2a_state s;
@@ -298,7 +298,7 @@ void pgl_regs_defaults(pgl_regs *r) {
         r->vconst[i][0] = r->vconst[i][1] = r->vconst[i][2] = 0.0f;
         r->vconst[i][3] = 1.0f;
     }
-    r->vconst[3][0] = r->vconst[3][1] = r->vconst[3][2] = 1.0f; /* difuso blanco */
+    r->vconst[3][0] = r->vconst[3][1] = r->vconst[3][2] = 1.0f; /* white diffuse */
 }
 
 static float as_float(uint32_t w) {
@@ -350,27 +350,27 @@ static void state_from_regs(const pgl_regs *r, nv2a_state *s) {
     s->fog_params[2] = as_float(M(r, 0x09C8));
 }
 
-/* Aplica el estado fijo. Devuelve lo aplicado (para los uniforms de alpha test). */
+/* Applies the fixed state. Returns what was applied (for the alpha test uniforms). */
 static void apply_state(const pgl_regs *r, gl_state *out) {
     nv2a_state s;
     uint32_t ch = M(r, 0x0200), cv = M(r, 0x0204);
     int err;
     state_from_regs(r, &s);
     if (R.state_valid && !memcmp(&s, &R.last_state, sizeof s)) {
-        *out = R.last_gl; /* nada ha cambiado desde el draw anterior */
+        *out = R.last_gl; /* nothing has changed since the previous draw */
         return;
     }
     P.state_sets++;
     err = glstate_apply(&s, out);
     if (err) {
         R.state_errors++;
-        note_error("estado NV097 no traducible (%s): blend %X/%X eq %X depth %X", glstate_error_text(err),
+        note_error("NV097 state not translatable (%s): blend %X/%X eq %X depth %X", glstate_error_text(err),
                    s.blend_sfactor, s.blend_dfactor, s.blend_equation, s.depth_func);
         nv2a_state_defaults(&s, R.target_w, R.target_h);
         glstate_apply(&s, out);
     }
-    /* glstate invierte el scissor porque supone la Y de OpenGL; aquí la fila 0 es la de
-     * arriba, como en la Xbox, así que va tal cual. La cara frontal sí queda invertida (ver
+    /* glstate flips the scissor because it assumes OpenGL's Y; here row 0 is the top one,
+     * as on the Xbox, so it goes as is. The front face does stay inverted (see
      * glstate.c). */
     glEnable(GL_SCISSOR_TEST);
     if (ch >> 16 && cv >> 16)
@@ -382,7 +382,7 @@ static void apply_state(const pgl_regs *r, gl_state *out) {
     R.state_valid = 1;
 }
 
-/* ---------------------------------------------------------------- superficies ---- */
+/* ---------------------------------------------------------------- surfaces ---- */
 
 static void delete_textures(const unsigned *dead, int n) {
     int i;
@@ -398,18 +398,18 @@ static int color_bpp(uint32_t cf) {
 
 static uint64_t surface_sig(const rc_surface *s);
 
-/* 1 si la CPU pudo escribir en [phys, phys + len) después del frame `since` (sin write watch,
- * o fuera de la RAM física, siempre 1: hay que mirar el contenido). */
+/* 1 if the CPU may have written to [phys, phys + len) after frame `since` (without write watch,
+ * or outside the physical RAM, always 1: the content must be looked at). */
 static int cpu_wrote(uint32_t phys, uint32_t len, uint32_t since) {
     return !R.ww_ok || rc_dirty_last(&R.dirty, phys, len) > since;
 }
 
-/* Fin de frame: marca con una época nueva las páginas que la CPU escribió desde el anterior.
- * Las cachés guardan la época en que comprobaron cada objeto. Se hace una vez por frame
- * (unos 50 µs: GetWriteWatch recorre las 16 k páginas de la arena; en cada kick costaba
- * 1,7 ms por frame), así que una escritura de la CPU se ve en el frame siguiente: las
- * texturas que la CPU reescribe cada frame (el vídeo) van un frame por detrás, y los
- * vértices que se reescriben se marcan como volátiles y se suben siempre. */
+/* End of frame: marks with a new epoch the pages the CPU wrote since the previous one.
+ * The caches store the epoch at which they checked each object. It is done once per frame
+ * (about 50 µs: GetWriteWatch walks the 16 k pages of the arena; on every kick it cost
+ * 1.7 ms per frame), so a CPU write is seen on the next frame: the
+ * textures the CPU rewrites every frame (video) lag one frame behind, and the
+ * vertices that get rewritten are marked volatile and always uploaded. */
 static void scan_written_pages(void) {
     LONGLONG t0 = pf_now();
     size_t n = ngb_contig_written(R.ww_buf, RC_DIRTY_PAGES);
@@ -423,11 +423,11 @@ static void scan_written_pages(void) {
 }
 
 void pgl_kick_begin(void) {
-    /* Reservado: el write watch se recoge en el flip (ver scan_written_pages). */
+    /* Reserved: the write watch is collected at the flip (see scan_written_pages). */
 }
 
-/* Crea la textura de una superficie. Si es de color de 32 bits y lineal, se inicializa con
- * lo que haya en la RAM (el juego puede haberla escrito con la CPU). */
+/* Creates a surface's texture. If it is a 32-bit linear color one, it is initialized with
+ * whatever is in RAM (the game may have written it with the CPU). */
 static void create_surface_texture(rc_surface *s, uint32_t pitch, int swizzled) {
     GLuint t;
     glGenTextures(1, &t);
@@ -465,16 +465,16 @@ static rc_surface *get_surface(int kind, uint32_t addr, uint32_t pitch, uint32_t
     return s;
 }
 
-/* Firma de la RAM de una superficie (ver rc_surface.mem_sig). */
+/* Signature of a surface's RAM (see rc_surface.mem_sig). */
 static uint64_t surface_sig(const rc_surface *s) {
     const uint8_t *p = nv2a_phys(s->addr, s->bytes);
     return p ? rc_sparse_hash(p, s->bytes) : 0;
 }
 
-/* Prepara el FBO con la superficie de color y la de zeta actuales. 0 si no hay destino.
- * Solo se adjunta lo que se va a usar (como xemu): D3D deja programadas una zeta en la
- * dirección 0 en pasadas sin profundidad y un color en la 0 en las sombras (máscara de color
- * a 0); adjuntarlas hacía que se pisaran entre sí y se recrearan dos texturas por frame. */
+/* Prepares the FBO with the current color and zeta surfaces. 0 if there is no target.
+ * Only what will be used is attached (like xemu): D3D leaves a zeta programmed at
+ * address 0 in passes without depth and a color at 0 in shadows (color mask
+ * at 0); attaching them made them overwrite each other and recreated two textures per frame. */
 static int bind_target(const pgl_regs *r, int need_color, int need_zeta) {
     uint32_t ch = M(r, 0x0200), cv = M(r, 0x0204), fmt = M(r, 0x0208), pitch = M(r, 0x020C);
     uint32_t w = (ch >> 16) + (ch & 0xFFFF), h = (cv >> 16) + (cv & 0xFFFF);
@@ -484,7 +484,7 @@ static int bind_target(const pgl_regs *r, int need_color, int need_zeta) {
     rc_surface *c = NULL, *z = NULL;
     if (!(ch >> 16) || !(cv >> 16) || w > 4096 || h > 4096)
         return 0;
-    /* Mismo destino que el draw anterior: el FBO ya está listo. */
+    /* Same target as the previous draw: the FBO is already ready. */
     key[0] = ch;
     key[1] = cv;
     key[2] = fmt;
@@ -497,7 +497,7 @@ static int bind_target(const pgl_regs *r, int need_color, int need_zeta) {
         return R.has_color || R.has_zeta;
     memcpy(R.target_key, key, sizeof key);
     R.target_valid = 1;
-    R.state_valid = 0; /* el scissor y el viewport dependen del destino */
+    R.state_valid = 0; /* the scissor and the viewport depend on the target */
     if (cf && pgraph_dma_base(0x194, &base)) {
         caddr = base + M(r, 0x0210);
         c = get_surface(RC_COLOR, caddr, pitch & 0xFFFF, w, h, cf, swz);
@@ -509,8 +509,8 @@ static int bind_target(const pgl_regs *r, int need_color, int need_zeta) {
     if (zf && pgraph_dma_base(0x198, &base)) {
         zaddr = base + M(r, 0x0214);
         z = get_surface(RC_ZETA, zaddr, pitch >> 16, w, h, zf, swz);
-        /* Pedir la zeta puede haber reciclado (LRU) o invalidado (solape) la entrada del color
-         * (issue #43): se revalida; si la zeta no puede convivir con él, se queda sin zeta. */
+        /* Requesting the zeta may have recycled (LRU) or invalidated (overlap) the color entry
+         * (issue #43): it is revalidated; if the zeta cannot coexist with it, it goes without zeta. */
         if (c && (!c->used || c->kind != RC_COLOR || c->addr != caddr)) {
             c = get_surface(RC_COLOR, caddr, pitch & 0xFFFF, w, h, cf, swz);
             if (c)
@@ -536,11 +536,11 @@ static int bind_target(const pgl_regs *r, int need_color, int need_zeta) {
     R.target_h = h;
     glViewport(0, 0, (GLsizei)w, (GLsizei)h);
     if (c && (ch >> 16) == 720)
-        R.present_addr = caddr; /* el búfer que acabará en pantalla (como el rasterizador) */
+        R.present_addr = caddr; /* the buffer that will end up on screen (like the rasterizer) */
     return 1;
 }
 
-/* ---------------------------------------------------------------- texturas ---- */
+/* ---------------------------------------------------------------- textures ---- */
 
 static GLint wrap_mode(uint32_t v) {
     switch (v) {
@@ -585,8 +585,8 @@ static void upload_levels(GLuint t, const texconv_desc *d, const uint8_t *data) 
     glTexParameteri(target, GL_TEXTURE_MAX_LEVEL, d->levels - 1);
 }
 
-/* Copia la superficie de color actual a una textura aparte: el juego la está leyendo como
- * textura mientras dibuja en ella, y GL no admite ese bucle. */
+/* Copies the current color surface to a separate texture: the game is reading it as a
+ * texture while drawing into it, and GL does not allow that loop. */
 static GLuint feedback_copy(rc_surface *s) {
     if (!R.copy_tex || R.copy_w != s->width || R.copy_h != s->height) {
         if (!R.copy_tex)
@@ -605,7 +605,7 @@ static GLuint feedback_copy(rc_surface *s) {
     return R.copy_tex;
 }
 
-/* Textura de la etapa `i`: una superficie (render-to-texture) o la caché de texturas. */
+/* Texture of stage `i`: a surface (render-to-texture) or the texture cache. */
 static GLuint stage_texture(const pgl_regs *r, int i, GLenum *target, float scale[2]) {
     uint32_t mb = 0x1B00u + 0x40u * (uint32_t)i, fmt = M(r, mb + 4), base, phys, pal = M(r, mb + 0x20);
     uint32_t pal_phys = 0;
@@ -626,14 +626,14 @@ static GLuint stage_texture(const pgl_regs *r, int i, GLenum *target, float scal
     derr = texconv_describe(fmt, M(r, mb + 0x10), M(r, mb + 0x1C), glb_has_s3tc(), &d);
     {
         uint32_t c = (fmt >> 8) & 0xFFu;
-        /* Textura de profundidad (mapa de sombras): la superficie Z que el juego dibujó antes
-           en este frame ya es una textura GL; no hay nada que convertir de la memoria. */
+        /* Depth texture (shadow map): the Z surface the game drew earlier
+           in this frame is already a GL texture; there is nothing to convert from memory. */
         s = rc_surface_find(&R.surf, c >= 0x2A && c <= 0x31 ? RC_ZETA : RC_COLOR, phys);
     }
     if (s && s->gl_tex && !(R.has_color && s->addr == R.color_addr) &&
         cpu_wrote(s->addr, s->bytes, s->drawn_frame) && surface_sig(s) != s->mem_sig) {
-        /* La CPU ha escrito otra cosa en la memoria de la superficie (una textura cargada
-         * donde antes había un render target): la superficie ya no vale. */
+        /* The CPU wrote something else into the surface's memory (a texture loaded
+         * where there used to be a render target): the surface is no longer valid. */
         GLuint g = rc_surface_drop(s);
         glDeleteTextures(1, &g);
         R.target_valid = 0;
@@ -652,7 +652,7 @@ static GLuint stage_texture(const pgl_regs *r, int i, GLenum *target, float scal
     }
     if (derr) {
         R.tex_errors++;
-        note_error("textura de la etapa %d no convertible: formato 0x%08X (%s)", i, fmt,
+        note_error("texture of stage %d not convertible: format 0x%08X (%s)", i, fmt,
                    texconv_error_text(derr));
         return 0;
     }
@@ -678,11 +678,11 @@ static GLuint stage_texture(const pgl_regs *r, int i, GLenum *target, float scal
     if (action == RC_TEX_USE)
         return t->gl_tex;
     if (d.kind == TEXCONV_PALETTE && !pgraph_dma_base((pal & 3) == 2 ? 0x188 : 0x184, &pal_phys))
-        pal_phys = 0xFFFFFFFFu; /* sin base: cpu_wrote dirá que sí */
+        pal_phys = 0xFFFFFFFFu; /* no base: cpu_wrote will say yes */
     if (action == RC_TEX_CHECK && !cpu_wrote(phys, (uint32_t)d.src_size, t->checked_frame) &&
         (d.kind != TEXCONV_PALETTE || !cpu_wrote(pal_phys + (pal & ~0x3Fu), 1024, t->checked_frame))) {
-        /* Ninguna página de la textura (ni de la paleta) se ha escrito desde que se comprobó:
-         * no hace falta hashearla. */
+        /* No page of the texture (nor of the palette) has been written since it was checked:
+         * there is no need to hash it. */
         rc_texture_checked(&R.tex, t, t->hash, R.epoch);
         R.tex_hash_skipped++;
         return t->gl_tex;
@@ -749,10 +749,10 @@ static void bind_textures(const pgl_regs *r, float tex_scale[8]) {
 
 /* ---------------------------------------------------------------- shaders ---- */
 
-/* Niebla del NV2A (como xemu, glsl/vsh.c): el hardware convierte la distancia de niebla del
- * vértice (oFog.x de un vertex program, o la que genera el modo fijo) en el factor que lee el
- * combiner final, según SET_FOG_MODE y SET_FOG_PARAMS. Sin esto oFog valía 0 y, con la niebla
- * activa, todo salía del color de la niebla (negro en el primer nivel). */
+/* NV2A fog (like xemu, glsl/vsh.c): the hardware converts the vertex fog distance
+ * (oFog.x of a vertex program, or the one the fixed mode generates) into the factor read by the
+ * final combiner, according to SET_FOG_MODE and SET_FOG_PARAMS. Without this oFog was 0 and, with
+ * fog enabled, everything came out in the fog color (black in the first level). */
 #define FOG_GLSL \
     "uniform ivec3 fogCfg;\nuniform vec2 fogParam;\n" \
     "float ngbFog(float d) {\n" \
@@ -770,25 +770,25 @@ static void bind_textures(const pgl_regs *r, float tex_scale[8]) {
     "}\n"
 
 /*
- * Pipeline fijo del NV2A (transform & lighting de D3D sin vertex program). Registros
- * (nv2a_regs.h de xemu como referencia; código propio):
- *   - posición: matriz compuesta 0x0680 (ya incluye proyección y viewport); ojo: model-view
- *     0x0480, normales con la model-view inversa 0x0580;
- *   - skinning (SET_SKIN_MODE 0x0328: 1/2 = 2 matrices, 3/4 = 3, 5/6 = 4; los impares calculan
- *     el último peso): model-view 0x0480 + m·0x40 e inversas 0x0580 + m·0x40 ponderadas con los
- *     pesos del atributo 1; la posición sale de la suma en el ojo por la matriz compuesta, que
- *     con skinning D3D deja en solo proyección y viewport (0x0440 queda a cero);
- *   - luces 0..7 en 0x1000 + i·0x80 (ambiente, difusa, especular, rango, half vector, dirección
- *     infinita, posición local, atenuación) y el modo de cada una en 0x03BC (2 bits: 1
- *     infinita, 2 local, 3 foco, tratado como local);
- *   - material: ambiente de escena 0x0A10, emisión 0x03A8, alfa 0x03B4, color material 0x0298
- *     (2 bits por término: emisión, ambiente, difusa, especular; 0 material, 1 difusa del
- *     vértice, 2 especular del vértice); especular activado 0x03B8;
- *   - texgen S/T/R/Q por etapa en 0x03C0 + e·0x10 y sus planos en 0x0840 + e·0x40; matrices de
- *     textura en 0x06C0 + e·0x40, activadas en 0x0420 + e·4.
- * D3D ya multiplica el material en los colores de las luces; con color material se
- * multiplica por el color del vértice. Aproximaciones: potencia especular fija (16) en lugar
- * de SET_SPECULAR_PARAMS, focos sin cono y mapa esférico en convención de OpenGL.
+ * NV2A fixed pipeline (D3D transform & lighting without a vertex program). Registers
+ * (xemu's nv2a_regs.h as reference; own code):
+ *   - position: composite matrix 0x0680 (already includes projection and viewport); note: model-view
+ *     0x0480, normals with the inverse model-view 0x0580;
+ *   - skinning (SET_SKIN_MODE 0x0328: 1/2 = 2 matrices, 3/4 = 3, 5/6 = 4; the odd ones compute
+ *     the last weight): model-view 0x0480 + m·0x40 and inverses 0x0580 + m·0x40 weighted with
+ *     the weights of attribute 1; the position comes from the sum in eye space through the composite matrix, which
+ *     with skinning D3D leaves as projection and viewport only (0x0440 stays at zero);
+ *   - lights 0..7 at 0x1000 + i·0x80 (ambient, diffuse, specular, range, half vector, infinite
+ *     direction, local position, attenuation) and the mode of each at 0x03BC (2 bits: 1
+ *     infinite, 2 local, 3 spot, treated as local);
+ *   - material: scene ambient 0x0A10, emission 0x03A8, alpha 0x03B4, color material 0x0298
+ *     (2 bits per term: emission, ambient, diffuse, specular; 0 material, 1 vertex
+ *     diffuse, 2 vertex specular); specular enabled 0x03B8;
+ *   - texgen S/T/R/Q per stage at 0x03C0 + e·0x10 and their planes at 0x0840 + e·0x40; texture
+ *     matrices at 0x06C0 + e·0x40, enabled at 0x0420 + e·4.
+ * D3D already multiplies the material into the light colors; with color material it is
+ * multiplied by the vertex color. Approximations: fixed specular power (16) instead
+ * of SET_SPECULAR_PARAMS, spot lights without a cone and sphere map in OpenGL convention.
  */
 static const char k_ff_vs[] =
     "#version 400\n"
@@ -810,9 +810,9 @@ static const char k_ff_vs[] =
     "}\n"
     "vec3 invMul(int m, vec3 n) { return n.x * ffInv[m * 4].xyz + n.y * ffInv[m * 4 + 1].xyz + n.z * ffInv[m * 4 + 2].xyz; }\n"
     "void main() {\n"
-    "    /* Skinning (SET_SKIN_MODE): 2-4 model-view ponderadas por v1; en los modos \"G\" el\n"
-    "     * último peso es 1 - la suma de los demás. Con skinning, D3D deja en la matriz\n"
-    "     * compuesta solo la proyección (con el viewport); sin él, es la transformación entera. */\n"
+    "    /* Skinning (SET_SKIN_MODE): 2-4 model-views weighted by v1; in the \"G\" modes the\n"
+    "     * last weight is 1 - the sum of the others. With skinning, D3D leaves in the composite\n"
+    "     * matrix only the projection (with the viewport); without it, it is the whole transform. */\n"
     "    int nm = ffI[26] == 0 ? 0 : (ffI[26] + 3) / 2, nw = (ffI[26] & 1) != 0 ? nm - 1 : nm;\n"
     "    vec4 pe = mvMul(0, v0);\n"
     "    vec3 ne = invMul(0, v2.xyz);\n"
@@ -892,8 +892,8 @@ static const char k_ff_vs[] =
     "            t = vec4(dot(ffTM[e * 4], t), dot(ffTM[e * 4 + 1], t), dot(ffTM[e * 4 + 2], t), dot(ffTM[e * 4 + 3], t));\n"
     "        tout[e] = t;\n"
     "    }\n"
-    "    /* Distancia de niebla (SET_FOG_GEN_MODE): alfa especular, FOG_X (atributo 5) o, en los\n"
-    "     * modos de ojo, la distancia en el espacio del ojo. */\n"
+    "    /* Fog distance (SET_FOG_GEN_MODE): specular alpha, FOG_X (attribute 5) or, in the\n"
+    "     * eye modes, the distance in eye space. */\n"
     "    float fogd = ffI[25] == 0 ? v4.a : ffI[25] == 6 ? v5.x : ffI[25] == 1 ? length(eyeP) : abs(eyeP.z);\n"
     "    oB0 = oD0; oB1 = oD1; oFog = vec4(ngbFog(fogd)); oPts = vec4(1.0);\n"
     "    oT0 = tout[0]; oT1 = tout[1]; oT2 = tout[2]; oT3 = tout[3];\n"
@@ -915,14 +915,14 @@ static void psh_regs_from(const pgl_regs *r, psh_registers *p) {
     p->final_inputs_abcd = M(r, 0x0288);
     p->final_inputs_efg = M(r, 0x028C);
     p->texture_modes = M(r, 0x1E70);
-    for (i = 0; i < 4; i++) /* etapa sin textura activa: modo NONE (t = 0) */
+    for (i = 0; i < 4; i++) /* stage without an active texture: mode NONE (t = 0) */
         if (!(M(r, 0x1B0C + 0x40 * i) & 0x40000000u))
             p->texture_modes &= ~(0x1Fu << (5 * i));
     p->other_stage_input = M(r, 0x1E78);
     p->compare_mode = M(r, 0x17F8);
     p->dot_mapping = M(r, 0x1E74);
-    /* Mapas de sombra: etapas activas con una textura de profundidad (formatos de color
-     * 0x2A-0x31; los X8_Y24 son 0x2A, 0x2B, 0x2E y 0x2F) y la función de comparación
+    /* Shadow maps: active stages with a depth texture (color formats
+     * 0x2A-0x31; the X8_Y24 ones are 0x2A, 0x2B, 0x2E and 0x2F) and the comparison function
      * (0x1E6C SET_SHADOW_DEPTH_FUNC). */
     for (i = 0; i < 4; i++) {
         uint32_t c = (M(r, 0x1B04 + 0x40 * (uint32_t)i) >> 8) & 0xFFu;
@@ -935,8 +935,8 @@ static void psh_regs_from(const pgl_regs *r, psh_registers *p) {
     p->shadow |= (M(r, 0x1E6C) & 7u) << 8;
 }
 
-/* El GLSL de vsh.c pasa la Y a la convención de OpenGL; aquí la fila 0 es la de arriba, así
- * que se deshace al final del main. */
+/* The GLSL from vsh.c converts Y to the OpenGL convention; here row 0 is the top one, so
+ * it is undone at the end of main. */
 static int unflip_vs(char *text, size_t cap) {
     static const char add[] = "    gl_Position.y = -gl_Position.y;\n    oFog = vec4(ngbFog(oFog.x));\n";
     static const char decl[] = FOG_GLSL;
@@ -944,7 +944,7 @@ static int unflip_vs(char *text, size_t cap) {
     size_t len, n = sizeof add - 1;
     if (!nl || strlen(text) + sizeof decl + sizeof add > cap)
         return -1;
-    /* Las declaraciones de la niebla van tras "#version" y el cálculo al final del main. */
+    /* The fog declarations go after "#version" and the computation at the end of main. */
     memmove(nl + 1 + (sizeof decl - 1), nl + 1, strlen(nl + 1) + 1);
     memcpy(nl + 1, decl, sizeof decl - 1);
     end = strrchr(text, '}');
@@ -991,14 +991,14 @@ static void link_uniforms(gl_prog *p) {
                  (uint32_t)(p->u_ffm >= 0) << UG_MAT | (uint32_t)(p->u_ffi >= 0) << UG_FFI |
                  (uint32_t)(p->u_psc0 >= 0 || p->u_psc1 >= 0) << UG_PSC |
                  (uint32_t)(p->u_bump >= 0 || p->u_bscale >= 0 || p->u_boff >= 0) << UG_BUMP;
-    /* c[]: el compilador recorta el array hasta el último elemento que se usa. Si las
-     * locations de sus elementos van seguidas (lo normal), se pueden subir solo los tramos
-     * que cambian; si no, se sube entero. */
+    /* c[]: the compiler trims the array to the last element that is used. If the
+     * locations of its elements are consecutive (the normal case), only the spans
+     * that change can be uploaded; otherwise it is uploaded whole. */
     p->c_n = 0;
     if (p->u_c >= 0) {
         char name[16];
         int lo = 1, hi = PGL_CONSTANTS, mid;
-        while (lo < hi) { /* el mayor n con c[n-1] activo */
+        while (lo < hi) { /* the largest n with c[n-1] active */
             mid = (lo + hi + 1) / 2;
             snprintf(name, sizeof name, "c[%d]", mid - 1);
             if (ngl_glGetUniformLocation(g, name) >= 0)
@@ -1053,7 +1053,7 @@ static gl_prog *get_program(const pgl_regs *r) {
         }
     if (R.nprogs < MAX_PROGRAMS) {
         k = R.nprogs++;
-    } else { /* tabla llena: se recicla una entrada (raro: el juego usa pocas combinaciones) */
+    } else { /* table full: an entry is recycled (rare: the game uses few combinations) */
         k = (int)(R.frame % MAX_PROGRAMS);
         if (R.progs[k].prog)
             ngl_glDeleteProgram(R.progs[k].prog);
@@ -1069,7 +1069,7 @@ static gl_prog *get_program(const pgl_regs *r) {
         err = nv2a_vsh_decode(&r->program[start * 4], (int)(PGL_PROGRAM_SLOTS - start), &R.vp);
         if (err < 0 || nv2a_vsh_to_glsl(&R.vp, R.vs_text, sizeof R.vs_text) < 0 ||
             unflip_vs(R.vs_text, sizeof R.vs_text)) {
-            note_error("vertex program en el slot %u no traducible (%s)", start, nv2a_vsh_error(err));
+            note_error("vertex program in slot %u not translatable (%s)", start, nv2a_vsh_error(err));
             p->failed = 1;
             R.prog_errors++;
             return NULL;
@@ -1082,7 +1082,7 @@ static gl_prog *get_program(const pgl_regs *r) {
         snprintf(R.fs_text, sizeof R.fs_text, "%s", k_fallback_fs);
     err = glb_compile(R.vs_text, R.fs_text, &p->prog, log, sizeof log);
     if (err) {
-        note_error("shader rechazado por el driver: %.200s", log);
+        note_error("shader rejected by the driver: %.200s", log);
         p->failed = 1;
         R.prog_errors++;
         return NULL;
@@ -1091,8 +1091,8 @@ static gl_prog *get_program(const pgl_regs *r) {
     return p;
 }
 
-/* Texgen: valor del registro -> código del shader (0 nada, 1 ojo, 2 objeto, 3 esfera,
- * 4 normal, 5 reflexión). */
+/* Texgen: register value -> shader code (0 none, 1 eye, 2 object, 3 sphere,
+ * 4 normal, 5 reflection). */
 static int texgen_code(uint32_t mode) {
     switch (mode) {
     case 0x2400: return 1;
@@ -1104,7 +1104,7 @@ static int texgen_code(uint32_t mode) {
     }
 }
 
-/* Sube `n` vec4 si el programa tiene ese uniform. */
+/* Uploads `n` vec4 if the program has that uniform. */
 static void u4(GLint loc, int n, const float *v) {
     if (loc < 0)
         return;
@@ -1112,14 +1112,14 @@ static void u4(GLint loc, int n, const float *v) {
     P.unif_vec4 += (uint32_t)n;
 }
 
-/* 16 vec4 seguidos de los registros (las matrices son floats tal cual). */
+/* 16 consecutive vec4 of the registers (the matrices are floats as they are). */
 static void u4_regs(GLint loc, const pgl_regs *r, uint32_t method) {
     float v[16 * 4];
     memcpy(v, &r->m[method / 4], sizeof v);
     u4(loc, 16, v);
 }
 
-/* Último cambio de los métodos de un grupo. */
+/* Last change of a group's methods. */
 static uint64_t group_stamp(const pgl_regs *r, int g) {
     uint64_t s = 0;
     uint32_t b;
@@ -1130,8 +1130,8 @@ static uint64_t group_stamp(const pgl_regs *r, int g) {
     return s;
 }
 
-/* c[]: solo los tramos de constantes escritas con otro valor desde la última subida a este
- * programa. Dos cambios a menos de 4 elementos van en la misma llamada. */
+/* c[]: only the spans of constants written with another value since the last upload to this
+ * program. Two changes less than 4 elements apart go in the same call. */
 static void upload_constants(const pgl_regs *r, gl_prog *p) {
     uint64_t since = p->c_up;
     int i, last;
@@ -1159,7 +1159,7 @@ static void upload_constants(const pgl_regs *r, gl_prog *p) {
     p->c_up = r->stamp + 1;
 }
 
-/* Uniforms del pipeline fijo (ver k_ff_vs); `dirty` son los grupos UG_* que han cambiado. */
+/* Fixed pipeline uniforms (see k_ff_vs); `dirty` are the UG_* groups that have changed. */
 static void set_ff_uniforms(const pgl_regs *r, gl_prog *p, uint32_t dirty) {
     static float l[64 * 4];
     GLint ints[32];
@@ -1181,7 +1181,7 @@ static void set_ff_uniforms(const pgl_regs *r, gl_prog *p, uint32_t dirty) {
             for (k = 0; k < 7; k++)
                 for (c = 0; c < 3; c++)
                     l[(i * 8 + k) * 4 + c] = as_float(M(r, b + src[k] + 4 * (uint32_t)c));
-            l[(i * 8 + 6) * 4 + 3] = as_float(M(r, b + 0x24)); /* rango de la luz local */
+            l[(i * 8 + 6) * 4 + 3] = as_float(M(r, b + 0x24)); /* range of the local light */
         }
         u4(p->u_ffl, 64, l);
     }
@@ -1223,7 +1223,7 @@ static void set_uniforms(const pgl_regs *r, gl_prog *p, const gl_state *st, cons
         R.cur_prog = p->prog;
     }
     upload_constants(r, p);
-    /* Grupos de registros: por sellos de cambio, sin mirar los valores. */
+    /* Register groups: by change stamps, without looking at the values. */
     for (g = 0; g < UG_N; g++) {
         uint64_t now;
         if (!(p->ug_mask & (1u << g)))
@@ -1234,7 +1234,7 @@ static void set_uniforms(const pgl_regs *r, gl_prog *p, const gl_state *st, cons
             dirty |= 1u << g;
         }
     }
-    /* El resto sale de unos pocos registros y del estado del draw: un hash basta. */
+    /* The rest comes from a few registers and the draw state: a hash is enough. */
     src[0] = R.target_w;
     src[1] = R.target_h;
     src[2] = M(r, 0x0394);
@@ -1278,7 +1278,7 @@ static void set_uniforms(const pgl_regs *r, gl_prog *p, const gl_state *st, cons
             u4(p->u_fc1, 1, v);
         }
         if (p->u_fog >= 0) {
-            uint32_t c = M(r, 0x02A8); /* ABGR: R en el byte bajo */
+            uint32_t c = M(r, 0x02A8); /* ABGR: R in the low byte */
             v[0] = (float)(c & 0xFF) / 255.0f;
             v[1] = (float)((c >> 8) & 0xFF) / 255.0f;
             v[2] = (float)((c >> 16) & 0xFF) / 255.0f;
@@ -1338,24 +1338,24 @@ static void set_uniforms(const pgl_regs *r, gl_prog *p, const gl_state *st, cons
     }
 }
 
-/* ---------------------------------------------------------------- vértices y dibujo ---- */
+/* ---------------------------------------------------------------- vertices and drawing ---- */
 
-/* Caché de vértices (H7c, issue #43): los arrays de vértices del juego casi nunca cambian de
- * un frame a otro (el escenario), así que cada combinación de formatos, direcciones y rango
- * de vértices se sube una vez a su propio búfer GL y se reutiliza mientras el write watch no
- * vea escrituras de la CPU en esa memoria. */
+/* Vertex cache (H7c, issue #43): the game's vertex arrays almost never change from one
+ * frame to the next (the scenery), so each combination of formats, addresses and vertex
+ * range is uploaded once to its own GL buffer and reused as long as the write watch does not
+ * see CPU writes to that memory. */
 #define VCACHE_SIZE 1024
 typedef struct vc_entry {
     uint64_t key;
     uint32_t epoch, last_use, ok_mask;
-    int volatile_; /* la CPU reescribió estos vértices alguna vez: no se reutilizan */
+    int volatile_; /* the CPU has rewritten these vertices at some point: not reused */
     size_t total;
     GLuint buf;
 } vc_entry;
 static vc_entry g_vc[VCACHE_SIZE];
 static uint32_t g_vc_clock;
 
-/* Entrada para `key`: la suya si está, si no una libre o la menos usada de sus dos huecos. */
+/* Entry for `key`: its own if present, otherwise a free one or the least used of its two slots. */
 static vc_entry *vcache_slot(uint64_t key) {
     vc_entry *e = &g_vc[key % VCACHE_SIZE], *alt = &g_vc[(key >> 32) % VCACHE_SIZE];
     if (e->key == key)
@@ -1369,10 +1369,10 @@ static vc_entry *vcache_slot(uint64_t key) {
     return e->last_use <= alt->last_use ? e : alt;
 }
 
-/* Cada atributo activo va a su propia región del VBO, empaquetado (CMP ya expandido a
- * floats). Los vértices son [vmin, vmin + nv) o, con `gather`, los nv índices de esa lista
- * relativos a vmin (cuando el rango es mucho mayor que los vértices usados: issue #43);
- * `span` es el tramo de memoria que cubren. Los índices de R.idx ya están rebasados. */
+/* Each active attribute goes to its own VBO region, packed (CMP already expanded to
+ * floats). The vertices are [vmin, vmin + nv) or, with `gather`, the nv indices of that list
+ * relative to vmin (when the range is much larger than the vertices used: issue #43);
+ * `span` is the memory span they cover. The R.idx indices are already rebased. */
 static int upload_vertices(const pgl_regs *r, const pgl_draw_t *d, uint32_t vmin, uint32_t nv,
                            const uint32_t *gather, uint32_t span) {
     rc_attr a[16];
@@ -1404,8 +1404,8 @@ static int upload_vertices(const pgl_regs *r, const pgl_draw_t *d, uint32_t vmin
             sstride[slot] = (size_t)per * 4;
         } else {
             uint32_t o = M(r, 0x1720 + 4 * slot), base;
-            /* Stride, vmin y el tramo vienen del juego: el desplazamiento y la longitud se
-             * calculan en 64 bits y se rechazan si no caben en la RAM de la Xbox. */
+            /* Stride, vmin and the span come from the game: the offset and the length are
+             * computed in 64 bits and rejected if they do not fit in the Xbox RAM. */
             uint64_t start, len;
             sstride[slot] = at->stride ? at->stride : (uint32_t)at->src_bytes;
             start = (uint64_t)vmin * sstride[slot];
@@ -1440,7 +1440,7 @@ static int upload_vertices(const pgl_regs *r, const pgl_draw_t *d, uint32_t vmin
     ngl_glBindVertexArray(R.vao);
     if (e && e->buf && e->key == key && !dirty && !e->volatile_ && e->total == total &&
         e->ok_mask == ok_mask) {
-        ngl_glBindBuffer(GL_ARRAY_BUFFER, e->buf); /* acierto: nada que copiar ni subir */
+        ngl_glBindBuffer(GL_ARRAY_BUFFER, e->buf); /* hit: nothing to copy or upload */
         e->last_use = ++g_vc_clock;
         P.vc_hits++;
     } else {
@@ -1499,7 +1499,7 @@ static int upload_vertices(const pgl_regs *r, const pgl_draw_t *d, uint32_t vmin
         }
         ngl_glEnableVertexAttribArray(slot);
         switch (at->type) {
-        case 0: /* D3DCOLOR: B G R A en memoria */
+        case 0: /* D3DCOLOR: B G R A in memory */
             ngl_glVertexAttribPointer(slot, at->comps == 4 ? GL_BGRA : at->comps, GL_UNSIGNED_BYTE,
                                       GL_TRUE, 4, (const void *)off[slot]);
             break;
@@ -1511,7 +1511,7 @@ static int upload_vertices(const pgl_regs *r, const pgl_draw_t *d, uint32_t vmin
             ngl_glVertexAttribPointer(slot, at->comps, GL_SHORT, at->type == 1, at->dst_bytes,
                                       (const void *)off[slot]);
             break;
-        default: /* F y CMP expandido */
+        default: /* F and expanded CMP */
             ngl_glVertexAttribPointer(slot, at->comps, GL_FLOAT, GL_FALSE, at->dst_bytes,
                                       (const void *)off[slot]);
             break;
@@ -1525,10 +1525,10 @@ static uint32_t *idx_buffer(size_t n) {
     return R.idx;
 }
 
-/* Diagnóstico (NGB_GL_TRACE="frame:paso:desde:prefijo"): en ese frame registra cada draw con
- * su estado y, a partir del draw `desde`, guarda el destino de color en PNG cada `paso` draws
- * (prefijo-dNNNN.png). Sirve
- * para encontrar el draw que estropea la imagen sin volcar el push buffer entero. */
+/* Diagnostics (NGB_GL_TRACE="frame:step:from:prefix"): in that frame it logs each draw with
+ * its state and, starting at draw `from`, saves the color target to PNG every `step` draws
+ * (prefix-dNNNN.png). It helps
+ * find the draw that ruins the image without dumping the whole push buffer. */
 static void trace_draw(const pgl_regs *r, const pgl_draw_t *d, uint32_t n_idx, uint32_t nv) {
     static int init;
     static uint32_t frame = 0xFFFFFFFFu, step = 25, from = 0;
@@ -1545,9 +1545,9 @@ static void trace_draw(const pgl_regs *r, const pgl_draw_t *d, uint32_t n_idx, u
     if (R.frame != frame)
         return;
     k = R.trace_n++;
-    ngb_log("    · traza f%u d%u: prim %u, %u índices, %u vértices, destino 0x%08X %ux%u zeta 0x%08X; "
-            "modo %X prog %u; blend %u %X/%X eq %X; alfa %u %X ref %X; z %u %X máscara %u; stencil %u; "
-            "colores %08X; niebla %u %X gen %X; tex0 %s0x%08X fmt %08X; tex1 %s0x%08X fmt %08X; comb %08X/%08X",
+    ngb_log("    · trace f%u d%u: prim %u, %u indices, %u vertices, target 0x%08X %ux%u zeta 0x%08X; "
+            "mode %X prog %u; blend %u %X/%X eq %X; alpha %u %X ref %X; z %u %X mask %u; stencil %u; "
+            "colors %08X; fog %u %X gen %X; tex0 %s0x%08X fmt %08X; tex1 %s0x%08X fmt %08X; comb %08X/%08X",
             R.frame, k, d->prim, n_idx, nv, R.color_addr, R.target_w, R.target_h, R.zeta_addr,
             M(r, 0x1E94), M(r, 0x1EA0), M(r, 0x0304) & 1, M(r, 0x0344), M(r, 0x0348), M(r, 0x0350),
             M(r, 0x0300) & 1, M(r, 0x033C), M(r, 0x0340), M(r, 0x030C) & 1, M(r, 0x0354), M(r, 0x035C) & 1,
@@ -1560,7 +1560,7 @@ static void trace_draw(const pgl_regs *r, const pgl_draw_t *d, uint32_t n_idx, u
         words[0] = 0;
         for (w = 0; d->inline_words && w < d->n_inline && w < 16 && n < sizeof words; w++)
             n += (size_t)snprintf(words + n, sizeof words - n, " %08X", d->inline_words[w]);
-        ngb_log("    · traza f%u d%u: formatos %08X %08X %08X %08X; difuso constante %.2f %.2f %.2f %.2f; inline:%s",
+        ngb_log("    · trace f%u d%u: formats %08X %08X %08X %08X; constant diffuse %.2f %.2f %.2f %.2f; inline:%s",
                 R.frame, k, M(r, 0x1760), M(r, 0x1764), M(r, 0x176C), M(r, 0x1784), r->vconst[3][0],
                 r->vconst[3][1], r->vconst[3][2], r->vconst[3][3], words);
     }
@@ -1626,7 +1626,7 @@ void pgl_draw(const pgl_regs *r, const pgl_draw_t *d) {
             idx[i] -= vmin;
         span = vmax - vmin + 1;
         if (span > 2 * n + 64) {
-            /* Rango disperso (issue #43): se suben solo los vértices que se usan. */
+            /* Sparse range (issue #43): only the vertices that are used are uploaded. */
             R.gather = (uint32_t *)grow(R.gather, &R.gather_cap, (size_t)n * sizeof(uint32_t));
             if (!R.gather)
                 goto skip;
@@ -1634,7 +1634,7 @@ void pgl_draw(const pgl_regs *r, const pgl_draw_t *d) {
             gather = R.gather;
         }
     }
-    if (d->prim == 8) { /* QUADS: el core profile no los tiene */
+    if (d->prim == 8) { /* QUADS: the core profile does not have them */
         uint32_t *tri = idx + n;
         uint32_t m = rc_quads_to_triangles(idx, n, tri);
         memmove(idx, tri, (size_t)m * sizeof *idx);
@@ -1671,7 +1671,7 @@ skip:
     R.skipped++;
 }
 
-/* ---------------------------------------------------------------- clear y present ---- */
+/* ---------------------------------------------------------------- clear and present ---- */
 
 void pgl_clear(const pgl_regs *r, uint32_t flags) {
     uint32_t ch = M(r, 0x1D98), cv = M(r, 0x1D9C), x0 = ch & 0xFFFF, x1 = ch >> 16, y0 = cv & 0xFFFF;
@@ -1681,7 +1681,7 @@ void pgl_clear(const pgl_regs *r, uint32_t flags) {
     if (!bind_target(r, (flags & 0xF0) != 0, (flags & 3) != 0))
         return;
     R.clears++;
-    R.state_valid = 0; /* el clear toca scissor y máscaras */
+    R.state_valid = 0; /* the clear touches scissor and masks */
     if (!x1 && !y1) {
         x1 = R.target_w - 1;
         y1 = R.target_h - 1;
@@ -1710,7 +1710,7 @@ void pgl_clear(const pgl_regs *r, uint32_t flags) {
         glClear(bits);
 }
 
-/* Rectángulo de la ventana con el aspecto 4:3 y escala vertical entera (como present.c). */
+/* Window rectangle with the 4:3 aspect and integer vertical scale (like present.c). */
 static void fit_rect(int cw, int ch, int fh, int out[4]) {
     int scale = fh > 0 ? ch / fh : 1, dw, dh;
     if (scale < 1)
@@ -1733,8 +1733,8 @@ static void fit_rect(int cw, int ch, int fh, int out[4]) {
     out[3] = out[1] + dh;
 }
 
-/* Diagnóstico (NGB_GL_DUMP_SURFACES): guarda junto a la captura un PNG de cada superficie de
- * color de la caché, para ver los pasos intermedios del frame. */
+/* Diagnostics (NGB_GL_DUMP_SURFACES): saves next to the capture a PNG of each color surface of
+ * the cache, to see the intermediate steps of the frame. */
 static void dump_surfaces(const char *shot_path) {
     int k;
     for (k = 0; k < RC_MAX_SURFACES; k++) {
@@ -1768,13 +1768,13 @@ int pgl_flip(const pgl_regs *r, const char *shot_path) {
     if (!s && R.present_addr)
         s = rc_surface_find(&R.surf, RC_COLOR, R.present_addr);
     else if (s && s->addr != R.present_addr)
-        R.present_other++; /* el heurístico del rasterizador habría presentado otra */
+        R.present_other++; /* the rasterizer heuristic would have presented another one */
     if (!GetClientRect(R.hwnd, &client))
         client.right = client.bottom = 0;
-    if (shot_path) { /* diagnóstico: qué se presenta y qué superficies hay */
+    if (shot_path) { /* diagnostics: what is presented and which surfaces exist */
         int k;
         char line[1024];
-        size_t n = (size_t)snprintf(line, sizeof line, "GL flip %u: presenta 0x%08X (color actual 0x%08X, %ux%u);",
+        size_t n = (size_t)snprintf(line, sizeof line, "GL flip %u: presents 0x%08X (current color 0x%08X, %ux%u);",
                                     R.flips, s ? s->addr : 0, R.color_addr, (unsigned)(M(r, 0x0200) >> 16),
                                     (unsigned)(M(r, 0x0204) >> 16));
         for (k = 0; k < RC_MAX_SURFACES && n < sizeof line; k++)
@@ -1794,7 +1794,7 @@ int pgl_flip(const pgl_regs *r, const char *shot_path) {
         ngl_glBindFramebuffer(GL_READ_FRAMEBUFFER, R.read_fbo);
         ngl_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s->gl_tex, 0);
         fit_rect(client.right, client.bottom, (int)s->height, rect);
-        /* La fila 0 de la superficie es la de arriba: se voltea al copiar a la ventana. */
+        /* Surface row 0 is the top one: it is flipped when copying to the window. */
         ngl_glBlitFramebuffer(0, 0, (GLint)s->width, (GLint)s->height, rect[0], client.bottom - rect[1],
                               rect[2], client.bottom - rect[3], GL_COLOR_BUFFER_BIT, GL_LINEAR);
         if (shot_path) {
@@ -1813,7 +1813,7 @@ int pgl_flip(const pgl_regs *r, const char *shot_path) {
     SwapBuffers(R.dc);
     rdoc_after_present(R.frame);
     ngl_glBindFramebuffer(GL_FRAMEBUFFER, R.fbo);
-    R.color_addr = 0; /* el FBO se vuelve a preparar en el siguiente dibujo */
+    R.color_addr = 0; /* the FBO is prepared again on the next draw */
     R.target_valid = R.state_valid = 0;
     if (R.ww_ok)
         scan_written_pages();
@@ -1827,14 +1827,14 @@ int pgl_flip(const pgl_regs *r, const char *shot_path) {
 void pgl_summary(void) {
     if (!R.active)
         return;
-    ngb_log("pgraph gl: %u dibujos (%u con transformación fija), %u sin dibujar, %u clears, %u flips; "
-            "%u superficies creadas (%u descartadas por escrituras de la CPU), %u usos como textura (%u copias "
-            "por lectura y escritura a la vez); "
-            "texturas: %u subidas, %u comprobaciones de hash, %u aciertos; %u programas (%u errores), "
-            "%u errores de textura, %u de estado; %u flips con un búfer distinto del último de 720",
+    ngb_log("pgraph gl: %u draws (%u with fixed transform), %u not drawn, %u clears, %u flips; "
+            "%u surfaces created (%u dropped due to CPU writes), %u uses as texture (%u copies "
+            "for simultaneous read and write); "
+            "textures: %u uploads, %u hash checks, %u hits; %u programs (%u errors), "
+            "%u texture errors, %u state errors; %u flips with a buffer other than the last 720-wide one",
             R.draws, R.ff_draws, R.skipped, R.clears, R.flips, R.surf_created, R.surf_dropped, R.rtt_binds,
             R.feedback_copies, R.tex_uploads, R.tex.checks, R.tex.hits, R.nprogs, R.prog_errors,
             R.tex_errors, R.state_errors, R.present_other);
     if (R.first_error[0])
-        ngb_log("pgraph gl: primer error: %s", R.first_error);
+        ngb_log("pgraph gl: first error: %s", R.first_error);
 }

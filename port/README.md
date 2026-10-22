@@ -1,278 +1,290 @@
-# port/: loader nativo de XBE (H6, arranque nativo)
+# port/: native XBE loader (H6, native boot)
 
-Ejecuta el código x86 de un `default.xbe` dentro de un proceso Win32 de 32 bits, con un
-kernel Xbox propio que registra cada llamada. No emula la CPU: el código del juego corre
-tal cual. El hito H6 termina cuando el juego llega a la inicialización de D3D (primer
-acceso MMIO al NV2A en `0xFD000000`).
+Runs the x86 code of a `default.xbe` inside a 32-bit Win32 process, with a custom Xbox
+kernel that logs every call. It does not emulate the CPU: the game code runs as is. Milestone
+H6 ends when the game reaches D3D initialization (first MMIO access to the NV2A at
+`0xFD000000`).
 
-Proyecto pedagógico. No incluye nada del juego ni del XDK de Microsoft. Las estructuras y
-los prototipos del kernel salen de nxdk (`lib/xboxkrnl/xboxkrnl.h`, CC0) y la tabla de
-exports de `src/ngb_tools/data/xboxkrnl_exports.tsv`.
+Unofficial fan port. You need your own copy of the game. Not affiliated with Koei Tecmo or
+Microsoft. It includes nothing from the game or from the Microsoft XDK. The kernel structures
+and prototypes come from nxdk (`lib/xboxkrnl/xboxkrnl.h`, CC0) and the export table from
+`src/ngb_tools/data/xboxkrnl_exports.tsv`.
 
-## Compilar y ejecutar
+## Build and run
 
 ```bat
 port\build.cmd
 build\port\ngb-loader.exe %USERPROFILE%\ngb-data\game\default.xbe
 ```
 
-- `build.cmd` llama a `vcvarsall.bat x86` (VS 2022; se puede cambiar con `VCVARSALL`) y
-  compila con `/W4 /WX /O2 /Zi`. Deja `ngb-loader.exe`, `ngb-core.dll` y los `.pdb` en
-  `build\port\` (ignorado por git).
-- El log va por defecto a `%NGB_DATA%\runs\h6-<fecha>.log` (fuera del repo); `--log`
-  lo cambia. El disco duro virtual vive en `%NGB_DATA%\runs\hdd\`.
-- Opciones: `--max-calls N` (200000), `--timeout S` (60), `--idle S` (10 s sin llamadas al
-  kernel), `--lenient` (una llamada sin implementar devuelve `STATUS_SUCCESS`), `--echo`,
-  `--mmio-strict` (para en cualquier MMIO o E/S de puertos), `--mmio-gpu-ram` (el NV2A
-  también se trata como RAM trazada: sirve para explorar más allá de H6).
-- Código de salida: 0 todo terminó, 1 uso/XBE inválido, 2 llamada sin implementar,
-  3 excepción (incluido MMIO), 4 `--max-calls`, 5 timeout/inactividad, 6 el juego pidió
-  apagar (`HalReturnToFirmware`, `KeBugCheck`).
+- `build.cmd` calls `vcvarsall.bat x86` (VS 2022; can be changed with `VCVARSALL`) and
+  compiles with `/W4 /WX /O2 /Zi`. It leaves `ngb-loader.exe`, `ngb-core.dll` and the `.pdb`
+  files in `build\port\` (ignored by git).
+- The log goes by default to `%NGB_DATA%\runs\h6-<date>.log` (outside the repo); `--log`
+  changes it. The virtual hard disk lives in `%NGB_DATA%\runs\hdd\`.
+- Options: `--max-calls N` (200000), `--timeout S` (60), `--idle S` (10 s without kernel
+  calls), `--lenient` (an unimplemented call returns `STATUS_SUCCESS`), `--echo`,
+  `--mmio-strict` (stops at any MMIO or port I/O), `--mmio-gpu-ram` (the NV2A is also treated
+  as traced RAM: useful to explore beyond H6).
+- Exit code: 0 everything finished, 1 usage/invalid XBE, 2 unimplemented call,
+  3 exception (including MMIO), 4 `--max-calls`, 5 timeout/inactivity, 6 the game asked to
+  shut down (`HalReturnToFirmware`, `KeBugCheck`).
 
-Regenerar los stubs tras tocar el TSV: `python tools/gen_kernel_stubs.py` (o
-`--check` para verificar). Tests: `python -m unittest discover -s tests` con
-`PYTHONPATH=src`; `tests/port/test_loader.py` ejecuta el loader compilado sobre XBE
-sintéticos y se salta si no existe `build\port\ngb-loader.exe` (o `NGB_LOADER`).
+Regenerate the stubs after touching the TSV: `python tools/gen_kernel_stubs.py` (or
+`--check` to verify). Tests: `python -m unittest discover -s tests` with
+`PYTHONPATH=src`; `tests/port/test_loader.py` runs the built loader on synthetic XBEs and is
+skipped if `build\port\ngb-loader.exe` does not exist (or `NGB_LOADER`).
 
-## Archivos
+## Files
 
-| Archivo | Propósito |
+| File | Purpose |
 |---|---|
-| `build.cmd` | Compilación x86 con MSVC: `ngb-core.dll` y el exe stub. |
-| `src/loader_stub.c` | `ngb-loader.exe`: base fija `0x10000` y BSS `.xbox` que reserva la imagen del XBE; carga `ngb-core.dll`. |
-| `launcher/` | `ngb-launcher.exe`: launcher gráfico (Win32 + GDI, sin dependencias), inglés y español. `launcher.c` (páginas y lógica; ajustes en `ngb.ini` junto al exe; PLAY lanza el loader con `NGB_DATA`), `ui.c` (widgets), `art.c` (arte original procedural), `import.c` (importar el juego del usuario en un hilo), `xdvdfs.c` (lector/extractor XDVDFS de imágenes `.iso`), `strings.h` (tabla EN/ES). |
-| `res/` | Recursos: `ngb.ico` (shuriken cromado con tajo rojo, original; lo genera `make_icon.py` con solo la stdlib), `ngb.rc` (icono y versión de loader y core) y `version.h`. |
-| `src/main.c` | `ngb_main`: argumentos, carga, thunk, hilo de arranque y vigilante (timeout, inactividad, fin). |
-| `src/xbe.c`, `xbe.h` | Parseo mínimo: cabecera, secciones, TLS y des-XOR (retail/debug) del entry y del thunk. |
-| `src/memory.c` | Mapa de la imagen, cabecera PE sombra, arena contigua en `0x80000000`, kernel PE falso, thunk. |
-| `src/thread.c` | Hilos Xbox: KPCR/ETHREAD falsos, superposición en el TEB, pila propia con TLS, cadena SEH. |
-| `src/crash.c` | Vectored exception handler: informe del crash, MMIO trazado, E/S de puertos. |
-| `src/log.c` | Log thread-safe, resumen y parada (`ngb_stop`). |
-| `src/kernel/stubs.c` | GENERADO: un stub por export con su convención y número de argumentos. |
-| `src/kernel/dispatch.c` | `ngb_kcall`: línea de log por llamada y despacho a la implementación. |
-| `src/kernel/data.c` | Las variables exportadas (`KeTickCount`, `XboxKrnlVersion`, `LaunchDataPage`...). |
-| `src/kernel/impl_*.c` | Implementaciones: memoria (`mm`), `Rtl`, planificador (`ke`), hilos (`ps`), archivos (`io`), varios (`misc`). |
-| `../tools/gen_kernel_stubs.py` | Envoltorio de `python -m ngb_tools.port.kernel_stubs` (genera `stubs.c` desde el TSV). |
+| `build.cmd` | x86 build with MSVC: `ngb-core.dll` and the stub exe. |
+| `src/loader_stub.c` | `ngb-loader.exe`: fixed base `0x10000` and a `.xbox` BSS that reserves the XBE image; loads `ngb-core.dll`. |
+| `launcher/` | `ngb-launcher.exe`: graphical launcher (Win32 + GDI, no dependencies), English and Spanish. `launcher.c` (pages and logic; settings in `ngb.ini` next to the exe; PLAY launches the loader with `NGB_DATA`), `ui.c` (widgets), `art.c` (original procedural art), `import.c` (imports the user's game on a thread), `xdvdfs.c` (XDVDFS reader/extractor for `.iso` images), `strings.h` (EN/ES table). |
+| `res/` | Resources: `ngb.ico` (chrome shuriken with a red slash, original; generated by `make_icon.py` using only the stdlib), `ngb.rc` (icon and version of loader and core) and `version.h`. |
+| `src/main.c` | `ngb_main`: arguments, load, thunk, boot thread and watchdog (timeout, inactivity, end). |
+| `src/xbe.c`, `xbe.h` | Minimal parsing: header, sections, TLS and un-XOR (retail/debug) of the entry point and the thunk. |
+| `src/memory.c` | Image map, shadow PE header, contiguous arena at `0x80000000`, fake kernel PE, thunk. |
+| `src/thread.c` | Xbox threads: fake KPCR/ETHREAD, TEB overlay, own stack with TLS, SEH chain. |
+| `src/crash.c` | Vectored exception handler: crash report, traced MMIO, port I/O. |
+| `src/log.c` | Thread-safe log, summary and stop (`ngb_stop`). |
+| `src/kernel/stubs.c` | GENERATED: one stub per export with its convention and argument count. |
+| `src/kernel/dispatch.c` | `ngb_kcall`: one log line per call and dispatch to the implementation. |
+| `src/kernel/data.c` | The exported variables (`KeTickCount`, `XboxKrnlVersion`, `LaunchDataPage`...). |
+| `src/kernel/impl_*.c` | Implementations: memory (`mm`), `Rtl`, scheduler (`ke`), threads (`ps`), files (`io`), miscellaneous (`misc`). |
+| `../tools/gen_kernel_stubs.py` | Wrapper around `python -m ngb_tools.port.kernel_stubs` (generates `stubs.c` from the TSV). |
 
-Formato del log: `[n] T<hilo> @<dirección de retorno> <ordinal> <nombre>(args) -> ret`.
-La línea se escribe al volver de la llamada, así que los detalles que añade la
-implementación (`    · ...`) quedan justo encima. Al final van el motivo de la parada,
-el estado de cada hilo Xbox (EIP, pila, llamada en curso) y las llamadas por función.
+Log format: `[n] T<thread> @<return address> <ordinal> <name>(args) -> ret`.
+The line is written when the call returns, so the details that the implementation adds
+(`    · ...`) end up right above it. At the end come the stop reason, the state of every
+Xbox thread (EIP, stack, call in progress) and the calls per function.
 
-## Decisiones
+## Decisions
 
-**Memoria de la imagen.** El XBE no es reubicable y vive en `0x10000`, una zona que Windows
-llena enseguida (heaps, pilas, NLS). Igual que el `cxbxr-ldr.exe` de Cxbx-Reloaded, el exe
-se enlaza en `0x10000` con `/FIXED` y una BSS enorme: el cargador de Windows reserva
-`[0x10000, 0x01010000)` al crear el proceso. El exe no tiene CRT; todo el loader está en
-`ngb-core.dll`, que vive en otra dirección. `ngb_main` pisa el código del stub (no vuelve
-nunca) y copia cabeceras y secciones (todas, también las no PRELOAD; `XeLoadSection`
-solo cuenta referencias). La imagen queda RWX y el proceso sin DEP, como en Xbox.
+**Image memory.** The XBE is not relocatable and lives at `0x10000`, an area that Windows
+fills up quickly (heaps, stacks, NLS). Like Cxbx-Reloaded's `cxbxr-ldr.exe`, the exe is
+linked at `0x10000` with `/FIXED` and a huge BSS: the Windows loader reserves
+`[0x10000, 0x01010000)` when creating the process. The exe has no CRT; the whole loader is
+in `ngb-core.dll`, which lives at another address. `ngb_main` overwrites the stub code (it
+never returns) and copies headers and sections (all of them, including the non-PRELOAD ones;
+`XeLoadSection` only counts references). The image is RWX and the process has no DEP, as on
+Xbox.
 
-**Cabecera PE sombra.** Tras pisar la cabecera PE del exe con la del XBE, `CreateThread`
-falla (`ERROR_BAD_EXE_FORMAT`) y los hilos nuevos mueren en ntdll: Windows relee la
-cabecera desde la base de la imagen (cambiar `PEB.ImageBaseAddress` no basta). Se copian
-las NT headers a `0x01000000` (cola de la BSS), se escribe `MZ` en `0x10000` y en `0x1003C`
-(`e_lfanew`) el offset a la copia. Los dos campos caen en el magic y en la firma RSA del
-XBE, que el código del juego no lee en ejecución (solo el kernel al cargar).
+**Shadow PE header.** After overwriting the exe's PE header with the XBE one, `CreateThread`
+fails (`ERROR_BAD_EXE_FORMAT`) and new threads die in ntdll: Windows re-reads the header
+from the image base (changing `PEB.ImageBaseAddress` is not enough). The NT headers are
+copied to `0x01000000` (tail of the BSS), `MZ` is written at `0x10000` and at `0x1003C`
+(`e_lfanew`) the offset to the copy. Both fields fall inside the XBE magic and RSA
+signature, which the game code does not read at run time (only the kernel does, when
+loading).
 
-**FS/KPCR (atajo de H6).** En WOW64 no hay LDT (`NtSetLdtEntries` no existe en x64), así
-que `fs:` sigue apuntando al TEB de Windows. El código Xbox solo usa unos pocos campos y se
-superponen en el TEB de cada hilo Xbox: `fs:[0x1C]` SelfPcr (EnvironmentPointer),
-`fs:[0x20]` Prcb (ClientId.UniqueProcess) y `fs:[0x28]` CurrentThread (ActiveRpcHandle).
-`fs:[0x24]` (Irql) NO se superpone: es `ClientId.UniqueThread`, que Windows usa para
-despertar a quien espera un CRITICAL_SECTION (cambiarlo perdía despertares y colgaba D3D
-en H7a). Las 7 lecturas `movzx r32, byte ptr fs:[24h]` del juego se parchean al cargar
-a `mov r32, 0` (PASSIVE_LEVEL). `fs:[0]`, `fs:[4]` y `fs:[8]` (ExceptionList, StackBase,
-StackLimit) significan lo mismo en ambos y se usan tal cual. Consecuencia:
-`GetCurrentProcessId` devuelve basura en hilos Xbox; el loader no lo usa. Alternativa futura: parchear los accesos `fs:` como hace Cxbx-Reloaded.
+**FS/KPCR (H6 shortcut).** Under WOW64 there is no LDT (`NtSetLdtEntries` does not exist on
+x64), so `fs:` keeps pointing at the Windows TEB. Xbox code only uses a few fields, and they
+are overlaid on the TEB of each Xbox thread: `fs:[0x1C]` SelfPcr (EnvironmentPointer),
+`fs:[0x20]` Prcb (ClientId.UniqueProcess) and `fs:[0x28]` CurrentThread (ActiveRpcHandle).
+`fs:[0x24]` (Irql) is NOT overlaid: it is `ClientId.UniqueThread`, which Windows uses to
+wake whoever waits on a CRITICAL_SECTION (changing it lost wakeups and hung D3D in H7a). The
+7 `movzx r32, byte ptr fs:[24h]` reads in the game are patched at load time to
+`mov r32, 0` (PASSIVE_LEVEL). `fs:[0]`, `fs:[4]` and `fs:[8]` (ExceptionList, StackBase,
+StackLimit) mean the same in both and are used as they are. Consequence:
+`GetCurrentProcessId` returns garbage on Xbox threads; the loader does not use it. Future
+alternative: patch the `fs:` accesses as Cxbx-Reloaded does.
 
-**TLS.** El arranque de XAPI pone `_tls_index` negativo y accede con
-`[fs:[4] + _tls_index*4]`: el bloque TLS vive justo debajo de StackBase y
-`KTHREAD.TlsData` (offset 0x28) apunta a él. Cada hilo Xbox corre en una pila propia
-(VirtualAlloc, mínimo 1 MB) con el bloque en la cima; el TEB se apunta a ella y la cadena
-SEH se reinicia con una copia del registro final de ntdll dentro de la pila nueva, para que
-la validación de SEH/SEHOP la acepte.
+**TLS.** The XAPI startup sets a negative `_tls_index` and accesses with
+`[fs:[4] + _tls_index*4]`: the TLS block lives right below StackBase and
+`KTHREAD.TlsData` (offset 0x28) points to it. Every Xbox thread runs on its own stack
+(VirtualAlloc, 1 MB minimum) with the block at the top; the TEB is pointed at it and the SEH
+chain is restarted with a copy of ntdll's final record inside the new stack, so that
+SEH/SEHOP validation accepts it.
 
-**Hilos y planificador.** Un hilo Xbox es un hilo Win32 (`PsCreateSystemThreadEx` llama a
-la SystemRoutine de XAPI igual que el kernel real). Proceso con afinidad a un núcleo. Subir
-a DISPATCH_LEVEL toma un lock global recursivo. Los timers y DPC los ejecuta un hilo Xbox
-interno. Las interrupciones se aceptan pero nunca se disparan.
+**Threads and scheduler.** An Xbox thread is a Win32 thread (`PsCreateSystemThreadEx` calls
+XAPI's SystemRoutine just like the real kernel). The process has single-core affinity.
+Raising to DISPATCH_LEVEL takes a global recursive lock. Timers and DPCs are run by an
+internal Xbox thread. Interrupts are accepted but never fire.
 
-**Kernel.** Cada slot del thunk (`0x80000000|ordinal`) se reescribe con el stub (función)
-o con la dirección de la variable (data). Los stubs se generan del TSV con la convención
-real (stdcall/fastcall/cdecl) y `arg_bytes/4` argumentos, devuelven EDX:EAX y llaman a
-`ngb_kcall`. Una llamada a un export sin implementación detiene la ejecución (salvo con `--lenient`). `XAPI` lee la cabecera PE de
-`xboxkrnl.exe` en `0x80010000` (busca su sección INIT): hay una cabecera PE falsa sin INIT.
+**Kernel.** Every thunk slot (`0x80000000|ordinal`) is rewritten with the stub (function) or
+with the variable address (data). The stubs are generated from the TSV with the real
+convention (stdcall/fastcall/cdecl) and `arg_bytes/4` arguments, return EDX:EAX and call
+`ngb_kcall`. A call to an export with no implementation stops the run (except with
+`--lenient`). `XAPI` reads the PE header of `xboxkrnl.exe` at `0x80010000` (it looks for its
+INIT section): there is a fake PE header with no INIT.
 
-**Archivos.** `\Device\CdRom0` (D:) es la carpeta del XBE y es de solo lectura: nunca se
-escribe ahí. `\Device\Harddisk0\PartitionN\...` va a `%NGB_DATA%\runs\hdd\partitionN\`; el
-volumen en crudo (`...\PartitionN` sin barra final) es `partitionN.raw`. El tamaño de
-volumen imita FATX (clúster de 16 KB): con el de NTFS, XAPI pide formatear y reinicia.
+**Files.** `\Device\CdRom0` (D:) is the XBE folder and is read only: nothing is ever written
+there. `\Device\Harddisk0\PartitionN\...` goes to `%NGB_DATA%\runs\hdd\partitionN\`; the raw
+volume (`...\PartitionN` without a trailing slash) is `partitionN.raw`. The volume size
+imitates FATX (16 KB cluster): with the NTFS one, XAPI asks to format and reboots.
 
-**MMIO.** En H6 el primer acceso al NV2A detenía la ejecución; desde H7a lo atiende el
-modelo de `src/gpu/` (ver abajo; `--mmio-gpu-ram` vuelve al modo de exploración). El resto
-de periféricos (USB, APU, AC97, NIC, flash) se traza con RAM a cero: cada acceso se
-registra (los 400 primeros), se abre la página, se ejecuta la instrucción en paso a paso y
-se vuelve a cerrar. Unos pocos registros que el arranque sondea se leen fijos (APU
-`PIO_FREE` = 0x80, AC97 `GLOB_STA` = códecs listos) y el bit de reset de los `x_CR` del
-AC97 se limpia solo. `IN`/`OUT`, `CLI`/`STI` y `WBINVD` se registran y se saltan.
+**MMIO.** In H6 the first access to the NV2A stopped the run; since H7a it is served by the
+model in `src/gpu/` (see below; `--mmio-gpu-ram` goes back to exploration mode). The other
+peripherals (USB, APU, AC97, NIC, flash) are traced with zeroed RAM: every access is logged
+(the first 400), the page is opened, the instruction is executed in single-step mode and
+the page is closed again. A few registers that boot polls are read as fixed (APU
+`PIO_FREE` = 0x80, AC97 `GLOB_STA` = codecs ready) and the reset bit of the AC97 `x_CR`
+registers clears itself. `IN`/`OUT`, `CLI`/`STI` and `WBINVD` are logged and skipped.
 
-## H7a: modelo mínimo del NV2A y captura del push buffer
+## H7a: minimal NV2A model and push buffer capture
 
-Archivos en `src/gpu/`: `nv2a.c` (registros), `pushbuf.c` (decodificador del push buffer,
-puro y probado en `tests/pushbuf_test.c`), `pgraph.c` (métodos, log, clear, semáforos,
-PNG), `nv097_names.c` (nombres de los métodos 3D) y `png.c`.
+Files in `src/gpu/`: `nv2a.c` (registers), `pushbuf.c` (push buffer decoder, pure and
+tested in `tests/pushbuf_test.c`), `pgraph.c` (methods, log, clear, semaphores, PNG),
+`nv097_names.c` (names of the 3D methods) and `png.c`.
 
-- **Registros.** `[0xFD000000, 0xFE000000)` queda reservado sin acceso; cada acceso falla, el
-  VEH escribe en la página el valor modelado, ejecuta la instrucción en paso a paso y aplica
-  los efectos de la escritura. Modelados: `PMC_BOOT_0` (0x02A000A3), interrupciones W1C
-  (PMC, PFIFO, PGRAPH, PCRTC, PTIMER; escribir 1 en `PCRTC_INTR_0` baja también el bit 24
-  de `PMC_INTR_0`), ID PCI de PBUS, PFIFO vacío, `DMA_CTL` válido, `DMA_PUT`/`DMA_GET`
-  (PFIFO y USER canal 0), PTIMER que avanza, `PFB_CSTATUS` = 64 MB, flush de `PFB_WBC` que
-  termina al instante, PGRAPH ocioso, `PCRTC_RASTER`, PLL de PRAMDAC enganchados. Lo
-  desconocido es RAM y se anota una vez en el log. Dos excepciones por acceso: en la
-  inicialización son miles y por frame D3D solo toca PUT/GET, así que no compensa mapear
-  como RAM los registros sin efectos. Fuente de offsets y valores: xemu `hw/xbox/nv2a`.
-- **PRAMIN** (0xFD700000) es RAM: una sección de 1 MB mapeada a la vez ahí y en 0x83F00000
-  (el último MB de la RAM física, como en el hardware).
-- **FIFO.** Al escribir `DMA_PUT` se decodifica de GET a PUT dentro del objeto DMA del canal
-  (RAMIN + `CACHE1_DMA_INSTANCE`·16) y GET pasa a valer PUT. `SET_OBJECT` y los
-  `SET_CONTEXT_DMA_*` se resuelven por RAMHT (hash de xemu). Efectos que D3D espera de
-  vuelta: `BACK_END_WRITE_SEMAPHORE_RELEASE` escribe en memoria y `CLEAR_SURFACE` de color
-  rellena la superficie. No se rasteriza nada.
-- **Log de PGRAPH**: `<log>-pgraph.log`, con un método por línea y las rachas agrupadas
-  (`--pgraph-frames N` frames completos, 3 por defecto, más el primer frame que dibuja). Al
-  final del log principal va el resumen: frames (FLIP_STALL), BEGIN_END por primitiva,
-  texturas y métodos por tipo.
-- **PNG**: `<log>-pgraph-NNN.png` es el búfer de color en cada FLIP de los 10 primeros frames
-  y cada 100; `<log>-pgraph-texNN.png`, cada textura nueva que se usa al dibujar (formatos
-  de 32 y 16 bits, A8 e I8 con paleta; lineales o swizzle).
-- **Vblank** sintético a ~60 Hz en el hilo de DPC: marca `PCRTC_INTR_0`/`PMC_INTR_0` y llama
-  a la ISR de D3D, que encola su DPC y señala `m_VerticalBlankEvent`.
-- **Memoria "física"** (`MmGetPhysicalAddress`): arena contigua = 0..64 MB; la imagen del
-  XBE se ve en la ventana `NGB_PHYS_XBE` (96 MB + VA); el resto, identidad.
-- **DSP falso** de la APU: DSOUND espera que el GP DSP ponga a 0 un buzón (offset 0x810 de
-  la primera página de la lista de `NV_PAPU_GPSADDR`); el hilo de DPC lo hace por él.
-- **`fs:[0x24]`** ya no se superpone (ver FS/KPCR): era la causa del cuelgue de D3D en H7a.
-- `--symbols CSV` (de Ghidra, en NGB_DATA) añade `<función+off>` a las líneas del log y a los
-  crashes. `--log-cap N` limita las líneas por función del kernel (2000 por defecto).
+- **Registers.** `[0xFD000000, 0xFE000000)` is reserved with no access; every access faults,
+  the VEH writes the modeled value into the page, executes the instruction in single-step
+  mode and applies the effects of the write. Modeled: `PMC_BOOT_0` (0x02A000A3), W1C
+  interrupts (PMC, PFIFO, PGRAPH, PCRTC, PTIMER; writing 1 to `PCRTC_INTR_0` also clears
+  bit 24 of `PMC_INTR_0`), PBUS PCI ID, empty PFIFO, valid `DMA_CTL`, `DMA_PUT`/`DMA_GET`
+  (PFIFO and USER channel 0), a PTIMER that advances, `PFB_CSTATUS` = 64 MB, a `PFB_WBC`
+  flush that ends instantly, idle PGRAPH, `PCRTC_RASTER`, locked PRAMDAC PLLs. Anything
+  unknown is RAM and is noted once in the log. Two exceptions per access: during
+  initialization there are thousands, and per D3D frame it only touches PUT/GET, so mapping
+  the registers without side effects as RAM does not pay off. Source of offsets and values:
+  xemu `hw/xbox/nv2a`.
+- **PRAMIN** (0xFD700000) is RAM: a 1 MB section mapped at once there and at 0x83F00000
+  (the last MB of physical RAM, as on the hardware).
+- **FIFO.** Writing `DMA_PUT` decodes from GET to PUT inside the channel's DMA object
+  (RAMIN + `CACHE1_DMA_INSTANCE`·16) and GET becomes PUT. `SET_OBJECT` and the
+  `SET_CONTEXT_DMA_*` are resolved through RAMHT (xemu hash). Effects that D3D expects
+  back: `BACK_END_WRITE_SEMAPHORE_RELEASE` writes to memory and a color `CLEAR_SURFACE`
+  fills the surface. Nothing is rasterized.
+- **PGRAPH log**: `<log>-pgraph.log`, with one method per line and runs grouped
+  (`--pgraph-frames N` full frames, 3 by default, plus the first frame that draws). At the
+  end of the main log comes the summary: frames (FLIP_STALL), BEGIN_END per primitive,
+  textures and methods by type.
+- **PNG**: `<log>-pgraph-NNN.png` is the color buffer at each FLIP of the first 10 frames
+  and every 100; `<log>-pgraph-texNN.png`, each new texture used when drawing (32- and
+  16-bit formats, A8 and I8 with palette; linear or swizzled).
+- Synthetic **vblank** at ~60 Hz on the DPC thread: it sets `PCRTC_INTR_0`/`PMC_INTR_0` and
+  calls the D3D ISR, which queues its DPC and signals `m_VerticalBlankEvent`.
+- **"Physical" memory** (`MmGetPhysicalAddress`): contiguous arena = 0..64 MB; the XBE image
+  is seen in the `NGB_PHYS_XBE` window (96 MB + VA); the rest, identity.
+- **Fake DSP** of the APU: DSOUND expects the GP DSP to set a mailbox to 0 (offset 0x810 of
+  the first page of the `NV_PAPU_GPSADDR` list); the DPC thread does it on its behalf.
+- **`fs:[0x24]`** is no longer overlaid (see FS/KPCR): it was the cause of the D3D hang in
+  H7a.
+- `--symbols CSV` (from Ghidra, in NGB_DATA) adds `<function+off>` to the log lines and to
+  crashes. `--log-cap N` limits the lines per kernel function (2000 by default).
 
-Resultado (30 s de `default.xbe`): D3D y DSOUND inicializan, el juego llega a la pantalla de
-avisos ("Warnings") y envía ~40 000 frames (sin pacing: FLIP_STALL no espera al vblank),
-~800 000 BEGIN_END (TRIANGLE_STRIP con INLINE_ARRAY) y 5 texturas (fuente I8 128x128, rótulo
-A8 256x64, dos búferes de 720x480). Siguiente paso: rasterizar (HLE de D3D o PGRAPH sobre
-D3D11/Vulkan), pacing de FLIP_STALL contra el vblank y entrada del mando (XInput) para pasar
-de la pantalla de avisos.
+Result (30 s of `default.xbe`): D3D and DSOUND initialize, the game reaches the warnings
+screen ("Warnings") and sends ~40,000 frames (without pacing: FLIP_STALL does not wait for
+the vblank), ~800,000 BEGIN_END (TRIANGLE_STRIP with INLINE_ARRAY) and 5 textures (I8 128x128
+font, A8 256x64 caption, two 720x480 buffers). Next step: rasterize (D3D HLE or PGRAPH on
+D3D11/Vulkan), FLIP_STALL pacing against the vblank and gamepad input (XInput) to get past
+the warnings screen.
 
-## H7b: primer frame en una ventana de PC
+## H7b: first frame in a PC window
 
-`--window` abre la ventana del presentador (`src/gfx/present.c`: Win32 + GDI en su hilo,
-escalado entero, F12 guarda captura en `%NGB_DATA%\runs\shots`, FPS en el título).
+`--window` opens the presenter window (`src/gfx/present.c`: Win32 + GDI on its own thread,
+integer scaling, F12 saves a screenshot to `%NGB_DATA%\runs\shots`, FPS in the title).
 
-- **Enganche** (`gpu/pgraph.c`): en cada `FLIP_STALL` se presenta el búfer de color de 720 de
-  ancho que el juego limpió o dibujó en ese frame (A8R8G8B8, pitch de `SET_SURFACE_PITCH`).
-  Cada 300 frames presentados se guarda una captura automática (`<log>-pgraph-shot-NNNNN.png`).
-- **Pacing**: `FLIP_STALL` espera al siguiente 1/60 s de reloj (un vblank de 60 Hz virtual)
-  antes de devolver GET; `--no-pacing` lo quita. Desde H7c la espera se hace al volver del
-  kick, ya sin el lock del NV2A ni el de PGRAPH (issue #35); solo un kick con dos
-  `FLIP_STALL` seguidos (el push buffer en bucle del vídeo) espera dentro.
-- **Rasterizador de referencia** (`gpu/raster.c`, puro, probado en `tests/raster_test.c`):
-  triángulos con posición ya en pantalla (XYZRHW: 4 floats en el atributo 0), difuso
-  (atributo 3, `UB_D3D`/`UB_OGL`/float, o la constante de `SET_VERTEX_DATA4UB`), coordenadas
-  de la etapa 0 (atributo 9), muestreo por punto (A8R8G8B8/X8R8G8B8/R5G6B5, A8, I8 con paleta;
-  swizzle o lineales con coordenadas en texels), combinador mínimo textura x difuso, prueba de
-  alfa y mezcla con los factores GL del NV2A, interpolación con 1/w. Recorta al clip de la
-  superficie. Primitivas: TRIANGLES, TRIANGLE_STRIP, TRIANGLE_FAN, QUADS, QUAD_STRIP, POLYGON.
-- **Métodos NV097 nuevos**: `SET_VERTEX_DATA_ARRAY_FORMAT[16]`, `SET_BEGIN_END` (dibuja al
-  cerrar), `INLINE_ARRAY`, `SET_VERTEX_DATA4UB` (difuso), `SET_ALPHA_TEST_ENABLE`,
+- **Hook** (`gpu/pgraph.c`): on every `FLIP_STALL` the 720-wide color buffer that the game
+  cleared or drew in that frame is presented (A8R8G8B8, pitch from `SET_SURFACE_PITCH`).
+  Every 300 presented frames an automatic screenshot is saved
+  (`<log>-pgraph-shot-NNNNN.png`).
+- **Pacing**: `FLIP_STALL` waits for the next 1/60 s of wall-clock time (a virtual 60 Hz
+  vblank) before returning GET; `--no-pacing` removes it. Since H7c the wait is done when
+  returning from the kick, without the NV2A lock or the PGRAPH lock (issue #35); only a kick
+  with two consecutive `FLIP_STALL` (the looping push buffer of the video) waits inside.
+- **Reference rasterizer** (`gpu/raster.c`, pure, tested in `tests/raster_test.c`):
+  triangles with an already-on-screen position (XYZRHW: 4 floats in attribute 0), diffuse
+  (attribute 3, `UB_D3D`/`UB_OGL`/float, or the `SET_VERTEX_DATA4UB` constant), stage 0
+  coordinates (attribute 9), point sampling (A8R8G8B8/X8R8G8B8/R5G6B5, A8, I8 with palette;
+  swizzled or linear with texel coordinates), minimal texture x diffuse combiner, alpha test
+  and blending with the NV2A's GL factors, 1/w interpolation. Clips to the surface clip.
+  Primitives: TRIANGLES, TRIANGLE_STRIP, TRIANGLE_FAN, QUADS, QUAD_STRIP, POLYGON.
+- **New NV097 methods**: `SET_VERTEX_DATA_ARRAY_FORMAT[16]`, `SET_BEGIN_END` (draws on
+  close), `INLINE_ARRAY`, `SET_VERTEX_DATA4UB` (diffuse), `SET_ALPHA_TEST_ENABLE`,
   `SET_ALPHA_FUNC`, `SET_ALPHA_REF`, `SET_BLEND_ENABLE`, `SET_BLEND_FUNC_SFACTOR/DFACTOR`,
-  `SET_TRANSFORM_EXECUTION_MODE` (registrado), y la etapa de textura 0 ya leída en H7a
+  `SET_TRANSFORM_EXECUTION_MODE` (logged), and texture stage 0, already read in H7a
   (`OFFSET`, `FORMAT`, `CONTROL0/1`, `IMAGE_RECT`, `PALETTE`).
-- Lo que no se dibuja se cuenta en el resumen: posiciones de 3 floats (geometría 3D, que
-  necesita el intérprete de vertex programs), puntos y líneas, `DRAW_ARRAYS`/`ARRAY_ELEMENT*`
-  (vértices en memoria) y superficies swizzle.
+- What is not drawn is counted in the summary: 3-float positions (3D geometry, which needs
+  the vertex program interpreter), points and lines, `DRAW_ARRAYS`/`ARRAY_ELEMENT*`
+  (vertices in memory) and swizzled surfaces.
 
-Además, para pasar de la pantalla de avisos sin colgarse:
+In addition, to get past the warnings screen without hanging:
 
-- **Suspensiones seguras**: el juego planifica sus hilos con SuspendThread/ResumeThread.
-  Suspender un hilo con un lock del loader tomado (kernel emulado, VEH del NV2A o IRQL >=
-  DISPATCH) colgaba al resto: ahora NtSuspendThread se aplaza hasta que el hilo sale de
-  ese código (`ngb_kernel_enter`/`ngb_kernel_leave`), como la APC de suspensión del kernel real.
-- **Eventos limpiados en memoria**: D3D pone a 0 el `SignalState` de su evento de vblank sin
-  llamar al kernel; `KeWaitFor*` alinea antes el objeto de Windows con la cabecera.
-- `--pgraph-at N` vuelca al log de PGRAPH los frames N..N+2; tras `--log-cap`, el log del
-  kernel guarda una muestra cada 100 000 llamadas; el vigilante de inactividad ya no confunde
-  una carrera entre hilos con 15 s sin llamadas.
+- **Safe suspensions**: the game schedules its threads with SuspendThread/ResumeThread.
+  Suspending a thread while it held a loader lock (emulated kernel, NV2A VEH or IRQL >=
+  DISPATCH) hung the rest: now NtSuspendThread is deferred until the thread leaves that code
+  (`ngb_kernel_enter`/`ngb_kernel_leave`), like the real kernel's suspension APC.
+- **Events cleared in memory**: D3D sets the `SignalState` of its vblank event to 0 without
+  calling the kernel; `KeWaitFor*` first aligns the Windows object with the header.
+- `--pgraph-at N` dumps frames N..N+2 to the PGRAPH log; after `--log-cap`, the kernel log
+  keeps one sample every 100,000 calls; the inactivity watchdog no longer mistakes a race
+  between threads for 15 s without calls.
 
-Resultado (`--window`, 75 s de `default.xbe`): la ventana muestra la pantalla de avisos
-completa ("Warnings" y el texto que se desplaza y se funde) a 60 fps; capturas automáticas en
-`%NGB_DATA%\runs\<log>-pgraph-shot-NNNNN.png`. Tras ~40 s el juego deja los avisos, abre
-`spr.afs` y pasa a una pantalla que solo limpia a negro (no hay geometría nueva que dibujar).
-Siguiente paso: averiguar qué espera ahí (mando conectado, carga de datos o vídeo) e
-interpretar los vertex programs para la geometría 3D.
+Result (`--window`, 75 s of `default.xbe`): the window shows the full warnings screen
+("Warnings" and the text that scrolls and fades) at 60 fps; automatic screenshots in
+`%NGB_DATA%\runs\<log>-pgraph-shot-NNNNN.png`. After ~40 s the game leaves the warnings,
+opens `spr.afs` and moves to a screen that only clears to black (there is no new geometry to
+draw). Next step: find out what it waits for there (connected gamepad, data load or video)
+and interpret the vertex programs for the 3D geometry.
 
-## H7c: render con OpenGL en el runtime
+## H7c: OpenGL render in the runtime
 
-`--renderer gl|soft` elige quién dibuja. Por defecto (`gl` sin pedirlo) se usa OpenGL 4.x si
-hay `--window` y el driver da un contexto; si no, el rasterizador por software de H7b.
+`--renderer gl|soft` chooses who draws. By default (`gl` when not requested) OpenGL 4.x is
+used if there is `--window` and the driver provides a context; otherwise, the H7b software
+rasterizer.
 
-- **Hilo de render** (`gpu/pgraph_gl.c`): el contexto GL vive en un hilo propio, sobre la
-  ventana del presentador (`gfx_set_external`: GDI deja de pintar). `pgraph_kick` le pasa el
-  kick entero y espera (sigue siendo síncrono). Motivo: el kick llega desde el VEH en
-  cualquier hilo Xbox, con el TEB parcheado y una pila propia, y un contexto GL solo puede
-  estar actual en un hilo.
-- **Superficies**: cada render target (color y zeta) es una textura GL indexada por su
-  dirección física (`gpu/rcache.c`). Una textura cuya dirección es la de una superficie se
-  muestrea directamente de la GPU (render-to-texture); si además es el destino actual, se
-  copia antes (GL no deja leer y escribir a la vez). Se dibuja con la fila 0 arriba, como en
-  la Xbox, y el present la voltea.
-- **Dibujo**: `INLINE_ARRAY`, `DRAW_ARRAYS` y `ARRAY_ELEMENT16/32` con los formatos de
-  `SET_VERTEX_DATA_ARRAY_FORMAT` y `SET_VERTEX_DATA_ARRAY_OFFSET`; atributos constantes de
-  `SET_VERTEX_DATA*`. Shaders: vertex programs (`0x0B00` + LOAD/START) con `nv2a_vsh_to_glsl`
-  o, en modo fijo, un shader con la matriz compuesta; combiners con `nv2a_psh_to_glsl`;
-  estado con `glstate`. Programas cacheados por hash del microcódigo y de los combiners.
-- **Texturas**: `texconv`, con caché por dirección + formato y hash del contenido, que se
-  comprueba la primera vez que se usa cada textura en un frame.
-- **Present**: en `FLIP_STALL`, blit de la superficie de 720 al back buffer y SwapBuffers
-  (sin vsync: el ritmo lo pone el pacing). Las capturas automáticas leen la textura de la GPU.
-- **Medidas**: cada 300 frames el log escribe una línea `perf:` con los fps reales y el
-  tiempo por frame de cada fase (pusher, dibujo, clear, present, pacing, log), más llamadas al
-  kernel, accesos MMIO y kicks por frame.
-- **Pusher parado** (`gpu/nv2a.c`): con el bit 0 de `CACHE1_PUSH0` o de `CACHE1_DMA_PUSH` a 0,
-  una escritura de PUT solo se guarda, y el kick se hace al reactivarlo. Al reiniciar D3D para
-  el vídeo, el juego para el pusher, libera el push buffer viejo y escribe PUT = 0 antes que
-  GET. Antes ese PUT se ejecutaba: el pusher recorría el búfer liberado durante 4 M de
-  palabras, con FLIP_STALL de los avisos viejos y unos 2 minutos de pantalla negra, en los dos
-  renders. El log anota las escrituras del FIFO que no son un PUT normal (`NV2A: FIFO`).
+- **Render thread** (`gpu/pgraph_gl.c`): the GL context lives on its own thread, on top of
+  the presenter window (`gfx_set_external`: GDI stops painting). `pgraph_kick` hands the
+  whole kick to it and waits (it is still synchronous). Reason: the kick arrives from the VEH
+  on any Xbox thread, with a patched TEB and its own stack, and a GL context can only be
+  current on one thread.
+- **Surfaces**: every render target (color and depth) is a GL texture indexed by its
+  physical address (`gpu/rcache.c`). A texture whose address is that of a surface is sampled
+  directly on the GPU (render-to-texture); if it is also the current target, it is copied
+  first (GL does not allow reading and writing at once). Drawing is done with row 0 on top,
+  as on the Xbox, and the present flips it.
+- **Drawing**: `INLINE_ARRAY`, `DRAW_ARRAYS` and `ARRAY_ELEMENT16/32` with the formats of
+  `SET_VERTEX_DATA_ARRAY_FORMAT` and `SET_VERTEX_DATA_ARRAY_OFFSET`; constant attributes from
+  `SET_VERTEX_DATA*`. Shaders: vertex programs (`0x0B00` + LOAD/START) with
+  `nv2a_vsh_to_glsl` or, in fixed mode, a shader with the composed matrix; combiners with
+  `nv2a_psh_to_glsl`; state with `glstate`. Programs are cached by hash of the microcode and
+  the combiners.
+- **Textures**: `texconv`, with a cache by address + format and a content hash, which is
+  checked the first time each texture is used in a frame.
+- **Present**: on `FLIP_STALL`, blit of the 720 surface to the back buffer and SwapBuffers
+  (no vsync: the pace is set by the pacing). Automatic screenshots read the GPU texture.
+- **Measurements**: every 300 frames the log writes a `perf:` line with the real fps and
+  the time per frame of each phase (pusher, draw, clear, present, pacing, log), plus kernel
+  calls, MMIO accesses and kicks per frame.
+- **Stopped pusher** (`gpu/nv2a.c`): with bit 0 of `CACHE1_PUSH0` or `CACHE1_DMA_PUSH` at 0,
+  a PUT write is only stored, and the kick is done when it is re-enabled. When restarting D3D
+  for the video, the game stops the pusher, frees the old push buffer and writes PUT = 0
+  before GET. Before, that PUT was executed: the pusher walked the freed buffer for 4 M
+  words, with FLIP_STALLs from the old warnings and about 2 minutes of black screen, in both
+  renders. The log notes the FIFO writes that are not a normal PUT (`NV2A: FIFO`).
 
-## Deuda conocida
+## Known debt
 
-- 106 de las 128 funciones que importa `default.xbe` tienen implementación (119 exports
-  en total). Faltan 22: la pila de E/S por IRP (`IoBuildSynchronousFsdRequest`,
+- 106 of the 128 functions that `default.xbe` imports have an implementation (119 exports
+  in total). 22 are missing: the IRP I/O stack (`IoBuildSynchronousFsdRequest`,
   `IoInvalidDeviceRequest`, `IoStartNextPacket`, `IoStartPacket`,
   `IoSynchronousDeviceIoControlRequest`, `IoSynchronousFsdRequest`, `IofCallDriver`,
-  `IofCompleteRequest`, `IoMarkIrpMustComplete`), `NtDeleteFile`, `ObReferenceObjectByName` y la criptografía `Xc*` (SHA-1, RC4, HMAC, RSA, DES). Además,
-  `ObReferenceObjectByHandle` solo resuelve hilos y renombrar archivos no está hecho.
-- E/S síncrona: las rutinas APC de `NtReadFile` no se llaman.
-- Interrupciones: solo el vblank del NV2A (sintético, H7a); la de USB no existe. Los timers
-  tienen ~16 ms de granularidad.
-- H7a: sin rasterizado ni pacing de FLIP_STALL; DSP de la APU falso; la traducción de
-  direcciones "físicas" es aproximada (arena, ventana del XBE, identidad).
-- Las tablas de secciones críticas y objetos crecen sin liberar; las pilas Xbox no se liberan.
-- Atajos frágiles documentados arriba: superposición en el TEB y cabecera PE sombra.
+  `IofCompleteRequest`, `IoMarkIrpMustComplete`), `NtDeleteFile`, `ObReferenceObjectByName`
+  and the `Xc*` cryptography (SHA-1, RC4, HMAC, RSA, DES). Also,
+  `ObReferenceObjectByHandle` only resolves threads and renaming files is not done.
+- Synchronous I/O: the APC routines of `NtReadFile` are not called.
+- Interrupts: only the NV2A vblank (synthetic, H7a); there is no USB one. Timers have ~16 ms
+  granularity.
+- H7a: no rasterization or FLIP_STALL pacing; fake APU DSP; the translation of "physical"
+  addresses is approximate (arena, XBE window, identity).
+- The critical section and object tables grow without being freed; Xbox stacks are not
+  freed.
+- Fragile shortcuts documented above: TEB overlay and shadow PE header.
 
-## Jugar
+## Playing
 
 ```
-portuild.cmd      compila (una vez)
-port\play.cmd       abre el juego en una ventana: sonido, mando de PC y teclado
+port\build.cmd      build (once)
+port\play.cmd       opens the game in a window: sound, PC gamepad and keyboard
 port\play.cmd --mute
 ```
 
-- Con `--window` (lo que usa `play.cmd`) no hay límites de tiempo ni de llamadas, salvo que se pidan con
-  `--timeout`, `--max-calls` o `--idle`.
-- El teclado solo cuenta con la ventana del juego activa:
+- With `--window` (what `play.cmd` uses) there are no time or call limits, unless they are
+  requested with `--timeout`, `--max-calls` or `--idle`.
+- The keyboard only counts while the game window is active:
   - Enter = START + A, Esc = BACK + B;
-  - flechas = cruceta, WASD = stick izquierdo;
+  - arrows = D-pad, WASD = left stick;
   - J K L I = A B X Y.

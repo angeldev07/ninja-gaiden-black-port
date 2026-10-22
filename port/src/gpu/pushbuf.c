@@ -1,5 +1,5 @@
 /*
- * pushbuf.c: decodificador del push buffer (ver pushbuf.h).
+ * pushbuf.c: push buffer decoder (see pushbuf.h).
  */
 #include "pushbuf.h"
 
@@ -31,7 +31,7 @@ uint32_t pb_run(pb_state_t *st, const uint8_t *base, uint32_t limit, uint32_t ge
             ok_page = get >> 12;
         }
         if (st->count > 1 && st->non_increasing && cb && cb->bulk) {
-            /* Racha de datos: hasta PUT (o el límite), el fin de la página y el tope de palabras. */
+            /* Data run: up to PUT (or the limit), the end of the page and the word cap. */
             uint32_t n = st->count, room = ((put > get && put < limit ? put : limit) - get) / 4;
             uint32_t page = (0x1000u - (get & 0xFFFu)) / 4;
             if (n > room)
@@ -80,7 +80,7 @@ uint32_t pb_run(pb_state_t *st, const uint8_t *base, uint32_t limit, uint32_t ge
             if (!st->in_subroutine) {
                 st->errors++;
                 emit(cb, user, PB_EVENT_ERROR, at, word, 0);
-                continue; /* como xemu: se registra y se sigue */
+                continue; /* like xemu: it is logged and processing continues */
             }
             st->in_subroutine = 0;
             get = st->return_get;

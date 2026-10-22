@@ -80,7 +80,7 @@ class LoaderRunTest(unittest.TestCase):
                 env={**os.environ, "NGB_DATA": tmp},
             )
         self.assertNotEqual(result.returncode, EXIT_OK)
-        self.assertIn(b"repo git", result.stderr)
+        self.assertIn(b"git repo", result.stderr)
         self.assertFalse(log.exists())
 
     def test_exited_thread_is_signalled_with_its_status(self) -> None:
@@ -94,7 +94,7 @@ class LoaderRunTest(unittest.TestCase):
     def test_boot_calls_kernel_and_returns(self) -> None:
         code, log = self.run_xbe(build_loader_xbe(boot_code()))
         self.assertEqual(code, EXIT_OK, log)
-        self.assertIn("thunk: 0x00011800, 3 funciones + 1 variables enlazadas", log)
+        self.assertIn("thunk: 0x00011800, 3 functions + 1 variables linked", log)
         freq = re.search(
             rf"\[1\] T1 @\w+ {KE_QUERY_PERFORMANCE_FREQUENCY} "
             r"KeQueryPerformanceFrequency\(\) -> 0x(\w+)",
@@ -109,25 +109,25 @@ class LoaderRunTest(unittest.TestCase):
             f"{RTL_INIT_ANSI_STRING} RtlInitAnsiString(0x{ANSI_VA:08X}, 0x{HOLA_VA:08X})", log
         )
         self.assertIn("DbgPrint: len=4", log)  # la pila stdcall quedó bien: siguió ejecutando
-        self.assertIn("el entry point ha vuelto", log)
+        self.assertIn("the entry point returned", log)
         self.assertIn("STOP OK", log)
-        self.assertIn("resumen: 3 funciones distintas llamadas (3 implementadas)", log)
+        self.assertIn("summary: 3 distinct functions called (3 implemented)", log)
 
     def test_unimplemented_call_stops(self) -> None:
         xbe = build_loader_xbe(unimplemented_code(), imports=(HAL_READ_SMC_TRAY_STATE,))
         code, log = self.run_xbe(xbe)
         self.assertEqual(code, EXIT_UNIMPLEMENTED, log)
-        self.assertIn("9 HalReadSMCTrayState(0, 0) -> NO IMPLEMENTADA", log)
-        self.assertIn("primera sin implementar: 9 HalReadSMCTrayState", log)
+        self.assertIn("9 HalReadSMCTrayState(0, 0) -> NOT IMPLEMENTED", log)
+        self.assertIn("first unimplemented: 9 HalReadSMCTrayState", log)
 
     def test_unmodelled_mmio_is_reported_as_crash(self) -> None:
         """Con --mmio-strict, un acceso a la APU para la ejecución con informe."""
         xbe = build_loader_xbe(mmio_code(0xFE820010), imports=())
         code, log = self.run_xbe(xbe, "--mmio-strict")
         self.assertEqual(code, EXIT_CRASH, log)
-        self.assertIn("EXCEPCIÓN ACCESS_VIOLATION", log)
-        self.assertIn("lectura de 0xFE820010: MMIO APU (audio)", log)
-        self.assertIn("código del XBE", log)
+        self.assertIn("EXCEPTION ACCESS_VIOLATION", log)
+        self.assertIn("read of 0xFE820010: MMIO APU (audio)", log)
+        self.assertIn("XBE code", log)
 
     def test_nv2a_registers_and_push_buffer(self) -> None:
         """H7a: PMC_BOOT_0, flush de PFB que termina solo y un push buffer decodificado."""
@@ -139,7 +139,7 @@ class LoaderRunTest(unittest.TestCase):
         self.assertIn("SET_COLOR_CLEAR_VALUE              = 0xFF336699", pg)
         self.assertIn("CLEAR_SURFACE                      = 0x000000F0", pg)
         self.assertIn("FLIP_STALL", pg)
-        self.assertIn("fin del frame 0", pg)
+        self.assertIn("end of frame 0", pg)
 
 
 @unittest.skipUnless(os.name == "nt" and HOSTPATH_TEST.is_file(), "requiere el test C compilado")

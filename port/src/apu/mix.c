@@ -1,5 +1,5 @@
 /*
- * mix.c: lectura de muestras de las voces de la APU y mezcla a estéreo. Ver mix.h.
+ * mix.c: reading APU voice samples and mixing to stereo. See mix.h.
  */
 #include "apu/mix.h"
 
@@ -28,7 +28,7 @@ void mix_adpcm_decode(const uint8_t *block, int channels, int16_t out[2][MIX_ADP
         const uint8_t *h = block + c * 4;
         int pred = (int16_t)(h[0] | h[1] << 8), index = h[2] > 88 ? 88 : h[2], n = 1;
         out[c][0] = (int16_t)pred;
-        /* Datos: grupos de 4 bytes (8 nibbles) por canal, entrelazados, nibble bajo primero. */
+        /* Data: groups of 4 bytes (8 nibbles) per channel, interleaved, low nibble first. */
         for (i = 0; i < 8; i++) {
             const uint8_t *g = block + channels * 4 + (i * channels + c) * 4;
             int k;
@@ -50,11 +50,11 @@ void mix_adpcm_decode(const uint8_t *block, int channels, int16_t out[2][MIX_ADP
     }
 }
 
-/* Dirección lineal del búfer de la voz -> memoria del host, por la tabla SGE (páginas de 4 KB). */
+/* Linear address of the voice buffer -> host memory, through the SGE table (4 KB pages). */
 static const uint8_t *sge_ptr(mix_ctx_t *m, uint32_t linear, uint32_t len) {
     const uint8_t *entry;
     uint32_t page;
-    if (((linear & 0xFFFu) + len) > 0x1000u) /* no cruza página: el llamador lee por partes */
+    if (((linear & 0xFFFu) + len) > 0x1000u) /* does not cross a page: the caller reads in parts */
         return NULL;
     entry = m->phys(m->sge_phys + (linear >> 12) * 8u, 4);
     if (!entry)
@@ -77,17 +77,17 @@ float mix_voice_sample(mix_ctx_t *m, uint32_t handle, const uint8_t *voice, uint
     uint32_t fmt = rd32(voice + VP_VOICE_CFG_FMT), ba = rd32(voice + VP_VOICE_CUR_PSL_START) & VP_OFFSET_MASK;
     uint32_t container = fmt >> 30, sample_size = (fmt >> 28) & 3u;
     int channels = (fmt & (1u << 27)) ? 2 : 1;
-    if (fmt & (1u << 24)) /* voz de stream (SSL): todavía no */
+    if (fmt & (1u << 24)) /* stream voice (SSL): not yet */
         return 0.0f;
     if (ch >= channels)
         ch = channels - 1;
-    if (container == 2) { /* ADPCM: bloques de 36 bytes por canal y 64 muestras */
+    if (container == 2) { /* ADPCM: blocks of 36 bytes per channel and 64 samples */
         mix_voice_cache_t *c = &m->cache[handle % VP_MAX_VOICES];
         uint32_t block = cbo / MIX_ADPCM_SAMPLES, bytes = MIX_ADPCM_BLOCK * (uint32_t)channels;
         if (c->block != block + 1 || c->ba != ba) {
             uint8_t raw[MIX_ADPCM_BLOCK * 2];
             uint32_t i, linear = ba + block * bytes;
-            for (i = 0; i < bytes; i += 4) { /* palabra a palabra: puede cruzar de página */
+            for (i = 0; i < bytes; i += 4) { /* word by word: it may cross a page */
                 const uint8_t *p = sge_ptr(m, linear + i, 4);
                 if (!p)
                     return 0.0f;
@@ -100,14 +100,14 @@ float mix_voice_sample(mix_ctx_t *m, uint32_t handle, const uint8_t *voice, uint
         return c->pcm[ch][cbo % MIX_ADPCM_SAMPLES] / 32768.0f;
     } else {
         uint32_t csize = container_bytes[container];
-        uint32_t spb = 1u + ((fmt >> 16) & 0x1Fu); /* muestras por bloque: canales del frame */
+        uint32_t spb = 1u + ((fmt >> 16) & 0x1Fu); /* samples per block: channels of the frame */
         const uint8_t *p = sge_ptr(m, ba + cbo * csize * spb + (uint32_t)ch * csize, csize);
         return p ? pcm_value(p, sample_size) : 0.0f;
     }
 }
 
 static float attenuation(uint32_t vol) {
-    return vol >= 0xFFFu ? 0.0f : powf(10.0f, (float)vol / -1280.0f); /* 1/64 dB por paso */
+    return vol >= 0xFFFu ? 0.0f : powf(10.0f, (float)vol / -1280.0f); /* 1/64 dB per step */
 }
 
 void mix_voice_gains(const uint8_t *voice, int is3d, float g[2][2]) {
@@ -140,21 +140,21 @@ void mix_voice_gains(const uint8_t *voice, int is3d, float g[2][2]) {
         float a = attenuation(vol[b]);
         float *ch = g[b % channels];
         switch (bin[b]) {
-        case 0: ch[0] += a; break;                                /* frontal izquierdo */
-        case 1: ch[1] += a; break;                                /* frontal derecho */
-        case 2: ch[0] += 0.707f * a; ch[1] += 0.707f * a; break;  /* central */
-        case 4: ch[0] += 0.5f * a; break;                         /* trasero izquierdo */
-        case 5: ch[1] += 0.5f * a; break;                         /* trasero derecho */
-        default: break;                                           /* LFE y efectos */
+        case 0: ch[0] += a; break;                                /* front left */
+        case 1: ch[1] += a; break;                                /* front right */
+        case 2: ch[0] += 0.707f * a; ch[1] += 0.707f * a; break;  /* center */
+        case 4: ch[0] += 0.5f * a; break;                         /* rear left */
+        case 5: ch[1] += 0.5f * a; break;                         /* rear right */
+        default: break;                                           /* LFE and effects */
         }
     }
 }
 
 int mix_voice_is_dsp_feed(const uint8_t *voice) {
-    /* DirectSound arranca voces propias en bucle sobre 32 muestras que en la Xbox rellena el
-       DSP (GP) con la mezcla de efectos. Sin DSP emulado esas muestras son basura a volumen
-       máximo en todos los mixbins: un ruido constante. Ninguna voz de sonido real tiene un
-       bucle tan corto (en NGB, las voces 64-67 con EBO 0x1F). */
+    /* DirectSound starts its own voices looping over 32 samples which on the Xbox the DSP
+       (GP) fills with the effects mix. Without an emulated DSP those samples are garbage at
+       maximum volume in all the mixbins: constant noise. No real sound voice has such a short
+       loop (in NGB, voices 64-67 with EBO 0x1F). */
     uint32_t fmt = rd32(voice + VP_VOICE_CFG_FMT);
     uint32_t ebo = rd32(voice + VP_VOICE_PAR_NEXT) & VP_OFFSET_MASK;
     return (fmt & VP_FMT_LOOP) && ebo < 256;
@@ -174,7 +174,7 @@ void mix_render(vp_state_t *s, mix_ctx_t *m, float *out, uint32_t frames) {
             continue;
         rate = vp_voice_rate(v) / 48000.0;
         mix_voice_gains(v, h < MIX_3D_VOICES, g);
-        audible = !mix_voice_is_dsp_feed(v) && /* avanza, pero no se oye */
+        audible = !mix_voice_is_dsp_feed(v) && /* advances, but is not heard */
                   (g[0][0] > 0.0f || g[0][1] > 0.0f || g[1][0] > 0.0f || g[1][1] > 0.0f);
         stereo = (rd32(v + VP_VOICE_CFG_FMT) & (1u << 27)) != 0;
         pos = s->frac[h];
@@ -191,7 +191,7 @@ void mix_render(vp_state_t *s, mix_ctx_t *m, float *out, uint32_t frames) {
             step = (uint32_t)pos;
             pos -= step;
             if (step && !vp_voice_move(s, h, v, step))
-                break; /* la voz terminó */
+                break; /* the voice ended */
         }
         s->frac[h] = pos;
     }

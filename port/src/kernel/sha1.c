@@ -1,5 +1,5 @@
 /*
- * sha1.c: SHA-1 (FIPS 180-4) y HMAC-SHA1 (RFC 2104). Ver sha1.h.
+ * sha1.c: SHA-1 (FIPS 180-4) and HMAC-SHA1 (RFC 2104). See sha1.h.
  */
 #include "kernel/sha1.h"
 
@@ -98,7 +98,7 @@ void ngb_hmac_sha1(const void *key, size_t key_len, const void *data1, size_t le
     uint8_t k[NGB_SHA1_BLOCK] = {0}, pad[NGB_SHA1_BLOCK], inner[NGB_SHA1_DIGEST];
     ngb_sha1_t c;
     int i;
-    if (key_len > NGB_SHA1_BLOCK) { /* claves largas: se usa su hash */
+    if (key_len > NGB_SHA1_BLOCK) { /* long keys: their hash is used */
         ngb_sha1_init(&c);
         ngb_sha1_update(&c, key, key_len);
         ngb_sha1_final(&c, k);

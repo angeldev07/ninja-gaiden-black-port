@@ -1,14 +1,14 @@
 /*
- * eeprom.h: imagen de la EEPROM de la Xbox (256 bytes) para ExQueryNonVolatileSetting.
+ * eeprom.h: Xbox EEPROM image (256 bytes) for ExQueryNonVolatileSetting.
  *
- * XAPI pide la EEPROM entera (índice XC_MAX_ALL = 0xFFFF) cuando XboxHDKey es cero: la
- * firma "no itinerante" de los archivos del disco duro (XCalculateSignatureBeginEx) usa
- * entonces como clave los 16 bytes del offset 0x36 de la imagen. Antes solo se escribían 4
- * bytes y el resto era basura de la pila del juego, así que la firma de T:\system.dat
- * cambiaba de una ejecución a otra ("Unable to load game settings").
+ * XAPI asks for the whole EEPROM (index XC_MAX_ALL = 0xFFFF) when XboxHDKey is zero: the
+ * "non-roaming" signature of the hard drive files (XCalculateSignatureBeginEx) then
+ * uses as its key the 16 bytes at offset 0x36 of the image. Before, only 4 bytes were
+ * written and the rest was garbage from the game's stack, so the signature of T:\system.dat
+ * changed from one run to the next ("Unable to load game settings").
  *
- * Disposición (xboxdevwiki, "EEPROM"; Cxbx-Reloaded, XBOX_EEPROM): sección cifrada
- * 0x00-0x2F, de fábrica 0x30-0x5F y de usuario 0x60-0xFF. Pura: sin Windows ni loader.
+ * Layout (xboxdevwiki, "EEPROM"; Cxbx-Reloaded, XBOX_EEPROM): encrypted section
+ * 0x00-0x2F, factory 0x30-0x5F and user 0x60-0xFF. Pure: no Windows or loader.
  */
 #pragma once
 
@@ -21,17 +21,17 @@
 #define EEPROM_USER_OFFSET 0x60u
 #define EEPROM_USER_SIZE 0xA0u
 
-/* Valores que devuelve el kernel emulado (los mismos que los índices sueltos). */
-#define EEPROM_LANGUAGE 1u              /* inglés */
+/* Values returned by the emulated kernel (the same as for the individual indices). */
+#define EEPROM_LANGUAGE 1u              /* English */
 #define EEPROM_AV_REGION 0x00800300u    /* PAL-I */
-#define EEPROM_GAME_REGION 4u           /* resto del mundo */
+#define EEPROM_GAME_REGION 4u           /* rest of the world */
 #define EEPROM_DVD_REGION 2u
-#define EEPROM_SERIAL "000000000000"    /* 12 caracteres */
+#define EEPROM_SERIAL "000000000000"    /* 12 characters */
 
-/* Rellena `out` (EEPROM_SIZE bytes) con una EEPROM determinista: claves a cero, número de
- * serie y regiones de arriba y ajustes de usuario por defecto. */
+/* Fills `out` (EEPROM_SIZE bytes) with a deterministic EEPROM: keys at zero, serial
+ * number and the regions above, and default user settings. */
 void eeprom_image(uint8_t out[EEPROM_SIZE]);
 
-/* Bloque que devuelven los índices XC_MAX_OS (0xFF), XC_MAX_FACTORY (0x1FF) y XC_MAX_ALL
- * (0xFFFF): offset y longitud dentro de la imagen. 0 si `index` es uno de ellos; -1 si no. */
+/* Block returned by the indices XC_MAX_OS (0xFF), XC_MAX_FACTORY (0x1FF) and XC_MAX_ALL
+ * (0xFFFF): offset and length inside the image. 0 if `index` is one of them; -1 if not. */
 int eeprom_section(uint32_t index, uint32_t *offset, uint32_t *length);

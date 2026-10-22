@@ -1,5 +1,5 @@
 /*
- * impl_ps.c: hilos (Ps*, Nt*Thread) y referencias a objetos (Ob*).
+ * impl_ps.c: threads (Ps*, Nt*Thread) and object references (Ob*).
  */
 #include "../ngb.h"
 
@@ -23,7 +23,7 @@ static uint64_t PsCreateSystemThreadEx(uint32_t *args) {
     if (PTR(4))
         *(uint32_t *)PTR(4) = t->tid;
     ngb_log("    · PsCreateSystemThreadEx: T%d tid %lu, start 0x%08X ctx 0x%08X system 0x%08X, "
-            "pila 0x%X, TLS %u, extensión %u",
+            "stack 0x%X, TLS %u, extension %u",
             t->index, t->tid, ARG(5), ARG(6), ARG(9), ARG(2), ARG(3), ARG(1));
     return STATUS_SUCCESS;
 }
@@ -38,7 +38,7 @@ static uint64_t PsCreateSystemThread(uint32_t *args) {
     a[5] = ARG(2);
     a[6] = ARG(3);
     a[8] = ARG(4); /* DebuggerThread (nxdk: ThreadHandle, ThreadId, StartRoutine,
-                    * StartContext, DebuggerThread); a[7] es CreateSuspended, que queda 0 */
+                    * StartContext, DebuggerThread); a[7] is CreateSuspended, which stays 0 */
     return PsCreateSystemThreadEx(a);
 }
 
@@ -59,7 +59,7 @@ static uint64_t ObReferenceObjectByHandle(uint32_t *args) {
         *(uint32_t *)PTR(2) = (uint32_t)(uintptr_t)t->ethread;
         return STATUS_SUCCESS;
     }
-    ngb_log("    · ObReferenceObjectByHandle: handle 0x%08X (tipo 0x%08X) no es un hilo", ARG(0),
+    ngb_log("    · ObReferenceObjectByHandle: handle 0x%08X (type 0x%08X) is not a thread", ARG(0),
             ARG(1));
     return RET32(STATUS_INVALID_HANDLE);
 }
@@ -72,8 +72,8 @@ static uint64_t ObfReference(uint32_t *args) {
 
 /* 231 NTSTATUS NtSuspendThread(HANDLE, PULONG PreviousSuspendCount) */
 static uint64_t NtSuspendThread(uint32_t *args) {
-    /* Un hilo Xbox dentro del kernel emulado o del VEH puede tener locks del loader: nunca
-     * se congela ahí; se aparca al salir (ngb_thread_suspend, thread.c). */
+    /* An Xbox thread inside the emulated kernel or the VEH may hold loader locks: it is never
+     * frozen there; it is parked on exit (ngb_thread_suspend, thread.c). */
     ngb_thread_t *t = ngb_thread_from_handle((HANDLE)PTR(0));
     LONG r = t ? ngb_thread_suspend(t) : (LONG)SuspendThread((HANDLE)PTR(0));
     if (r == -1)

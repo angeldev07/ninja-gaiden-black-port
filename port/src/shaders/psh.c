@@ -1,41 +1,41 @@
 /*
- * psh.c: register combiners del NV2A -> fragment shader GLSL 4.00.
+ * psh.c: NV2A register combiners -> GLSL 4.00 fragment shader.
  *
- * Implementación propia a partir de la descripción del formato; no reutiliza código de
- * xemu ni de Cxbx-Reloaded (GPL) ni nada del XDK. Fuentes consultadas:
- *   - NVIDIA, extensión GL_NV_register_combiners (y _2): el modelo de etapas generales y
- *     final, los mapeos de entrada, AB/CD/SUM/MUX, escala y sesgo, blue-to-alpha.
+ * Own implementation from the format description; it does not reuse code from
+ * xemu or Cxbx-Reloaded (GPL) nor anything from the XDK. Sources consulted:
+ *   - NVIDIA, extension GL_NV_register_combiners (and _2): the general and final stage
+ *     model, the input mappings, AB/CD/SUM/MUX, scale and bias, blue-to-alpha.
  *     https://registry.khronos.org/OpenGL/extensions/NV/NV_register_combiners.txt
- *   - xemu, hw/xbox/nv2a/pgraph/glsl/psh.c y nv2a_regs.h: posición de los campos en las
- *     palabras NV097, inicialización de r0.a, condición del mux y combiner final.
+ *   - xemu, hw/xbox/nv2a/pgraph/glsl/psh.c and nv2a_regs.h: position of the fields in the
+ *     NV097 words, initialization of r0.a, mux condition and final combiner.
  *     https://github.com/xemu-project/xemu/tree/master/hw/xbox/nv2a
- *   - Cxbx-Reloaded, src/core/hle/D3D8/XbPixelShader.cpp: valores de los PS_* de la
- *     estructura de pixel shader de D3D, que son las mismas palabras.
+ *   - Cxbx-Reloaded, src/core/hle/D3D8/XbPixelShader.cpp: values of the PS_* of the
+ *     D3D pixel shader structure, which are the same words.
  *
- * Palabras (métodos NV097 verificados en nv2a_regs.h de xemu):
+ * Words (NV097 methods verified in xemu's nv2a_regs.h):
  *
- *   COMBINER_CONTROL 0x1E60: bits 0-7 etapas (1-8), bit 8 mux por el bit alto de r0.a
- *     (si no, por el bajo), bit 12 C0 propia por etapa, bit 16 C1 propia por etapa.
- *   COLOR_ICW / ALPHA_ICW (0x0AC0 / 0x0260 + 4i): A en el byte alto ... D en el bajo. Cada
- *     byte: bits 0-3 registro, bit 4 canal (RGB: .rgb o .aaa; alfa: .b o .a), bits 5-7
- *     mapeo (psh_map).
- *   COLOR_OCW / ALPHA_OCW (0x1E40 / 0x0AA0 + 4i): bits 0-3 destino de CD, 4-7 de AB, 8-11
- *     de SUM; bit 12 CD producto escalar, 13 AB producto escalar, 14 SUM es mux, 15-17
- *     escala y sesgo (psh_scale), 18 CD blue-to-alpha, 19 AB blue-to-alpha (solo RGB).
- *   SPECULAR_FOG_CW0 0x0288: A, B, C, D del final; CW1 0x028C: E, F, G y en el byte bajo
- *     0x80 clamp de V1R0_SUM, 0x40 complementa v1, 0x20 complementa r0.
- *   SHADER_STAGE_PROGRAM 0x1E70: modo de la etapa i en los bits 5i a 5i+4.
- *   SHADER_OTHER_STAGE_INPUT 0x1E78: etapa fuente de la 2 en los bits 16-19 y de la 3 en
- *     los 20-23 (la 1 siempre lee de la 0).
- *   SHADER_CLIP_PLANE_MODE 0x17F8: bit 4i + k, componente k de la etapa i: 1 = descarta si
- *     la coordenada es >= 0, 0 = si es < 0.
+ *   COMBINER_CONTROL 0x1E60: bits 0-7 stages (1-8), bit 8 mux by the high bit of r0.a
+ *     (otherwise by the low one), bit 12 own C0 per stage, bit 16 own C1 per stage.
+ *   COLOR_ICW / ALPHA_ICW (0x0AC0 / 0x0260 + 4i): A in the high byte ... D in the low one. Each
+ *     byte: bits 0-3 register, bit 4 channel (RGB: .rgb or .aaa; alpha: .b or .a), bits 5-7
+ *     mapping (psh_map).
+ *   COLOR_OCW / ALPHA_OCW (0x1E40 / 0x0AA0 + 4i): bits 0-3 destination of CD, 4-7 of AB, 8-11
+ *     of SUM; bit 12 CD dot product, 13 AB dot product, 14 SUM is mux, 15-17
+ *     scale and bias (psh_scale), 18 CD blue-to-alpha, 19 AB blue-to-alpha (RGB only).
+ *   SPECULAR_FOG_CW0 0x0288: A, B, C, D of the final; CW1 0x028C: E, F, G and in the low byte
+ *     0x80 clamp of V1R0_SUM, 0x40 complements v1, 0x20 complements r0.
+ *   SHADER_STAGE_PROGRAM 0x1E70: mode of stage i in bits 5i to 5i+4.
+ *   SHADER_OTHER_STAGE_INPUT 0x1E78: source stage of stage 2 in bits 16-19 and of stage 3 in
+ *     20-23 (stage 1 always reads from 0).
+ *   SHADER_CLIP_PLANE_MODE 0x17F8: bit 4i + k, component k of stage i: 1 = discard if
+ *     the coordinate is >= 0, 0 = if it is < 0.
  *
- * Semántica emulada: entradas mapeadas; AB = A·B (o dot), CD = C·D (o dot), SUM = AB + CD
- * o mux(AB, CD) con r0.a; escala y sesgo sobre las tres salidas y acotado a [-1, 1]; las
- * escrituras van después de leer todo (RGB, luego alfa, luego blue-to-alpha). r0.a empieza
- * valiendo t0.a si la etapa 0 tiene textura (1 si no). Final: rgb = A·B + (1 - A)·C + D,
- * alfa = G, con EF_PROD = E·F y V1R0_SUM = v1 + r0 (complementos y clamp opcionales). Las
- * constantes y el fog son uniforms: el juego las cambia sin recompilar el shader.
+ * Emulated semantics: mapped inputs; AB = A·B (or dot), CD = C·D (or dot), SUM = AB + CD
+ * or mux(AB, CD) with r0.a; scale and bias on the three outputs and clamped to [-1, 1];
+ * writes happen after reading everything (RGB, then alpha, then blue-to-alpha). r0.a starts
+ * as t0.a if stage 0 has a texture (1 otherwise). Final: rgb = A·B + (1 - A)·C + D,
+ * alpha = G, with EF_PROD = E·F and V1R0_SUM = v1 + r0 (optional complements and clamp). The
+ * constants and the fog are uniforms: the game changes them without recompiling the shader.
  */
 #include "psh.h"
 
@@ -56,18 +56,18 @@ static const char *const k_tex_names[PSH_TEX_MODE_COUNT] = {
 
 const char *nv2a_psh_error(int code) {
     switch (code) {
-    case PSH_ERR_ARGS: return "argumentos inválidos";
-    case PSH_ERR_STAGES: return "número de etapas fuera de [1, 8]";
-    case PSH_ERR_REGISTER: return "registro no válido en esa posición";
-    case PSH_ERR_FLAGS: return "escala reservada o flag solo de RGB en la parte de alfa";
-    case PSH_ERR_FINAL: return "mapeo no admitido en el combiner final";
-    case PSH_ERR_TEXMODE: return "modo de textura no válido";
-    case PSH_ERR_SPACE: return "el GLSL no cabe en el buffer";
-    default: return code >= 0 ? "ok" : "error desconocido";
+    case PSH_ERR_ARGS: return "invalid arguments";
+    case PSH_ERR_STAGES: return "number of stages outside [1, 8]";
+    case PSH_ERR_REGISTER: return "register not valid at that position";
+    case PSH_ERR_FLAGS: return "reserved scale or RGB-only flag in the alpha part";
+    case PSH_ERR_FINAL: return "mapping not supported in the final combiner";
+    case PSH_ERR_TEXMODE: return "invalid texture mode";
+    case PSH_ERR_SPACE: return "the GLSL does not fit in the buffer";
+    default: return code >= 0 ? "ok" : "unknown error";
     }
 }
 
-/* ---- decodificación -------------------------------------------------------------------- */
+/* ---- decoding -------------------------------------------------------------------------- */
 
 static psh_input decode_input(uint32_t word, int slot) {
     uint32_t byte = (word >> (24 - 8 * slot)) & 0xFFu;
@@ -138,7 +138,7 @@ static int decode_final(uint32_t abcd, uint32_t efg, psh_final *f) {
             return PSH_ERR_REGISTER;
         }
         if (k >= 4 && k <= 5 && reg == PSH_REG_EF_PROD) {
-            return PSH_ERR_REGISTER; /* E y F no pueden leer su propio producto */
+            return PSH_ERR_REGISTER; /* E and F cannot read their own product */
         }
         if (f->in[k].map > PSH_MAP_UNSIGNED_INVERT) {
             return PSH_ERR_FINAL;
@@ -243,7 +243,7 @@ static const char *reg_var(uint8_t reg) {
     }
 }
 
-/* El valor mapeado de una entrada: vec3 (`rgb` = 1) o float. */
+/* The mapped value of an input: vec3 (`rgb` = 1) or float. */
 static void emit_input(glsl_buf *b, const psh_input *in, int rgb) {
     const char *var = reg_var(in->reg);
     char src[32];
@@ -282,7 +282,7 @@ static void emit_scale(glsl_buf *b, const char *name, uint8_t scale, int rgb) {
     glsl_emit(b, "        %s = clamp(%s, %s, %s);\n", name, name, lo, hi);
 }
 
-/* Las tres salidas de una mitad: ab, cd y sum (con sufijo `_a` en la de alfa). */
+/* The three outputs of a half: ab, cd and sum (with suffix `_a` on the alpha one). */
 static void emit_portion(glsl_buf *b, const psh_portion *p, int rgb) {
     const char *type = rgb ? "vec3" : "float";
     const char *sfx = rgb ? "" : "_a";
@@ -331,7 +331,7 @@ static void emit_writes(glsl_buf *b, const psh_portion *p, int rgb) {
 
 static void emit_stage(glsl_buf *b, const psh_program *p, int s) {
     const psh_stage *st = &p->stage[s];
-    glsl_emit(b, "    /* etapa %d */\n    {\n", s);
+    glsl_emit(b, "    /* stage %d */\n    {\n", s);
     glsl_emit(b, "        vec4 c0 = psC0[%d];\n        vec4 c1 = psC1[%d];\n",
               p->unique_c0 ? s : 0, p->unique_c1 ? s : 0);
     if (st->rgb.mux || st->alpha.mux) {
@@ -370,8 +370,8 @@ static void emit_texture(glsl_buf *b, const psh_program *p, int i) {
     int src = p->tex_source[i];
     int k;
     if (p->shadow[i]) {
-        /* Mapa de sombras (como el NV2A): la profundidad guardada, en unidades del búfer Z,
-         * se compara con la z proyectada (PROJECT3D) o con 0 (PROJECT2D). */
+        /* Shadow map (like the NV2A): the stored depth, in Z buffer units,
+         * is compared with the projected z (PROJECT3D) or with 0 (PROJECT2D). */
         static const char *const ops[8] = {NULL, "<", "==", "<=", ">", "!=", ">=", NULL};
         const char *max = p->shadow[i] == 24 ? "16777215.0" : "65535.0";
         if (p->shadow_func == 0 || p->shadow_func == 7) {
@@ -422,7 +422,7 @@ static void emit_texture(glsl_buf *b, const psh_program *p, int i) {
         }
         break;
     default:
-        glsl_emit(b, "    vec4 t%d = vec4(0.0); /* modo %s sin emular */\n", i,
+    glsl_emit(b, "    vec4 t%d = vec4(0.0); /* mode %s not emulated */\n", i,
                   k_tex_names[mode]);
         break;
     }
@@ -466,7 +466,7 @@ int nv2a_psh_to_glsl(const psh_program *p, char *out, size_t outlen) {
     }
     glsl_buf_init(&b, out, outlen);
     glsl_emit(&b,
-              "#version 400\n/* Register combiners del NV2A: %d etapas (ngb, psh.c). */\n"
+              "#version 400\n/* NV2A register combiners: %d stages (ngb, psh.c). */\n"
               "in vec4 oD0;\nin vec4 oD1;\nin vec4 oFog;\n"
               "in vec4 oT0;\nin vec4 oT1;\nin vec4 oT2;\nin vec4 oT3;\n",
               p->n_stages);
@@ -482,11 +482,11 @@ int nv2a_psh_to_glsl(const psh_program *p, char *out, size_t outlen) {
               "uniform mat2 bumpMat[%d];\nuniform float bumpScale[%d];\n"
               "uniform float bumpOffset[%d];\nuniform int alphaTest;\nuniform int alphaFunc;\n"
               "uniform float alphaRef;\n"
-              "/* Texturas lineales (LU_IMAGE): el NV2A las direcciona en texels y texScale =\n"
-              " * 1/(ancho, alto) las pasa a [0, 1]. Para las demas vale 1. */\n"
+              "/* Linear textures (LU_IMAGE): the NV2A addresses them in texels and texScale =\n"
+              " * 1/(width, height) maps them to [0, 1]. For the others it is 1. */\n"
               "uniform vec2 texScale[%d];\nout vec4 fragColor;\n\n"
-              "/* Alpha test (estado fijo del NV2A, ver port/src/gl/glstate.c): alphaFunc es\n"
-              " * GL_NEVER + n y se compara en 8 bits, como el hardware. */\n"
+              "/* Alpha test (NV2A fixed state, see port/src/gl/glstate.c): alphaFunc is\n"
+              " * GL_NEVER + n and is compared in 8 bits, like the hardware. */\n"
               "bool nv_alpha_pass(float a) {\n"
               "    int ia = int(clamp(a, 0.0, 1.0) * 255.0 + 0.5);\n"
               "    int ir = int(clamp(alphaRef, 0.0, 1.0) * 255.0 + 0.5);\n"

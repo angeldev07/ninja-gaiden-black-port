@@ -1,9 +1,9 @@
 /*
- * raster.c: rasterizador de referencia por software (ver raster.h).
+ * raster.c: software reference rasterizer (see raster.h).
  *
- * Reglas: centro de píxel en (x + 0.5, y + 0.5); un píxel entra si las tres funciones de
- * arista son >= 0 (con la orientación del triángulo normalizada). Las funciones de
- * mezcla, alfa y el swizzle siguen a xemu (hw/xbox/nv2a/pgraph, swizzle.c).
+ * Rules: pixel center at (x + 0.5, y + 0.5); a pixel is covered if the three edge functions
+ * are >= 0 (with the triangle orientation normalized). The blend and alpha functions and
+ * the swizzle follow xemu (hw/xbox/nv2a/pgraph, swizzle.c).
  */
 #include "raster.h"
 
@@ -68,7 +68,7 @@ uint32_t rs_sample(const rs_texture_t *tex, float u, float v) {
         off = tex->swizzled ? idx : (size_t)y * tex->pitch + x;
         return ((uint32_t)tex->data[off] << 24) | 0x00FFFFFFu;
     case RS_TEX_I8: {
-        uint32_t c = 0xFFFF00FFu; /* sin paleta: magenta */
+        uint32_t c = 0xFFFF00FFu; /* no palette: magenta */
         off = tex->swizzled ? idx : (size_t)y * tex->pitch + x;
         if (tex->palette)
             memcpy(&c, tex->palette + (size_t)tex->data[off] * 4, 4);
@@ -167,7 +167,7 @@ uint32_t rs_draw_triangle(const rs_target_t *t, const rs_texture_t *tex, const r
     maxx = fmaxf(v0->x, fmaxf(v1->x, v2->x));
     miny = fminf(v0->y, fminf(v1->y, v2->y));
     maxy = fmaxf(v0->y, fmaxf(v1->y, v2->y));
-    /* Se acota en float antes de convertir: un vértice fuera del rango de int sería UB. */
+    /* Clamped in float before converting: a vertex outside the int range would be UB. */
     minx = fmaxf(minx, (float)t->clip_x0);
     miny = fmaxf(miny, (float)t->clip_y0);
     maxx = fminf(maxx, (float)t->clip_x1);
@@ -197,7 +197,7 @@ uint32_t rs_draw_triangle(const rs_target_t *t, const rs_texture_t *tex, const r
             w2 = edge(v0->x, v0->y, v1->x, v1->y, px, py) * sign;
             if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f)
                 continue;
-            /* Baricéntricas con corrección de perspectiva (pesos b_i * q_i). */
+            /* Barycentrics with perspective correction (weights b_i * q_i). */
             b0 = w0 * q0;
             b1 = w1 * q1;
             b2 = w2 * q2;

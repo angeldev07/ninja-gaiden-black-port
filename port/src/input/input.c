@@ -1,6 +1,6 @@
 /*
- * input.c: mapeo PC -> mando de Xbox y guion de pulsaciones (puro: sin Windows ni loader).
- * Ver input.h.
+ * input.c: PC -> Xbox gamepad mapping and button-press script (pure: no Windows or loader).
+ * See input.h.
  */
 #include "input.h"
 
@@ -93,12 +93,12 @@ int xpad_equal(const xbox_gamepad_t *a, const xbox_gamepad_t *b) {
     return memcmp(a, b, sizeof *a) == 0;
 }
 
-/* ---------------------------------------------------------------- guion ---- */
+/* ---------------------------------------------------------------- script ---- */
 
 typedef struct button_name {
     const char *name;
     uint16_t buttons;
-    int analog; /* -1 si es digital */
+    int analog; /* -1 if digital */
 } button_name_t;
 
 static const button_name_t k_buttons[] = {
@@ -112,8 +112,8 @@ static const button_name_t k_buttons[] = {
     {"LT", 0, XPAD_LEFT_TRIGGER},    {"RT", 0, XPAD_RIGHT_TRIGGER},
 };
 
-/* "<n>s" o "<n>ms" (n entero) a milisegundos, o "<n>p" a lecturas (*polls = 1). -1 si no
- * es válido. */
+/* "<n>s" or "<n>ms" (n integer) to milliseconds, or "<n>p" to reads (*polls = 1). -1 if not
+ * valid. */
 static long parse_ms(const char *text, size_t len, int *polls) {
     char buf[24];
     char *end;
@@ -145,7 +145,7 @@ static int parse_buttons(const char *text, size_t len, input_event_t *ev) {
         while (stop < len && text[stop] != '+')
             stop++;
         if (stop == start || (stop + 1 == len && text[stop] == '+'))
-            return -1; /* nombre vacío: "A++B" o "A+" */
+            return -1; /* empty name: "A++B" or "A+" */
         for (i = 0; i < sizeof k_buttons / sizeof k_buttons[0]; i++) {
             const button_name_t *b = &k_buttons[i];
             if (strlen(b->name) == stop - start && !_strnicmp(b->name, text + start, stop - start)) {
@@ -176,7 +176,7 @@ int input_script_parse(const char *text, input_script_t *out, char *err, size_t 
         memset(&ev, 0, sizeof ev);
         colon = memchr(p, ':', item_len);
         if (item_len < 3 || _strnicmp(p, "t=", 2) || !colon) {
-            snprintf(err, errlen, "entrada '%.*s': se esperaba t=<tiempo>:<BOTON>", (int)item_len, p);
+            snprintf(err, errlen, "entry '%.*s': expected t=<time>:<BUTTON>", (int)item_len, p);
             return -1;
         }
         when = parse_ms(p + 2, (size_t)(colon - p - 2), &when_polls);
@@ -186,20 +186,20 @@ int input_script_parse(const char *text, input_script_t *out, char *err, size_t 
         if (at)
             hold = parse_ms(at + 1, item_len - (size_t)(at + 1 - p), &hold_polls);
         if (when < 0 || hold <= 0) {
-            snprintf(err, errlen, "entrada '%.*s': tiempo inválido (usa 3s, 3500ms o 200p)", (int)item_len, p);
+            snprintf(err, errlen, "entry '%.*s': invalid time (use 3s, 3500ms or 200p)", (int)item_len, p);
             return -1;
         }
         if (hold_polls != when_polls) {
-            snprintf(err, errlen, "entrada '%.*s': el instante y la duración van en la misma unidad",
+            snprintf(err, errlen, "entry '%.*s': the instant and the duration must use the same unit",
                      (int)item_len, p);
             return -1;
         }
         if (parse_buttons(colon + 1, (size_t)((at ? at : p + item_len) - colon - 1), &ev)) {
-            snprintf(err, errlen, "entrada '%.*s': botón desconocido", (int)item_len, p);
+            snprintf(err, errlen, "entry '%.*s': unknown button", (int)item_len, p);
             return -1;
         }
         if (out->count == INPUT_SCRIPT_MAX) {
-            snprintf(err, errlen, "más de %d pulsaciones en el guion", INPUT_SCRIPT_MAX);
+            snprintf(err, errlen, "more than %d presses in the script", INPUT_SCRIPT_MAX);
             return -1;
         }
         ev.at_ms = (uint32_t)when;
@@ -208,7 +208,7 @@ int input_script_parse(const char *text, input_script_t *out, char *err, size_t 
         out->events[out->count++] = ev;
         p = item_end ? item_end + 1 : NULL;
         if (p && !*p) {
-            snprintf(err, errlen, "entrada vacía al final del guion");
+            snprintf(err, errlen, "empty entry at the end of the script");
             return -1;
         }
     }

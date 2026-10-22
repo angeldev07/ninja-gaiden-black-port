@@ -1,13 +1,13 @@
 /*
- * audio_out.c: salida de audio del port por waveOut (48 kHz, estéreo, 16 bits).
+ * audio_out.c: port audio output through waveOut (48 kHz, stereo, 16 bits).
  *
- * El hilo de DPC mezcla en cada tick lo que corresponde al tiempo transcurrido
- * (crash.c, ngb_apu_tick) y lo entrega aquí. Hay un anillo de cabeceras WAVEHDR:
- *   - arranca en pausa y empieza a sonar con 80 ms en cola, para que un tick tardío del
- *     hilo de DPC no deje al dispositivo sin datos (un corte audible);
- *   - si se queda sin datos, vuelve a esperar a tener 80 ms;
- *   - si la cola pasa de 250 ms (el dispositivo va más lento que el reloj), el bloque se
- *     descarta para no acumular latencia.
+ * The DPC thread mixes on every tick what corresponds to the elapsed time
+ * (crash.c, ngb_apu_tick) and delivers it here. There is a ring of WAVEHDR headers:
+ *   - it starts paused and begins playing with 80 ms queued, so that a late tick of the
+ *     DPC thread does not leave the device without data (an audible cut);
+ *   - if it runs out of data, it waits again until it has 80 ms;
+ *   - if the queue goes over 250 ms (the device is slower than the clock), the block is
+ *     dropped so latency does not accumulate.
  */
 #include "apu/audio_out.h"
 
@@ -15,9 +15,9 @@
 #include <string.h>
 
 #define AO_HEADERS 64
-#define AO_MAX_FRAMES 4800 /* 100 ms por bloque como máximo */
-#define AO_MAX_QUEUED 12000 /* 250 ms en cola */
-#define AO_PREBUFFER 3840  /* 80 ms antes de sonar */
+#define AO_MAX_FRAMES 4800 /* 100 ms per block at most */
+#define AO_MAX_QUEUED 12000 /* 250 ms queued */
+#define AO_PREBUFFER 3840  /* 80 ms before playing */
 
 static HWAVEOUT g_wo;
 static WAVEHDR g_hdr[AO_HEADERS];
@@ -42,9 +42,9 @@ int audio_out_open(void) {
     }
     for (i = 0; i < AO_HEADERS; i++) {
         memset(&g_hdr[i], 0, sizeof g_hdr[i]);
-        g_hdr[i].dwFlags = WHDR_DONE; /* libre */
+        g_hdr[i].dwFlags = WHDR_DONE; /* free */
     }
-    waveOutPause(g_wo); /* hasta tener AO_PREBUFFER en cola */
+    waveOutPause(g_wo); /* until AO_PREBUFFER is queued */
     return 0;
 }
 
@@ -66,7 +66,7 @@ void audio_out_write(const float *stereo, uint32_t frames) {
         frames = AO_MAX_FRAMES;
     h = &g_hdr[g_next];
     queued = queued_frames();
-    if (g_playing && queued == 0) { /* el dispositivo se quedó sin datos */
+    if (g_playing && queued == 0) { /* the device ran out of data */
         waveOutPause(g_wo);
         g_playing = 0;
         g_underruns++;

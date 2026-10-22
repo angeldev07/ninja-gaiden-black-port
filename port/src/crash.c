@@ -1,7 +1,7 @@
 /*
- * crash.c: vectored exception handler. Ante la primera excepción fatal registra código,
- * dirección, registros, bytes alrededor de EIP, la pila y la llamada al kernel en curso,
- * la clasifica (MMIO de NV2A/APU..., E/S de puertos, instrucción privilegiada) y para.
+ * crash.c: vectored exception handler. On the first fatal exception it logs the code,
+ * address, registers, bytes around EIP, the stack and the kernel call in progress,
+ * classifies it (NV2A/APU... MMIO, port I/O, privileged instruction) and stops.
  */
 #include "ngb.h"
 
@@ -23,9 +23,9 @@ static const char *mmio_region(uint32_t addr) {
     if (addr >= 0xFEF00000u && addr < 0xFEF00400u) return "MMIO NIC";
     if (addr >= 0xFF000000u) return "flash/BIOS";
     if (addr >= 0xF0000000u && addr < 0xF8000000u) return "AGP / framebuffer (0xF0000000)";
-    if (addr >= 0x80000000u && addr < 0x84000000u) return "ventana física 0x80000000";
-    if (addr >= 0xB0000000u && addr < 0xC0000000u) return "memoria física write-combined";
-    if (addr < 0x10000u) return "puntero nulo (o casi)";
+    if (addr >= 0x80000000u && addr < 0x84000000u) return "physical window 0x80000000";
+    if (addr >= 0xB0000000u && addr < 0xC0000000u) return "write-combined physical memory";
+    if (addr < 0x10000u) return "null pointer (or close to it)";
     return NULL;
 }
 
@@ -35,8 +35,8 @@ static const char *priv_hint(uint32_t eip) {
     ReadProcessMemory(GetCurrentProcess(), (const void *)(uintptr_t)eip, b, 2, &got);
     if (got < 1) return "";
     switch (b[0]) {
-    case 0xE4: case 0xE5: case 0xEC: case 0xED: return " (IN: E/S de puertos)";
-    case 0xE6: case 0xE7: case 0xEE: case 0xEF: return " (OUT: E/S de puertos)";
+    case 0xE4: case 0xE5: case 0xEC: case 0xED: return " (IN: port I/O)";
+    case 0xE6: case 0xE7: case 0xEE: case 0xEF: return " (OUT: port I/O)";
     case 0xFA: return " (CLI)";
     case 0xFB: return " (STI)";
     case 0xF4: return " (HLT)";
@@ -45,7 +45,7 @@ static const char *priv_hint(uint32_t eip) {
         if (b[1] == 0x30) return " (WRMSR)";
         if (b[1] == 0x32) return " (RDMSR)";
         if (b[1] == 0x20 || b[1] == 0x22) return " (MOV CRx)";
-        return " (0F xx privilegiada)";
+        return " (privileged 0F xx)";
     default: return "";
     }
 }
@@ -72,51 +72,51 @@ static const char *code_name(DWORD code) {
 static const char *where(uint32_t eip) {
     HMODULE self = NULL;
     if (eip >= g_ngb_xbe.base && eip < g_ngb_xbe.base + g_ngb_xbe.size_of_image)
-        return "código del XBE";
+        return "XBE code";
     GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                        (LPCSTR)(uintptr_t)eip, &self);
     if (self && self == GetModuleHandleA("ngb-core.dll"))
-        return "código del loader (ngb-core.dll): bug del kernel emulado o puntero del juego";
-    return self ? "otro módulo de Windows" : "memoria sin módulo";
+        return "loader code (ngb-core.dll): emulated kernel bug or game pointer";
+    return self ? "another Windows module" : "memory without a module";
 }
 
 /*
- * MMIO "de RAM con traza". Los periféricos que no son la GPU (USB, APU, AC97, NIC, flash)
- * no se emulan, pero para seguir avanzando hasta la inicialización de D3D (el final de
- * H6) se les da memoria a cero: el primer acceso a una página falla (PAGE_NOACCESS), se
- * registra, se abre la página, se ejecuta la instrucción en modo paso a paso (TF) y se
- * vuelve a cerrar. Leer devuelve lo último escrito. El NV2A (0xFD000000) no entra aquí:
- * su primer acceso para la ejecución. Con --mmio-strict cualquier MMIO para.
+ * "RAM with trace" MMIO. The peripherals that are not the GPU (USB, APU, AC97, NIC, flash)
+ * are not emulated, but to keep going until D3D initialization (the end of
+ * H6) they are given zeroed memory: the first access to a page faults (PAGE_NOACCESS), it is
+ * logged, the page is opened, the instruction is executed in single-step mode (TF) and the
+ * page is closed again. A read returns the last value written. The NV2A (0xFD000000) does not
+ * come in here: its first access stops the run. With --mmio-strict any MMIO stops it.
  */
 #define MMIO_LOG_MAX 400
 
 static volatile LONG g_mmio_count;
 static __declspec(thread) uint32_t t_mmio_page, t_mmio_addr, t_mmio_write;
 
-static volatile uint32_t g_apu_gpsaddr; /* NV_PAPU_GPSADDR: lista SG de la memoria del GP DSP */
+static volatile uint32_t g_apu_gpsaddr; /* NV_PAPU_GPSADDR: SG list of the GP DSP memory */
 
-/* Trampa del front end de la APU que ve la ISR de DirectSound mientras se le entrega una voz
- * libre (ngb_apu_interrupt): ISTS (0x1000), FECTL (0x1100, motivo en los bits 8-11) y el
- * método y parámetro decodificados (FEDECMETH 0x1300, FEDECPARAM 0x1304). Sus lecturas los
- * toman de aquí (mmio_access); fuera de una entrega, ISTS lee 0. */
+/* APU front end trap seen by the DirectSound ISR while a free voice is delivered to it
+ * (ngb_apu_interrupt): ISTS (0x1000), FECTL (0x1100, reason in bits 8-11) and the decoded
+ * method and parameter (FEDECMETH 0x1300, FEDECPARAM 0x1304). Its reads take them from here
+ * (mmio_access); outside a delivery, ISTS reads 0. */
 static volatile uint32_t g_apu_ists, g_apu_fe_meth, g_apu_fe_param, g_apu_trap;
 static uint32_t g_apu_idle_irqs;
 
-/* Procesador de voces (apu/vp.c): los métodos PIO llegan desde el hilo del juego que los
- * escribe y el avance desde el hilo de DPC. El tick usa TryEnter: un hilo del juego
- * suspendido con el lock tomado no puede colgar al hilo de DPC. */
+/* Voice processor (apu/vp.c): the PIO methods arrive from the game thread that writes
+ * them and the advance from the DPC thread. The tick uses TryEnter: a game thread suspended
+ * while holding the lock cannot hang the DPC thread. */
 static vp_state_t g_vp;
 static CRITICAL_SECTION g_vp_lock;
 static INIT_ONCE g_vp_once = INIT_ONCE_STATIC_INIT;
 static LARGE_INTEGER g_vp_last, g_vp_freq;
-static mix_ctx_t g_mix;      /* lectura de muestras y caché ADPCM (apu/mix.c) */
-static int g_audio = -1;     /* -1 sin abrir, 0 sin dispositivo, 1 sonando */
+static mix_ctx_t g_mix;      /* sample reads and ADPCM cache (apu/mix.c) */
+static int g_audio = -1;     /* -1 not opened, 0 no device, 1 playing */
 static float g_mixbuf[4800 * 2];
-static double g_audio_sq;              /* suma de cuadrados, para el RMS del resumen */
+static double g_audio_sq;              /* sum of squares, for the summary RMS */
 static float g_audio_peak;
-static uint64_t g_audio_frames, g_audio_loud; /* frames mezclados y frames con señal */
-static FILE *g_audio_wav; /* --audio-wav: la mezcla en <log>-audio.wav (16 bits, 48 kHz) */
+static uint64_t g_audio_frames, g_audio_loud; /* mixed frames and frames with signal */
+static FILE *g_audio_wav; /* --audio-wav: the mix in <log>-audio.wav (16 bits, 48 kHz) */
 
 static void wav_header(FILE *f, uint32_t data_bytes) {
     uint32_t h[11] = {0x46464952u, 36 + data_bytes, 0x45564157u, 0x20746D66u, 16,
@@ -126,20 +126,20 @@ static void wav_header(FILE *f, uint32_t data_bytes) {
     fseek(f, 0, SEEK_END);
 }
 
-/* Física de la Xbox -> host. La RAM contigua (64 MB) está en NGB_CONTIG_BASE; el resto
- * de "direcciones físicas" son las que da MmGetPhysicalAddress para memoria normal del
- * proceso, que hoy es la identidad (impl_mm.c): así llegan, por ejemplo, los búferes de
- * audio de Sofdec a la tabla SGE. Esas solo se aceptan si están mapeadas y se pueden leer;
- * la última región comprobada se guarda para no llamar a VirtualQuery en cada muestra. */
+/* Xbox physical -> host. The contiguous RAM (64 MB) is at NGB_CONTIG_BASE; the rest
+ * of the "physical addresses" are the ones MmGetPhysicalAddress gives for normal process
+ * memory, which today is the identity (impl_mm.c): that is how, for example, the Sofdec
+ * audio buffers reach the SGE table. Those are only accepted if they are mapped and readable;
+ * the last region checked is kept so VirtualQuery is not called for every sample. */
 static const uint8_t *apu_phys(uint32_t phys, uint32_t len) {
-    static uint32_t ok_lo, ok_hi; /* región host legible ya comprobada [ok_lo, ok_hi) */
+    static uint32_t ok_lo, ok_hi; /* already-checked readable host region [ok_lo, ok_hi) */
     MEMORY_BASIC_INFORMATION mbi;
     if (phys < NGB_CONTIG_SIZE)
         return len <= NGB_CONTIG_SIZE - phys ? (const uint8_t *)(uintptr_t)(NGB_CONTIG_BASE + phys)
                                              : NULL;
     if (phys >= NGB_PHYS_XBE + NGB_RESERVE_BASE && phys < NGB_PHYS_XBE + NGB_RESERVE_END) {
-        /* Imagen del XBE (ventana de MmGetPhysicalAddress, como en nv2a_phys): los sonidos que
-           el juego tiene en .data, como los del menú (SetBufferData sobre 0x00B05000). */
+        /* XBE image (MmGetPhysicalAddress window, as in nv2a_phys): the sounds the game
+           has in .data, like the menu ones (SetBufferData on 0x00B05000). */
         uint32_t va = phys - NGB_PHYS_XBE;
         return NGB_RESERVE_END - va >= len ? (const uint8_t *)(uintptr_t)va : NULL;
     }
@@ -169,17 +169,17 @@ static BOOL CALLBACK vp_init_once(PINIT_ONCE once, PVOID param, PVOID *ctx) {
 static void vp_write(uint32_t addr, uint32_t value) {
     InitOnceExecuteOnce(&g_vp_once, vp_init_once, NULL, NULL);
     EnterCriticalSection(&g_vp_lock);
-    if (addr == 0xFE80202Cu) { /* NV_PAPU_VPVADDR: dirección física de la tabla de voces */
+    if (addr == 0xFE80202Cu) { /* NV_PAPU_VPVADDR: physical address of the voice table */
         uint32_t phys = value & 0x07FFFF00u;
         g_vp.voices = phys + VP_MAX_VOICES * VP_VOICE_SIZE <= NGB_CONTIG_SIZE
                           ? (uint8_t *)(uintptr_t)(NGB_CONTIG_BASE + phys)
                           : NULL;
-        ngb_log("    · APU: tabla de voces en 0x%08X (física 0x%08X)",
+        ngb_log("    · APU: voice table at 0x%08X (physical 0x%08X)",
                 (uint32_t)(uintptr_t)g_vp.voices, phys);
-    } else if (addr == 0xFE802030u) { /* NV_PAPU_VPSGEADDR: tabla SGE de los búferes */
+    } else if (addr == 0xFE802030u) { /* NV_PAPU_VPSGEADDR: SGE table of the buffers */
         g_mix.sge_phys = value;
     } else if (addr == 0xFE820000u + VP_PIO_SET_CURRENT_INBUF_SGE_OFFSET) {
-        /* DirectSound programa la tabla SGE por PIO: entrada `inbuf_sge` = página física. */
+        /* DirectSound programs the SGE table through PIO: entry `inbuf_sge` = physical page. */
         uint32_t entry = g_mix.sge_phys + g_vp.inbuf_sge * 8u;
         if (g_vp.inbuf_sge < 0x10000u && entry + 8u <= NGB_CONTIG_SIZE)
             *(volatile uint32_t *)(uintptr_t)(NGB_CONTIG_BASE + entry) = value & 0xFFFFF000u;
@@ -197,9 +197,9 @@ static void vp_write(uint32_t addr, uint32_t value) {
     LeaveCriticalSection(&g_vp_lock);
 }
 
-/* Hilo de audio (modelo "pull"): mantiene ~100 ms en la cola de waveOut. Mezcla en bloques
- * de 10 ms solo cuando la tarjeta ha consumido, así que las voces avanzan al ritmo real del
- * dispositivo y un hilo de DPC tardío ya no produce cortes ni ráfagas. */
+/* Audio thread ("pull" model): keeps ~100 ms in the waveOut queue. It mixes in 10 ms blocks
+ * only when the card has consumed, so voices advance at the real pace of the
+ * device and a late DPC thread no longer produces cuts or bursts. */
 static void mix_block(uint32_t frames) {
     uint32_t i;
     memset(g_mixbuf, 0, (size_t)frames * 2 * sizeof g_mixbuf[0]);
@@ -228,7 +228,7 @@ static DWORD WINAPI audio_pump(LPVOID unused) {
     (void)unused;
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
     for (;;) {
-        /* TryEnter: si un hilo del juego quedó suspendido con el lock, se reintenta. */
+        /* TryEnter: if a game thread was left suspended holding the lock, retry. */
         if (TryEnterCriticalSection(&g_vp_lock)) {
             while (audio_out_queued() < 4800)
                 mix_block(480);
@@ -239,17 +239,17 @@ static DWORD WINAPI audio_pump(LPVOID unused) {
 }
 
 /*
- * Voces libres (SE2FE_IDLE_VOICE): por cada una se prepara la trampa del front end (método
- * 0x8000, parámetro = voz, motivo "requested" en FECTL, ISTS = GINTSTS | FETINTSTS) y se
- * llama a la ISR de la APU que conectó DirectSound. Lo hace el hilo de DPC (impl_ke.c), que
- * pasa la llamada a la ISR en `isr`. Sin ISR conectada las voces esperan en la cola.
+ * Free voices (SE2FE_IDLE_VOICE): for each one the front end trap is prepared (method
+ * 0x8000, parameter = voice, reason "requested" in FECTL, ISTS = GINTSTS | FETINTSTS) and the
+ * APU ISR that DirectSound connected is called. The DPC thread does it (impl_ke.c), and
+ * passes the call to the ISR in `isr`. With no ISR connected the voices wait in the queue.
  */
 void ngb_apu_interrupt(void (*isr)(void *ctx), void *ctx) {
     uint32_t handle;
     int got;
     for (;;) {
         if (!TryEnterCriticalSection(&g_vp_lock))
-            return; /* lo tiene un hilo del juego: en el siguiente tick */
+            return; /* held by a game thread: next tick */
         got = vp_take_idle(&g_vp, &handle);
         LeaveCriticalSection(&g_vp_lock);
         if (!got)
@@ -266,10 +266,10 @@ void ngb_apu_interrupt(void (*isr)(void *ctx), void *ctx) {
 }
 
 void ngb_apu_summary(void) {
-    ngb_log("apu: %u VOICE_ON, %u voces terminadas solas, %u avisos de voz libre (%u perdidos); "
-            "audio %s, %u frames descartados, %u vaciados",
+    ngb_log("apu: %u VOICE_ON, %u voices ended on their own, %u free-voice notices (%u lost); "
+            "audio %s, %u frames dropped, %u flushed",
             g_vp.voices_on, g_vp.voices_ended, g_apu_idle_irqs, g_vp.idle_dropped,
-            g_audio == 1 ? "waveOut 48 kHz" : g_audio == 0 ? "sin dispositivo" : "sin usar",
+            g_audio == 1 ? "waveOut 48 kHz" : g_audio == 0 ? "no device" : "unused",
             audio_out_dropped(), audio_out_underruns());
     if (g_audio_wav && TryEnterCriticalSection(&g_vp_lock)) {
         wav_header(g_audio_wav, (uint32_t)(g_audio_frames * 4));
@@ -278,16 +278,16 @@ void ngb_apu_summary(void) {
         LeaveCriticalSection(&g_vp_lock);
     }
     if (g_audio_frames)
-        ngb_log("apu: %.1f s mezclados, %.1f s con señal; pico %.3f, RMS %.4f",
+        ngb_log("apu: %.1f s mixed, %.1f s with signal; peak %.3f, RMS %.4f",
                 g_audio_frames / 48000.0, g_audio_loud / 48000.0, g_audio_peak,
                 sqrt(g_audio_sq / (2.0 * (double)g_audio_frames)));
 }
 
 /*
- * DSP falso (H7a, atajo): DSOUND arranca el GP DSP de la APU con su microcódigo y espera a
- * que este ponga a 0 un buzón en su memoria de trabajo (offset 0x810 de la primera página
- * de la lista SG de GPSADDR) tras escribirle un comando. No hay DSP emulado, así que el
- * hilo de DPC lo hace por él. Ver port/README.md (H7a).
+ * Fake DSP (H7a, shortcut): DSOUND starts the APU GP DSP with its microcode and waits for
+ * it to set to 0 a mailbox in its working memory (offset 0x810 of the first page
+ * of the GPSADDR SG list) after writing a command to it. There is no emulated DSP, so the
+ * DPC thread does it on its behalf. See port/README.md (H7a).
  */
 void ngb_apu_tick(void) {
     static int logged;
@@ -297,7 +297,7 @@ void ngb_apu_tick(void) {
     InitOnceExecuteOnce(&g_vp_once, vp_init_once, NULL, NULL);
     QueryPerformanceCounter(&now);
     if (TryEnterCriticalSection(&g_vp_lock)) {
-        /* Tiempo real transcurrido; un salto grande (depurador, parada) se acota a 100 ms. */
+        /* Real elapsed time; a big jump (debugger, pause) is capped to 100 ms. */
         double dt = g_vp_last.QuadPart
                         ? (double)(now.QuadPart - g_vp_last.QuadPart) / (double)g_vp_freq.QuadPart
                         : 0.0;
@@ -318,8 +318,8 @@ void ngb_apu_tick(void) {
                     wav_header(g_audio_wav, 0);
             }
         }
-        /* Con audio, el hilo de audio (audio_pump) avanza las voces al ritmo de la tarjeta;
-           sin audio, el VP avanza con el tiempo real. */
+        /* With audio, the audio thread (audio_pump) advances the voices at the card's pace;
+           without audio, the VP advances in real time. */
         if (g_audio != 1)
             vp_advance(&g_vp, dt);
         g_vp_last = now;
@@ -333,17 +333,17 @@ void ngb_apu_tick(void) {
     mbox = (volatile uint32_t *)(uintptr_t)(NGB_CONTIG_BASE + page + 0x810u);
     if (*mbox) {
         if (logged++ < 8)
-            ngb_log("    · APU: DSP falso, buzón %p = 0x%08X -> 0", (void *)mbox, *mbox);
+            ngb_log("    · APU: fake DSP, mailbox %p = 0x%08X -> 0", (void *)mbox, *mbox);
         *mbox = 0;
     }
 }
 
-/* AC97: el bit RR (1) de los registros de control x_CR se limpia solo tras el reset. */
+/* AC97: the RR bit (1) of the x_CR control registers clears itself after the reset. */
 static void mmio_after_step(uint32_t addr, int write) {
     uint32_t reg = addr & ~3u;
     if (reg == 0xFE802040u)
         g_apu_gpsaddr = *(volatile uint32_t *)(uintptr_t)0xFE802040u;
-    /* Métodos PIO del procesador de voces y la base de su tabla. */
+    /* PIO methods of the voice processor and the base of its table. */
     if (write && (reg == 0xFE80202Cu || reg == 0xFE802030u ||
                   (reg >= 0xFE820100u && reg < 0xFE820400u) ||
                   reg == 0xFE820804u || reg == 0xFE820808u))
@@ -356,15 +356,16 @@ static int mmio_traceable(uint32_t addr) {
     if (g_ngb_opts.mmio_strict)
         return 0;
     if (g_ngb_opts.gpu_ram && addr >= 0xFD000000u && addr < 0xFE000000u)
-        return 1; /* --mmio-gpu-ram: exploración más allá de H6 */
-    return addr >= 0xFE000000u; /* APU, AC97, USB, NIC, flash/BIOS; no el NV2A */
+        return 1; /* --mmio-gpu-ram: exploration beyond H6 */
+    return addr >= 0xFE000000u; /* APU, AC97, USB, NIC, flash/BIOS; not the NV2A */
 }
 
 /*
- * Registros de periféricos (no GPU) que el arranque sondea hasta ver un valor: se leen fijos.
- *   APU VP NV1BA0_PIO_FREE (xemu mcpx/apu/vp/vp.c): 0x80 palabras libres en la cola PIO.
- *   AC97 GLOB_STA (NABMBAR 0x100 + 0x30): códecs primario y secundario listos (bits 8, 9).
- *   AC97 CAS (NABMBAR + 0x34): semáforo de acceso al códec libre.
+/*
+ * Peripheral (non-GPU) registers that boot polls until it sees a value: they are read as fixed.
+ *   APU VP NV1BA0_PIO_FREE (xemu mcpx/apu/vp/vp.c): 0x80 free words in the PIO queue.
+ *   AC97 GLOB_STA (NABMBAR 0x100 + 0x30): primary and secondary codecs ready (bits 8, 9).
+ *   AC97 CAS (NABMBAR + 0x34): codec access semaphore free.
  */
 static const struct {
     uint32_t addr, value;
@@ -406,18 +407,18 @@ static LONG mmio_access(EXCEPTION_RECORD *rec, CONTEXT *c) {
     n = InterlockedIncrement(&g_mmio_count);
     if (n <= MMIO_LOG_MAX) {
         ngb_thread_t *t = ngb_thread_current();
-        ngb_log("    · MMIO %s 0x%08X (%s) desde EIP 0x%08lX, T%d%s",
-                rec->ExceptionInformation[0] ? "escritura" : "lectura", addr, mmio_region(addr),
-                c->Eip, t ? t->index : 0, n == MMIO_LOG_MAX ? " (último acceso MMIO registrado)" : "");
+        ngb_log("    · MMIO %s 0x%08X (%s) from EIP 0x%08lX, T%d%s",
+                rec->ExceptionInformation[0] ? "write" : "read", addr, mmio_region(addr),
+                c->Eip, t ? t->index : 0, n == MMIO_LOG_MAX ? " (last MMIO access logged)" : "");
     }
     t_mmio_page = page;
     t_mmio_addr = addr;
     t_mmio_write = rec->ExceptionInformation[0] != 0;
-    c->EFlags |= 0x100; /* TF: una instrucción y vuelta aquí para cerrar la página */
+    c->EFlags |= 0x100; /* TF: one instruction and back here to close the page */
     return EXCEPTION_CONTINUE_EXECUTION;
 }
 
-/* IN/OUT, CLI/STI y WBINVD: se registran y se saltan; IN devuelve 0. */
+/* IN/OUT, CLI/STI and WBINVD: they are logged and skipped; IN returns 0. */
 static LONG port_io(CONTEXT *c) {
     uint8_t b[3] = {0, 0, 0};
     SIZE_T got = 0;
@@ -435,20 +436,20 @@ static LONG port_io(CONTEXT *c) {
     case 0xEC: case 0xED: in = 1; port = c->Edx & 0xFFFF; break;
     case 0xEE: case 0xEF: port = c->Edx & 0xFFFF; break;
     case 0xFA: case 0xFB: case 0x0F:
-        /* CLI/STI y WBINVD (vaciado de caché): sin efecto en un proceso de usuario. */
+        /* CLI/STI and WBINVD (cache flush): no effect in a user process. */
         if (b[0] == 0x0F && b[1] != 0x09)
             return EXCEPTION_CONTINUE_SEARCH;
         len = b[0] == 0x0F ? 2 : 1;
         if (InterlockedIncrement(&g_mmio_count) <= MMIO_LOG_MAX)
-            ngb_log("    · instrucción privilegiada %s desde EIP 0x%08lX: se salta",
+            ngb_log("    · privileged instruction %s from EIP 0x%08lX: skipped",
                     b[0] == 0xFA ? "CLI" : b[0] == 0xFB ? "STI" : "WBINVD", c->Eip);
         c->Eip += len + pre;
         return EXCEPTION_CONTINUE_EXECUTION;
     default: return EXCEPTION_CONTINUE_SEARCH;
     }
     if (InterlockedIncrement(&g_mmio_count) <= MMIO_LOG_MAX)
-        ngb_log("    · E/S de puerto: %s 0x%04X desde EIP 0x%08lX (se salta%s)", in ? "IN" : "OUT",
-                port, c->Eip, in ? ", lee 0" : "");
+        ngb_log("    · port I/O: %s 0x%04X from EIP 0x%08lX (skipped%s)", in ? "IN" : "OUT",
+                port, c->Eip, in ? ", reads 0" : "");
     if (in)
         c->Eax = (b[0] & 1) ? 0 : (c->Eax & ~0xFFu);
     c->Eip += len + pre;
@@ -467,8 +468,8 @@ static LONG CALLBACK on_exception(EXCEPTION_POINTERS *info) {
     int i;
     if (!name)
         return EXCEPTION_CONTINUE_SEARCH;
-    /* El MMIO se sigue atendiendo durante la parada: los hilos Xbox siguen vivos mientras
-     * se escribe el resumen, y un acceso sin atender tiraría el proceso sin informe. */
+    /* MMIO keeps being served during the stop: Xbox threads are still alive while
+     * the summary is written, and an unserved access would take the process down without a report. */
     if (rec->ExceptionCode == EXCEPTION_SINGLE_STEP && nv2a_single_step(c)) {
         c->EFlags &= ~0x100u;
         return EXCEPTION_CONTINUE_EXECUTION;
@@ -496,17 +497,17 @@ static LONG CALLBACK on_exception(EXCEPTION_POINTERS *info) {
         return EXCEPTION_CONTINUE_SEARCH;
     if (rec->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && rec->NumberParameters >= 2) {
         uint32_t addr = (uint32_t)rec->ExceptionInformation[1];
-        const char *op = rec->ExceptionInformation[0] == 0   ? "lectura"
-                         : rec->ExceptionInformation[0] == 1 ? "escritura"
-                                                             : "ejecución";
+        const char *op = rec->ExceptionInformation[0] == 0   ? "read"
+                         : rec->ExceptionInformation[0] == 1 ? "write"
+                                                             : "execution";
         const char *region = mmio_region(addr);
-        snprintf(detail, sizeof detail, "%s de 0x%08X%s%s", op, addr, region ? ": " : "",
+        snprintf(detail, sizeof detail, "%s of 0x%08X%s%s", op, addr, region ? ": " : "",
                  region ? region : "");
     } else if (rec->ExceptionCode == EXCEPTION_PRIV_INSTRUCTION) {
-        snprintf(detail, sizeof detail, "instrucción privilegiada%s", priv_hint(c->Eip));
+        snprintf(detail, sizeof detail, "privileged instruction%s", priv_hint(c->Eip));
     }
     ngb_log("");
-    ngb_log("==== EXCEPCIÓN %s (0x%08lX) en EIP 0x%08lX%s, hilo T%d, %s", name, rec->ExceptionCode,
+    ngb_log("==== EXCEPTION %s (0x%08lX) at EIP 0x%08lX%s, thread T%d, %s", name, rec->ExceptionCode,
             c->Eip, ngb_symbol(c->Eip, sym, sizeof sym), t ? t->index : 0, where(c->Eip));
     if (detail[0])
         ngb_log("  %s", detail);
@@ -525,10 +526,10 @@ static LONG CALLBACK on_exception(EXCEPTION_POINTERS *info) {
                 stackw[i + 2], stackw[i + 3]);
     if (t && t->inflight_ordinal) {
         const ngb_kexport_t *e = ngb_kexport(t->inflight_ordinal);
-        ngb_log("  dentro de la llamada al kernel %u %s (desde 0x%08X)", t->inflight_ordinal,
+        ngb_log("  inside kernel call %u %s (from 0x%08X)", t->inflight_ordinal,
                 e ? e->name : "?", t->inflight_caller);
     }
-    ngb_stop(NGB_EXIT_CRASH, "%s en 0x%08lX%s%s", name, c->Eip, detail[0] ? ": " : "", detail);
+    ngb_stop(NGB_EXIT_CRASH, "%s at 0x%08lX%s%s", name, c->Eip, detail[0] ? ": " : "", detail);
 }
 
 void ngb_crash_install(void) {

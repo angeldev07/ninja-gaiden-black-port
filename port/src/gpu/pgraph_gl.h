@@ -1,13 +1,13 @@
 /*
- * pgraph_gl.h: render acelerado de PGRAPH con OpenGL 4.x (H7c, ADR-06).
+ * pgraph_gl.h: PGRAPH accelerated render with OpenGL 4.x (H7c, ADR-06).
  *
- * pgraph.c sigue interpretando el push buffer y guarda el estado NV097 en `pgl_regs`; con
- * `--renderer gl` las operaciones que tocan píxeles (CLEAR_SURFACE, el dibujo al cerrar un
- * BEGIN_END y FLIP_STALL) van aquí en vez de al rasterizador por software.
+ * pgraph.c keeps interpreting the push buffer and stores the NV097 state in `pgl_regs`; with
+ * `--renderer gl` the operations that touch pixels (CLEAR_SURFACE, the draw when closing a
+ * BEGIN_END, and FLIP_STALL) go here instead of to the software rasterizer.
  *
- * Hilos: todo GL vive en un hilo de render propio que tiene el contexto actual. Ese hilo
- * es también el pusher: pgraph_kick le avisa con pgl_post() y vuelve enseguida, y el hilo
- * consume el push buffer en paralelo con el juego, como la GPU de la consola.
+ * Threads: all GL lives on its own render thread, which holds the current context. That thread
+ * is also the pusher: pgraph_kick notifies it with pgl_post() and returns right away, and the
+ * thread consumes the push buffer in parallel with the game, like the console's GPU.
  */
 #pragma once
 
@@ -21,60 +21,60 @@
 #define PGL_CONSTANTS 192
 #define PGL_BLOCK 0x40
 
-/* Estado de PGRAPH que necesita el render. Lo escribe pgraph.c al decodificar. */
+/* PGRAPH state the render needs. Written by pgraph.c while decoding. */
 typedef struct pgl_regs {
-    uint32_t m[0x2000 / 4];                    /* último parámetro de cada método de la clase 3D */
-    uint32_t program[PGL_PROGRAM_SLOTS * 4];   /* memoria de vertex programs (0x0B00) */
-    uint32_t prog_load;                        /* en palabras (SET_TRANSFORM_PROGRAM_LOAD x 4) */
+    uint32_t m[0x2000 / 4];                    /* last parameter of each 3D class method */
+    uint32_t program[PGL_PROGRAM_SLOTS * 4];   /* vertex program memory (0x0B00) */
+    uint32_t prog_load;                        /* in words (SET_TRANSFORM_PROGRAM_LOAD x 4) */
     float constants[PGL_CONSTANTS * 4];        /* c[0..191] (0x0B80) */
-    uint32_t const_load;                       /* en palabras (SET_TRANSFORM_CONSTANT_LOAD x 4) */
-    float vconst[16][4];                       /* atributos sin array: SET_VERTEX_DATA* */
-    /* Sellos de cambio para subir solo los uniforms que cambian: `stamp` sube cada vez que un
-     * método o una constante cambia de valor, y cada bloque de 16 métodos (PGL_BLOCK bytes) y
-     * cada constante guardan el sello de su último cambio. */
-    uint64_t stamp; /* 64 bits: a miles de cambios por frame, 32 darían la vuelta en minutos */
+    uint32_t const_load;                       /* in words (SET_TRANSFORM_CONSTANT_LOAD x 4) */
+    float vconst[16][4];                       /* attributes without an array: SET_VERTEX_DATA* */
+    /* Change stamps to upload only the uniforms that change: `stamp` increases every time a
+     * method or a constant changes value, and each block of 16 methods (PGL_BLOCK bytes) and
+     * each constant keep the stamp of their last change. */
+    uint64_t stamp; /* 64 bits: at thousands of changes per frame, 32 would wrap around in minutes */
     uint64_t blk_stamp[0x2000 / PGL_BLOCK];
     uint64_t const_stamp[PGL_CONSTANTS];
 } pgl_regs;
 
-/* Una primitiva cerrada con SET_BEGIN_END(0). */
+/* A primitive closed with SET_BEGIN_END(0). */
 typedef struct pgl_draw {
     uint32_t prim;                 /* 1 POINTS ... 10 POLYGON */
-    const uint32_t *inline_words;  /* INLINE_ARRAY (NULL si va por arrays) */
+    const uint32_t *inline_words;  /* INLINE_ARRAY (NULL if it goes through arrays) */
     uint32_t n_inline;
-    const uint32_t *indices;       /* ARRAY_ELEMENT16/32 y DRAW_ARRAYS, ya como índices */
+    const uint32_t *indices;       /* ARRAY_ELEMENT16/32 and DRAW_ARRAYS, already as indices */
     uint32_t n_indices;
 } pgl_draw_t;
 
-/* Valores de reset de los métodos de estado (los de nv2a_state_defaults). */
+/* Reset values of the state methods (those of nv2a_state_defaults). */
 void pgl_regs_defaults(pgl_regs *r);
 
-/* Arranca el hilo de render con un contexto sobre `hwnd` (la ventana del presentador).
- * 0 si hay GL; si no, un código negativo y el motivo en `why`. */
+/* Starts the render thread with a context on `hwnd` (the presenter's window).
+ * 0 if there is GL; otherwise a negative code and the reason in `why`. */
 int pgl_start(HWND hwnd, char *why, size_t whylen);
 int pgl_active(void);
 
-/* Ejecuta fn(arg) en el hilo de render y espera a que vuelva. */
+/* Runs fn(arg) on the render thread and waits for it to return. */
 void pgl_call(void (*fn)(void *), void *arg);
-/* Pide fn(arg) al hilo de render sin esperar. Si ya está corriendo, lo vuelve a llamar al
- * terminar (el evento queda señalado): fn debe ser idempotente y mirar su propia cola. */
+/* Asks the render thread for fn(arg) without waiting. If it is already running, it calls it again on
+ * finishing (the event stays signaled): fn must be idempotent and look at its own queue. */
 void pgl_post(void (*fn)(void *), void *arg);
 
-/* Desde el hilo de render (dentro de pgl_call). */
-/* Al empezar cada kick: recoge las páginas que la CPU escribió desde el anterior. */
+/* From the render thread (inside pgl_call). */
+/* At the start of each kick: collects the pages the CPU wrote since the previous one. */
 void pgl_kick_begin(void);
 void pgl_clear(const pgl_regs *r, uint32_t flags);
 void pgl_draw(const pgl_regs *r, const pgl_draw_t *d);
-/* Presenta el destino de color de 720 de ancho que hay al llegar FLIP_STALL (D3D cambia al
- * siguiente back buffer después) o, si no lo es, el último de 720 en el que se dibujó; con
- * `shot_path`, la guarda en PNG
- * leyendo la textura de la GPU. 0 si guardó la captura. */
+/* Presents the 720-wide color target that is current when FLIP_STALL arrives (D3D switches to the
+ * next back buffer afterwards) or, if it is not, the last 720-wide one drawn into; with
+ * `shot_path`, saves it as PNG
+ * by reading the GPU texture. 0 if the capture was saved. */
 int pgl_flip(const pgl_regs *r, const char *shot_path);
-/* Desglose del tiempo de dibujo desde la última llamada (QPC), en ms por frame, y los
- * contadores de trabajo por frame; pone los acumuladores a cero. Desde el hilo de render. */
+/* Breakdown of the draw time since the last call (QPC), in ms per frame, and the work
+ * counters per frame; zeroes the accumulators. From the render thread. */
 void pgl_perf_take(char *out, size_t outlen, uint32_t frames);
-/* Estadísticas al log (sin GL: se puede llamar desde cualquier hilo). */
+/* Statistics to the log (no GL: can be called from any thread). */
 void pgl_summary(void);
 
-/* pgraph.c: física base del objeto DMA puesto con SET_CONTEXT_DMA_* (método 0x180-0x1FC). */
+/* pgraph.c: base physical address of the DMA object set with SET_CONTEXT_DMA_* (method 0x180-0x1FC). */
 int pgraph_dma_base(uint32_t method, uint32_t *phys);

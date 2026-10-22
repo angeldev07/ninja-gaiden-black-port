@@ -1,10 +1,10 @@
 /*
- * kernel.h: tabla de exports de xboxkrnl (generada en stubs.c) y despacho de llamadas.
+ * kernel.h: xboxkrnl export table (generated in stubs.c) and call dispatch.
  *
- * El código Xbox llama al kernel con `call [slot_del_thunk]`. El loader escribe en cada
- * slot la dirección de un stub generado (stubs.c) con la convención correcta; el stub
- * copia los argumentos y llama a ngb_kcall(), que registra la llamada y la despacha a
- * la implementación registrada para ese ordinal (impl_*.c).
+ * Xbox code calls the kernel with `call [thunk_slot]`. The loader writes into each
+ * slot the address of a generated stub (stubs.c) with the right convention; the stub
+ * copies the arguments and calls ngb_kcall(), which logs the call and dispatches it to
+ * the implementation registered for that ordinal (impl_*.c).
  */
 #pragma once
 
@@ -25,9 +25,9 @@ typedef struct ngb_kexport {
     uint16_t ordinal;
     uint8_t kind;  /* NGB_KIND_* */
     uint8_t conv;  /* NGB_CONV_* */
-    uint8_t nargs; /* argumentos de 32 bits; en cdecl (variádicas), los que se registran */
+    uint8_t nargs; /* 32-bit arguments; for cdecl (variadic), the ones that get logged */
     const char *name;
-    const void *stub; /* NULL en las variables exportadas */
+    const void *stub; /* NULL for exported variables */
 } ngb_kexport_t;
 
 /* stubs.c (generado) */
@@ -35,10 +35,10 @@ extern const ngb_kexport_t ngb_kexports[];
 extern const size_t ngb_kexport_count;
 extern const uint32_t ngb_kexport_max_ordinal;
 
-/* Punto común de todos los stubs. `args` apunta a nargs dwords (NULL si 0). */
+/* Common point of all stubs. `args` points to nargs dwords (NULL if 0). */
 uint64_t ngb_kcall(uint32_t ordinal, uint32_t *args, uint32_t caller);
 
-/* Implementación de un export: recibe los argumentos como dwords, devuelve EDX:EAX. */
+/* Implementation of an export: receives the arguments as dwords, returns EDX:EAX. */
 typedef uint64_t (*ngb_kimpl_fn)(uint32_t *args);
 
 typedef struct ngb_kimpl {
@@ -52,18 +52,18 @@ void ngb_kernel_register(const ngb_kimpl_t *impls, size_t count);
 void ngb_kernel_init(void);
 size_t ngb_kernel_impl_count(void);
 int ngb_kernel_is_implemented(uint32_t ordinal);
-void ngb_kernel_summary(void); /* llamadas por función, al log */
-unsigned long ngb_kernel_call_seq(void); /* llamadas al kernel hasta ahora */
+void ngb_kernel_summary(void); /* calls per function, to the log */
+unsigned long ngb_kernel_call_seq(void); /* kernel calls so far */
 
-/* data.c: almacenamiento de las variables exportadas */
+/* data.c: storage for the exported variables */
 void *ngb_kdata_address(uint32_t ordinal);
 void ngb_kdata_init(const char *xbe_path);
-void ngb_kdata_tick(void); /* actualiza KeTickCount */
+void ngb_kdata_tick(void); /* updates KeTickCount */
 
-/* impl_io.c: 1 si el handle era un enlace sintético (no es un handle de Windows) */
+/* impl_io.c: 1 if the handle was a synthetic link (not a Windows handle) */
 int ngb_io_close(void *h);
 
-/* Cada impl_*.c exporta su tabla con esta firma; dispatch.c las registra todas. */
+/* Each impl_*.c exports its table with this signature; dispatch.c registers them all. */
 void ngb_impl_register_mm(void);
 void ngb_impl_register_rtl(void);
 void ngb_impl_register_ke(void);
@@ -71,7 +71,7 @@ void ngb_impl_register_ps(void);
 void ngb_impl_register_io(void);
 void ngb_impl_register_misc(void);
 
-/* Ayudas para las implementaciones. */
+/* Helpers for the implementations. */
 #define ARG(i) (args[(i)])
 #define PTR(i) ((void *)(uintptr_t)args[(i)])
 #define RET32(v) ((uint64_t)(uint32_t)(v))

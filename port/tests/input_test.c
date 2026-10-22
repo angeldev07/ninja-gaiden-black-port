@@ -1,7 +1,7 @@
 /*
- * input_test.c: pruebas del mapeo de la entrada (input/input.c): mando de PC y teclado a
- * XINPUT_GAMEPAD de Xbox, combinación de fuentes y guion de --input-script.
- * Lo compila y ejecuta port\build.cmd; termina con código 1 si algo falla.
+ * input_test.c: tests of the input mapping (input/input.c): PC gamepad and keyboard to
+ * Xbox XINPUT_GAMEPAD, source merging and the --input-script script.
+ * Built and run by port\build.cmd; exits with code 1 if anything fails.
  */
 #include <stddef.h>
 #include <stdio.h>
@@ -14,12 +14,12 @@ static int g_failures;
 #define CHECK(cond)                                                                 \
     do {                                                                            \
         if (!(cond)) {                                                              \
-            fprintf(stderr, "FALLO %s:%d: %s\n", __FILE__, __LINE__, #cond);        \
+            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);        \
             g_failures++;                                                           \
         }                                                                           \
     } while (0)
 
-/* Teclas pulsadas para el teclado falso (códigos de tecla virtual de Windows). */
+/* Keys pressed for the fake keyboard (Windows virtual-key codes). */
 static int g_keys[16];
 static int g_nkeys;
 
@@ -37,8 +37,8 @@ static void press(const int *keys, int n) {
 }
 
 static void test_layout(void) {
-    /* Layout de Xbox: XINPUT_GAMEPAD 18 bytes, XINPUT_STATE 22, sin relleno. En tablas
-     * para que las comparaciones no sean constantes (C4127). */
+    /* Xbox layout: XINPUT_GAMEPAD 18 bytes, XINPUT_STATE 22, no padding. In tables
+     * so the comparisons are not constant (C4127). */
     static const size_t got[] = {
         sizeof(xbox_gamepad_t),           sizeof(xbox_input_state_t),
         offsetof(xbox_gamepad_t, analog), offsetof(xbox_gamepad_t, thumb_lx),
@@ -63,7 +63,7 @@ static void test_pc_mapping(void) {
     pc.thumb_rx = 123;
     pc.thumb_ry = -456;
     xpad_from_pc(&pc, &x);
-    /* Los bits digitales coinciden; A/B/X/Y y los hombros pasan a analógicos. */
+    /* The digital bits match; A/B/X/Y and the shoulders become analog. */
     CHECK(x.buttons == (XPAD_START | XPAD_DPAD_LEFT | XPAD_RIGHT_THUMB));
     CHECK(x.analog[XPAD_A] == 255 && x.analog[XPAD_B] == 0);
     CHECK(x.analog[XPAD_X] == 0 && x.analog[XPAD_Y] == 255);
@@ -74,7 +74,7 @@ static void test_pc_mapping(void) {
 
     pc.buttons = PC_RIGHT_SHOULDER | PC_B | PC_X | PC_BACK | PC_LEFT_SHOULDER;
     xpad_from_pc(&pc, &x);
-    CHECK(x.buttons == XPAD_BACK); /* los hombros no se filtran a wButtons */
+    CHECK(x.buttons == XPAD_BACK); /* the shoulders do not leak into wButtons */
     CHECK(x.analog[XPAD_BLACK] == 255 && x.analog[XPAD_WHITE] == 255); /* RB -> BLACK */
     CHECK(x.analog[XPAD_B] == 255 && x.analog[XPAD_X] == 255 && x.analog[XPAD_A] == 0);
 }
@@ -108,7 +108,7 @@ static void test_keyboard(void) {
     xpad_from_keys(fake_down, &x);
     CHECK(x.thumb_ly == 32767 && x.thumb_lx == -32767 && x.buttons == 0);
 
-    press(opposite, 3); /* W y S se anulan */
+    press(opposite, 3); /* W and S cancel out */
     xpad_from_keys(fake_down, &x);
     CHECK(x.thumb_ly == 0 && x.thumb_lx == 32767);
 
@@ -137,7 +137,7 @@ static void test_merge(void) {
     xpad_merge(&a, &b);
     CHECK(a.buttons == (XPAD_START | XPAD_DPAD_DOWN));
     CHECK(a.analog[XPAD_LEFT_TRIGGER] == 100 && a.analog[XPAD_A] == 255);
-    CHECK(a.thumb_lx == -32767 && a.thumb_ry == -20000); /* gana el más desviado */
+    CHECK(a.thumb_lx == -32767 && a.thumb_ry == -20000); /* the most deflected wins */
 }
 
 static void test_script(void) {
@@ -158,7 +158,7 @@ static void test_script(void) {
     input_script_apply(&s, 3000, 0, &x);
     CHECK(x.buttons == XPAD_START);
     memset(&x, 0, sizeof x);
-    input_script_apply(&s, 3000 + INPUT_SCRIPT_HOLD_MS, 0, &x); /* ya soltado */
+    input_script_apply(&s, 3000 + INPUT_SCRIPT_HOLD_MS, 0, &x); /* already released */
     CHECK(x.buttons == 0);
     input_script_apply(&s, 5100, 0, &x);
     CHECK(x.analog[XPAD_A] == 255 && x.buttons == 0);
@@ -175,7 +175,7 @@ static void test_script(void) {
                                       (1u << XPAD_BLACK) | (1u << XPAD_WHITE)));
     CHECK(s.events[0].buttons == XPAD_LEFT_THUMB);
 
-    /* Unidad "p": lecturas del mando, con su propio hold por defecto; el reloj en ms no cuenta. */
+    /* "p" unit: gamepad reads, with their own default hold; the ms clock does not count. */
     CHECK(input_script_parse("t=100p:START,t=200p:A@3p,t=1s:B", &s, err, sizeof err) == 0);
     CHECK(s.count == 3 && s.events[0].polls && s.events[0].at_ms == 100);
     CHECK(s.events[0].hold_ms == INPUT_SCRIPT_HOLD_POLLS && s.events[1].hold_ms == 3 && !s.events[2].polls);
@@ -198,18 +198,18 @@ static void test_script(void) {
 
 static void test_script_errors(void) {
     static const char *const bad[] = {
-        "START",          /* sin t= */
-        "t=3:START",      /* sin unidad */
-        "t=3s:",          /* sin botón */
-        "t=3s:JUMP",      /* botón desconocido */
-        "t=3s:A+",        /* botón vacío */
-        "t=-1s:A",        /* tiempo negativo */
-        "t=3s:A@0ms",     /* pulsación de 0 ms */
-        "t=3s:A,",        /* entrada vacía al final */
-        "t=99999999s:A",  /* fuera de rango */
-        "t=10p:A@1s",     /* unidades mezcladas */
+        "START",          /* no t= */
+        "t=3:START",      /* no unit */
+        "t=3s:",          /* no button */
+        "t=3s:JUMP",      /* unknown button */
+        "t=3s:A+",        /* empty button */
+        "t=-1s:A",        /* negative time */
+        "t=3s:A@0ms",     /* 0 ms press */
+        "t=3s:A,",        /* empty entry at the end */
+        "t=99999999s:A",  /* out of range */
+        "t=10p:A@1s",     /* mixed units */
         "t=10s:A@5p",
-        "t=10p:A@0p",     /* pulsación de 0 lecturas */
+        "t=10p:A@0p",     /* 0 reads press */
     };
     input_script_t s;
     char err[160];
@@ -217,7 +217,7 @@ static void test_script_errors(void) {
     for (i = 0; i < sizeof bad / sizeof bad[0]; i++) {
         err[0] = 0;
         if (input_script_parse(bad[i], &s, err, sizeof err) != -1 || !err[0]) {
-            fprintf(stderr, "FALLO: el guion '%s' debería ser inválido\n", bad[i]);
+            fprintf(stderr, "FAIL: script '%s' should be invalid\n", bad[i]);
             g_failures++;
         }
     }
@@ -231,9 +231,9 @@ int main(void) {
     test_script();
     test_script_errors();
     if (g_failures) {
-        fprintf(stderr, "input_test: %d fallos\n", g_failures);
+        fprintf(stderr, "input_test: %d failures\n", g_failures);
         return 1;
     }
-    printf("input_test: OK (6 pruebas)\n");
+    printf("input_test: OK (6 tests)\n");
     return 0;
 }

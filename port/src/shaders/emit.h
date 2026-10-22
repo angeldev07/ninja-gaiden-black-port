@@ -1,8 +1,8 @@
 /*
- * emit.h: escritura acotada de texto GLSL en un buffer del llamante.
+ * emit.h: bounded writing of GLSL text into a caller-owned buffer.
  *
- * Lo comparten vsh.c y psh.c. `glsl_emit` añade texto con formato printf; si no cabe,
- * marca `overflow` y deja de escribir (el buffer siempre queda terminado en NUL).
+ * Shared by vsh.c and psh.c. `glsl_emit` appends printf-formatted text; if it does not fit,
+ * it sets `overflow` and stops writing (the buffer always stays NUL-terminated).
  */
 #pragma once
 
@@ -10,16 +10,16 @@
 
 typedef struct glsl_buf {
     char *out;
-    size_t cap;   /* bytes de `out`, incluido el NUL final */
-    size_t len;   /* caracteres escritos, sin el NUL */
-    int overflow; /* 1 si algo no cupo */
+    size_t cap;   /* bytes of `out`, including the final NUL */
+    size_t len;   /* characters written, without the NUL */
+    int overflow; /* 1 if something did not fit */
 } glsl_buf;
 
-/* Prepara el buffer; `out` puede ser NULL solo si `cap` es 0 (todo será overflow). */
+/* Prepares the buffer; `out` may be NULL only if `cap` is 0 (everything will overflow). */
 void glsl_buf_init(glsl_buf *b, char *out, size_t cap);
 
-/* Añade texto con formato printf. */
+/* Appends printf-formatted text. */
 void glsl_emit(glsl_buf *b, const char *fmt, ...);
 
-/* Longitud escrita, o -1 si hubo overflow. */
+/* Length written, or -1 if there was an overflow. */
 int glsl_buf_result(const glsl_buf *b);

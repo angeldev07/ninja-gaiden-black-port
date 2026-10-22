@@ -1,5 +1,5 @@
 /*
- * eeprom_test.c: la imagen de la EEPROM es determinista y tiene los campos en su sitio.
+ * eeprom_test.c: the EEPROM image is deterministic and has its fields in the right place.
  */
 #include <stdio.h>
 #include <string.h>
@@ -11,7 +11,7 @@ static int g_fail;
 #define CHECK(c)                                                                                  \
     do {                                                                                          \
         if (!(c)) {                                                                               \
-            printf("FALLO %s:%d: %s\n", __FILE__, __LINE__, #c);                                  \
+            printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c);                                  \
             g_fail = 1;                                                                           \
         }                                                                                         \
     } while (0)
@@ -23,7 +23,7 @@ static unsigned get32(const unsigned char *p) {
 int main(void) {
     unsigned char a[EEPROM_SIZE], b[EEPROM_SIZE];
     uint32_t off = 0, len = 0;
-    memset(a, 0xCC, sizeof a); /* basura distinta en cada búfer: la imagen la pisa entera */
+    memset(a, 0xCC, sizeof a); /* different garbage in each buffer: the image overwrites all of it */
     memset(b, 0x5A, sizeof b);
     eeprom_image(a);
     eeprom_image(b);
@@ -33,7 +33,7 @@ int main(void) {
     CHECK(get32(a + 0x58) == EEPROM_AV_REGION);
     CHECK(get32(a + 0x90) == EEPROM_LANGUAGE);
     CHECK(get32(a + 0xBC) == EEPROM_DVD_REGION);
-    /* La clave que XAPI usa sin XboxHDKey: offset 0x36, 16 bytes ("0000000000" + MAC a 0). */
+    /* The key XAPI uses without XboxHDKey: offset 0x36, 16 bytes ("0000000000" + MAC at 0). */
     CHECK(!memcmp(a + 0x36, "0000000000\0\0\0\0\0\0", 16));
     CHECK(!eeprom_section(0xFFFF, &off, &len) && off == 0 && len == 256);
     CHECK(!eeprom_section(0x1FF, &off, &len) && off == 0x30 && len == 0x30);

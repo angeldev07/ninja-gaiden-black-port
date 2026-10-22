@@ -1,6 +1,6 @@
 /*
- * hostpath_test.c: el confinamiento de rutas Xbox -> PC nunca sale de la raíz.
- * Lo compila y ejecuta port\build.cmd; termina con código 1 si algo falla.
+ * hostpath_test.c: Xbox -> PC path confinement never leaves the root.
+ * Built and run by port\build.cmd; exits with code 1 if anything fails.
  */
 #include <stdio.h>
 #include <string.h>
@@ -15,7 +15,7 @@ static int g_failures, g_checks;
     do {                                                                            \
         g_checks++;                                                                 \
         if (!(cond)) {                                                              \
-            fprintf(stderr, "FALLO %s:%d: %s\n", __FILE__, __LINE__, #cond);        \
+            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);        \
             g_failures++;                                                           \
         }                                                                           \
     } while (0)
@@ -41,17 +41,17 @@ static void test_rejects_parent_components(void) {
     CHECK(!joins("\\..\\..\\Windows\\win.ini", out, sizeof out));
     CHECK(!joins("\\TDATA\\..\\..\\partition2\\x", out, sizeof out));
     CHECK(!joins("\\.\\x", out, sizeof out));
-    CHECK(!joins("\\...", out, sizeof out));  /* Windows lo recorta a ".." */
-    CHECK(!joins("\\.. ", out, sizeof out));  /* espacio final: idem */
-    CHECK(!joins("\\a/../../b", out, sizeof out)); /* '/' también separa */
+    CHECK(!joins("\\...", out, sizeof out));  /* Windows trims it to ".." */
+    CHECK(!joins("\\.. ", out, sizeof out));  /* trailing space: same */
+    CHECK(!joins("\\a/../../b", out, sizeof out)); /* '/' also separates */
 }
 
 static void test_rejects_absolute_and_colon(void) {
     char out[512];
-    CHECK(!joins("C:\\Windows\\win.ini", out, sizeof out));    /* no empieza por '\' */
-    CHECK(!joins("\\C:\\Windows\\win.ini", out, sizeof out));  /* ':' en un componente */
-    CHECK(!joins("\\file.txt:stream", out, sizeof out));       /* flujo alternativo NTFS */
-    CHECK(!joins("\\\\?\\C:\\x", out, sizeof out));            /* '?' y ':' */
+    CHECK(!joins("C:\\Windows\\win.ini", out, sizeof out));    /* does not start with '\' */
+    CHECK(!joins("\\C:\\Windows\\win.ini", out, sizeof out));  /* ':' in a component */
+    CHECK(!joins("\\file.txt:stream", out, sizeof out));       /* NTFS alternate stream */
+    CHECK(!joins("\\\\?\\C:\\x", out, sizeof out));            /* '?' and ':' */
     CHECK(!joins("\\a*b", out, sizeof out));
     CHECK(!joins("\\a\x01" "b", out, sizeof out));
     CHECK(!joins("\\CON", out, sizeof out) || !_strnicmp(out, ROOT, strlen(ROOT)));
@@ -60,7 +60,7 @@ static void test_rejects_absolute_and_colon(void) {
 static void test_unc_like_stays_inside(void) {
     char out[512];
     if (joins("\\\\server\\share", out, sizeof out))
-        CHECK(!_strnicmp(out, ROOT "\\", strlen(ROOT) + 1)); /* nunca \\server\share */
+        CHECK(!_strnicmp(out, ROOT "\\", strlen(ROOT) + 1)); /* never \\server\share */
 }
 
 static void test_small_buffer(void) {
@@ -75,9 +75,9 @@ int main(void) {
     test_unc_like_stays_inside();
     test_small_buffer();
     if (g_failures) {
-        fprintf(stderr, "hostpath_test: %d de %d comprobaciones fallan\n", g_failures, g_checks);
+        fprintf(stderr, "hostpath_test: %d of %d checks fail\n", g_failures, g_checks);
         return 1;
     }
-    printf("hostpath_test: OK (%d comprobaciones)\n", g_checks);
+    printf("hostpath_test: OK (%d checks)\n", g_checks);
     return 0;
 }

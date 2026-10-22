@@ -1,9 +1,9 @@
 /*
- * rcache.c: cachés de superficies y texturas del render GL (ver rcache.h). Código puro.
+ * rcache.c: surface and texture caches of the GL render (see rcache.h). Pure code.
  *
- * Son tablas pequeñas con búsqueda lineal: un frame del juego usa unas pocas superficies y
- * unas decenas de texturas, así que no compensa un hash. El LRU usa un reloj que avanza en
- * cada acceso.
+ * They are small tables with linear search: a game frame uses a few surfaces and a few
+ * dozen textures, so a hash does not pay off. The LRU uses a clock that advances on every
+ * access.
  */
 #include "rcache.h"
 
@@ -42,7 +42,7 @@ rc_surface *rc_surface_get(rc_surfaces *c, int kind, uint32_t addr, uint32_t pit
     if (!c || !result || !width || !height || width > RC_MAX_DIM || height > RC_MAX_DIM)
         return NULL;
     if (pitch < width)
-        pitch = width * 4; /* sin pitch fiable: se supone 32 bits por píxel */
+        pitch = width * 4; /* no reliable pitch: assume 32 bits per pixel */
     bytes = pitch * height;
     end = (uint64_t)addr + bytes;
     for (i = 0; i < RC_MAX_SURFACES; i++) {
@@ -53,7 +53,7 @@ rc_surface *rc_surface_get(rc_surfaces *c, int kind, uint32_t addr, uint32_t pit
             hit = s;
             continue;
         }
-        /* Otra superficie en la misma memoria: su contenido ya no vale. */
+        /* Another surface in the same memory: its contents are no longer valid. */
         if ((uint64_t)s->addr < end && (uint64_t)s->addr + s->bytes > addr) {
             push_dead(s->gl_tex, dead, dead_cap, n_dead);
             memset(s, 0, sizeof *s);
@@ -157,8 +157,8 @@ void rc_texture_uploaded(rc_texture *t, uint64_t hash, uint32_t frame) {
 }
 
 uint64_t rc_hash(const void *data, size_t len, uint64_t seed) {
-    /* Dos acumuladores de 32 bits (multiplicar y rotar, como murmur): rápido en x86 de 32
-     * bits y suficiente para detectar cambios, no es criptográfico. */
+    /* Two 32-bit accumulators (multiply and rotate, like murmur): fast on 32-bit x86 and
+     * good enough to detect changes, not cryptographic. */
     const uint8_t *p = (const uint8_t *)data;
     uint32_t h1 = (uint32_t)seed ^ 0x9E3779B9u, h2 = (uint32_t)(seed >> 32) ^ 0x85EBCA6Bu;
     size_t i, words = len / 4;
@@ -190,17 +190,17 @@ int rc_attr_layout(uint32_t f, rc_attr *out) {
     int type = (int)(f & 0xFu), size = (int)((f >> 4) & 0xFu);
     memset(out, 0, sizeof *out);
     out->type = type;
-    out->stride = (f >> 8) & 0xFFFFu; /* bits altos de la palabra del juego: fuera */
+    out->stride = (f >> 8) & 0xFFFFu; /* high bits of the game word: dropped */
     if (!size)
-        return 0; /* desactivado */
+        return 0; /* disabled */
     if (size == 7)
-        size = 3; /* SIZE_3W: tres componentes */
+        size = 3; /* SIZE_3W: three components */
     if (size > 4)
         return -1;
     out->enabled = 1;
     out->comps = size;
     switch (type) {
-    case 0: /* UB_D3D: D3DCOLOR, siempre una palabra */
+    case 0: /* UB_D3D: D3DCOLOR, always one word */
     case 4: /* UB_OGL */
         out->src_bytes = 4;
         out->dst_bytes = 4;
@@ -217,7 +217,7 @@ int rc_attr_layout(uint32_t f, rc_attr *out) {
         out->dst_bytes = 4 * size;
         out->inline_words = size;
         break;
-    case 6: /* CMP: normal 11:11:10 en una palabra; se expande a 3 floats */
+    case 6: /* CMP: normal 11:11:10 in one word; expanded to 3 floats */
         out->comps = 3;
         out->src_bytes = 4;
         out->dst_bytes = 12;
@@ -297,7 +297,7 @@ uint32_t rc_compact_indices(uint32_t *idx, uint32_t n, uint32_t *unique) {
             unique[m++] = unique[i];
     for (i = 0; i < n; i++) {
         uint32_t lo = 0, hi = m - 1;
-        while (lo < hi) { /* búsqueda binaria: el índice siempre está */
+        while (lo < hi) { /* binary search: the index is always present */
             uint32_t mid = (lo + hi) / 2;
             if (unique[mid] < idx[i])
                 lo = mid + 1;

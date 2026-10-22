@@ -1,10 +1,10 @@
 /*
- * glpng.c: PNG RGBA8 con deflate sin comprimir (ver glpng.h).
+ * glpng.c: RGBA8 PNG with uncompressed deflate (see glpng.h).
  *
- * Estructura: firma, IHDR (8 bits, tipo de color 6), un IDAT con un flujo zlib (cabecera
- * 0x78 0x01, bloques "stored" de hasta 65535 bytes, Adler-32 al final) y IEND. Cada fila
- * va precedida del byte de filtro 0. CRC-32 de cada chunk con el polinomio 0xEDB88320.
- * Especificación: https://www.w3.org/TR/png-3/ y RFC 1950/1951.
+ * Structure: signature, IHDR (8 bits, color type 6), one IDAT with a zlib stream (header
+ * 0x78 0x01, "stored" blocks of up to 65535 bytes, Adler-32 at the end) and IEND. Each row
+ * is preceded by the filter byte 0. CRC-32 of each chunk with the polynomial 0xEDB88320.
+ * Specification: https://www.w3.org/TR/png-3/ and RFC 1950/1951.
  */
 #include "glpng.h"
 
@@ -77,7 +77,7 @@ int glb_write_png(const char *path, int width, int height, const uint8_t *rgba) 
         return -1;
     }
     for (y = 0; y < height; y++) {
-        raw[(row + 1) * (size_t)y] = 0; /* filtro 0 */
+        raw[(row + 1) * (size_t)y] = 0; /* filter 0 */
         memcpy(raw + (row + 1) * (size_t)y + 1, rgba + row * (size_t)y, row);
     }
     z[0] = 0x78;
@@ -85,7 +85,7 @@ int glb_write_png(const char *path, int width, int height, const uint8_t *rgba) 
     pos = 2;
     for (done = 0; done < raw_len;) {
         size_t n = raw_len - done < STORED_MAX ? raw_len - done : STORED_MAX;
-        z[pos++] = (uint8_t)(done + n == raw_len); /* BFINAL en el último, BTYPE 00 */
+        z[pos++] = (uint8_t)(done + n == raw_len); /* BFINAL on the last one, BTYPE 00 */
         z[pos++] = (uint8_t)(n & 0xFFu);
         z[pos++] = (uint8_t)(n >> 8);
         z[pos++] = (uint8_t)(~n & 0xFFu);
@@ -102,11 +102,11 @@ int glb_write_png(const char *path, int width, int height, const uint8_t *rgba) 
     pos += 4;
     put_u32(ihdr, (uint32_t)width);
     put_u32(ihdr + 4, (uint32_t)height);
-    ihdr[8] = 8;  /* bits por canal */
+    ihdr[8] = 8;  /* bits per channel */
     ihdr[9] = 6;  /* RGBA */
     ihdr[10] = 0; /* deflate */
-    ihdr[11] = 0; /* filtro adaptativo (todas las filas con 0) */
-    ihdr[12] = 0; /* sin entrelazado */
+    ihdr[11] = 0; /* adaptive filter (all rows with 0) */
+    ihdr[12] = 0; /* no interlacing */
     f = fopen(path, "wb");
     ok = f != NULL;
     if (ok) {

@@ -1,10 +1,10 @@
 /*
- * glload.h: cargador mínimo de funciones de OpenGL 4.x y WGL (sin GLEW ni glad).
+ * glload.h: minimal loader for OpenGL 4.x and WGL functions (no GLEW or glad).
  *
- * `opengl32.lib` solo exporta OpenGL 1.1; el resto se pide al driver con
- * `wglGetProcAddress` una vez que hay un contexto actual. Aquí están únicamente las
- * funciones que usa glbackend.c, con los tipos y las constantes que no trae <GL/gl.h>.
- * Valores de las constantes: registro de Khronos (glcorearb.h y wglext.h).
+ * `opengl32.lib` only exports OpenGL 1.1; the rest is requested from the driver with
+ * `wglGetProcAddress` once a context is current. Only the functions used by glbackend.c
+ * are here, with the types and constants <GL/gl.h> does not provide.
+ * Constant values: Khronos registry (glcorearb.h and wglext.h).
  */
 #pragma once
 
@@ -17,7 +17,7 @@
 typedef char GLchar;
 typedef ptrdiff_t GLsizeiptr;
 
-/* Constantes de OpenGL > 1.1. */
+/* OpenGL > 1.1 constants. */
 #define GL_CLAMP_TO_EDGE 0x812F
 #define GL_TEXTURE0 0x84C0
 #define GL_ARRAY_BUFFER 0x8892
@@ -46,7 +46,7 @@ typedef ptrdiff_t GLsizeiptr;
 #define GL_TEXTURE_CUBE_MAP_POSITIVE_X 0x8515
 #define GL_MINOR_VERSION 0x821C
 
-/* WGL_ARB_create_context y WGL_ARB_create_context_profile. */
+/* WGL_ARB_create_context and WGL_ARB_create_context_profile. */
 #define WGL_CONTEXT_MAJOR_VERSION_ARB 0x2091
 #define WGL_CONTEXT_MINOR_VERSION_ARB 0x2092
 #define WGL_CONTEXT_FLAGS_ARB 0x2094
@@ -113,8 +113,8 @@ NGL_FUNCTIONS(NGL_DECLARE)
 #undef NGL_DECLARE
 
 /*
- * Carga `wglCreateContextAttribsARB` (fase 0, con el contexto 1.1 temporal) o todas las
- * demás (fase 1, con el contexto 4.x actual). Devuelve cuántas faltan (0 = todo bien) y
- * deja en `missing` el nombre de la primera que falta, si se pasa.
+ * Loads `wglCreateContextAttribsARB` (phase 0, with the temporary 1.1 context) or all the
+ * others (phase 1, with the 4.x context current). Returns how many are missing (0 = all good) and
+ * leaves in `missing` the name of the first missing one, if passed.
  */
 int ngl_load(int phase, const char **missing);

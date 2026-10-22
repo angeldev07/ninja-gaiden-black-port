@@ -1,24 +1,24 @@
 /*
- * thread.c: hilos Xbox sobre hilos Win32.
+ * thread.c: Xbox threads on top of Win32 threads.
  *
- * FS/KPCR (atajo de H6, ver port/README.md): en WOW64 no hay LDT (NtSetLdtEntries no
- * existe en x64), así que FS sigue apuntando al TEB de Windows. El código Xbox solo usa
- * unos pocos campos de fs: y se superponen en el TEB del hilo:
- *   fs:[0x00] ExceptionList, fs:[0x04] StackBase, fs:[0x08] StackLimit: misma semántica
- *             en NT_TIB de Windows y en el KPCR de Xbox; se usan tal cual.
- *   fs:[0x1C] SelfPcr     -> TEB.EnvironmentPointer := KPCR falso
- *   fs:[0x20] Prcb        -> TEB.ClientId.UniqueProcess := &KPCR falso.PrcbData
- *   fs:[0x24] Irql (byte) -> NO se toca: es TEB.ClientId.UniqueThread, y Windows lo usa
- *             para despertar a los hilos que esperan un CRITICAL_SECTION o un SRW (cambiarlo
- *             perdía despertares: deadlock en H7a). Las 7 lecturas `movzx r32, byte fs:[24h]`
- *             del juego se parchean al cargar a `mov r32, 0` (memory.c, ngb_memory_patch_irql).
- *   fs:[0x28] Prcb.CurrentThread -> TEB.ActiveRpcHandle := ETHREAD falso
+ * FS/KPCR (H6 shortcut, see port/README.md): under WOW64 there is no LDT (NtSetLdtEntries does
+ * not exist on x64), so FS keeps pointing at the Windows TEB. Xbox code only uses a few
+ * fs: fields, and they are overlaid on the thread's TEB:
+ *   fs:[0x00] ExceptionList, fs:[0x04] StackBase, fs:[0x08] StackLimit: same semantics
+ *             in the Windows NT_TIB and in the Xbox KPCR; used as they are.
+ *   fs:[0x1C] SelfPcr     -> TEB.EnvironmentPointer := fake KPCR
+ *   fs:[0x20] Prcb        -> TEB.ClientId.UniqueProcess := &fake KPCR.PrcbData
+ *   fs:[0x24] Irql (byte) -> NOT touched: it is TEB.ClientId.UniqueThread, and Windows uses it
+ *             to wake threads waiting on a CRITICAL_SECTION or an SRW (changing it
+ *             lost wakeups: deadlock in H7a). The 7 `movzx r32, byte fs:[24h]` reads
+ *             in the game are patched at load time to `mov r32, 0` (memory.c, ngb_memory_patch_irql).
+ *   fs:[0x28] Prcb.CurrentThread -> TEB.ActiveRpcHandle := fake ETHREAD
  *
- * TLS Xbox: el compilador del XDK accede con [fs:[4] + _tls_index*4], con _tls_index
- * negativo: el bloque TLS vive justo debajo de StackBase. Por eso cada hilo Xbox corre en
- * una pila propia (VirtualAlloc) con el bloque TLS en la cima, y el TEB apunta a ella
- * (StackBase/StackLimit). La cadena SEH se reinicia con una copia del registro final de
- * ntdll dentro de la pila nueva, para que la validación de SEH/SEHOP la acepte.
+ * Xbox TLS: the XDK compiler accesses it with [fs:[4] + _tls_index*4], with a negative
+ * _tls_index: the TLS block lives right below StackBase. That is why every Xbox thread runs on
+ * its own stack (VirtualAlloc) with the TLS block at the top, and the TEB points to it
+ * (StackBase/StackLimit). The SEH chain is restarted with a copy of ntdll's final record
+ * inside the new stack, so that SEH/SEHOP validation accepts it.
  */
 #include "ngb.h"
 
@@ -29,7 +29,7 @@
 
 #include "kernel/kernel.h"
 
-#define XBOX_MIN_STACK (1u << 20) /* las impl. del kernel y el log corren en esta pila */
+#define XBOX_MIN_STACK (1u << 20) /* the kernel impls and the log run on this stack */
 
 static DWORD g_tls = TLS_OUT_OF_INDEXES;
 static CRITICAL_SECTION g_threads_lock;
@@ -56,9 +56,9 @@ void ngb_kernel_enter(ngb_thread_t *t) {
 void ngb_kernel_leave(ngb_thread_t *t) {
     if (!t || InterlockedDecrement(&t->in_kernel) != 0)
         return;
-    /* Fuera ya de todo código propio: si el juego pidió suspender este hilo mientras estaba
-     * dentro, se aparca aquí hasta el NtResumeThread. El evento se resetea bajo el lock y la
-     * condición se vuelve a mirar tras despertar, así que un resume no se pierde. */
+    /* Now outside all loader code: if the game asked to suspend this thread while it was
+     * inside, it is parked here until NtResumeThread. The event is reset under the lock and
+     * the condition is checked again after waking up, so a resume is not lost. */
     EnterCriticalSection(&t->susp_lock);
     while (t->susp_park > 0 && t->in_kernel == 0) {
         ResetEvent(t->resume_evt);
@@ -75,12 +75,12 @@ LONG ngb_thread_suspend(ngb_thread_t *t) {
     EnterCriticalSection(&t->susp_lock);
     prev = t->susp_park + t->susp_host;
     if (t == ngb_thread_current() || t->in_kernel > 0) {
-        t->susp_park++; /* dentro del kernel: se aparca al salir (ngb_kernel_leave) */
+        t->susp_park++; /* inside the kernel: parked on exit (ngb_kernel_leave) */
     } else if (SuspendThread(t->handle) == (DWORD)-1) {
         prev = -1;
     } else {
-        /* SuspendThread es asíncrono: GetThreadContext espera a que el hilo pare de verdad.
-         * Si entró al kernel justo antes, se deshace y se aparca. */
+        /* SuspendThread is asynchronous: GetThreadContext waits until the thread has really
+         * stopped. If it entered the kernel just before, it is undone and parked. */
         ctx.ContextFlags = CONTEXT_CONTROL;
         GetThreadContext(t->handle, &ctx);
         if (t->in_kernel > 0) {
@@ -106,7 +106,7 @@ LONG ngb_thread_resume(ngb_thread_t *t) {
         ResumeThread(t->handle);
         t->susp_host--;
     } else {
-        /* Sin suspensiones propias: el hilo se creó suspendido (PsCreateSystemThreadEx). */
+        /* No suspensions of our own: the thread was created suspended (PsCreateSystemThreadEx). */
         r = ResumeThread(t->handle);
         prev = r == (DWORD)-1 ? -1 : (LONG)r;
     }
@@ -114,8 +114,8 @@ LONG ngb_thread_resume(ngb_thread_t *t) {
     return prev;
 }
 
-/* La GPU y la APU de la Xbox trabajan en paralelo a la CPU: sus hilos de emulación van a los
- * núcleos 1..n y no le quitan tiempo al juego, que vive en el núcleo 0 (ngb_thread_spawn). */
+/* The Xbox GPU and APU work in parallel with the CPU: their emulation threads go to cores
+ * 1..n and do not take time from the game, which lives on core 0 (ngb_thread_spawn). */
 void ngb_pin_hardware_thread(HANDLE h) {
     DWORD_PTR proc, sys;
     if (h && GetProcessAffinityMask(GetCurrentProcess(), &proc, &sys) && (proc & ~(DWORD_PTR)1))
@@ -130,7 +130,7 @@ uint32_t ngb_tls_total_size(const xbe_t *xbe) {
     uint32_t raw;
     if (!xbe->has_tls)
         return 0;
-    /* Igual que el arranque de XAPI: align16(datos + ceros) + 4 del puntero al bloque. */
+    /* Same as the XAPI startup: align16(data + zeros) + 4 for the block pointer. */
     raw = xbe->tls.raw_end - xbe->tls.raw_start + xbe->tls.zero_fill;
     return ((raw + 0xFu) & ~0xFu) + 4u;
 }
@@ -140,7 +140,7 @@ static void init_tls_block(ngb_thread_t *t, uint8_t *tls) {
     uint32_t raw;
     if (!t->tls_size || !xbe->has_tls)
         return;
-    /* [TlsData] = TlsData + 4 y detrás la plantilla .tls; lo mismo que XapiThreadStartup. */
+    /* [TlsData] = TlsData + 4 and the .tls template behind it; same as XapiThreadStartup. */
     *(uint32_t *)tls = (uint32_t)(uintptr_t)(tls + 4);
     raw = xbe->tls.raw_end - xbe->tls.raw_start;
     if (raw && raw <= t->tls_size - 4)
@@ -157,8 +157,8 @@ static void *final_seh_handler(void) {
     return handler;
 }
 
-/* Cambia ESP a new_esp, llama fn(t) (cdecl) y vuelve a la pila original.
- * C4100 justificado: en una función naked los parámetros solo se leen desde el asm. */
+/* Switches ESP to new_esp, calls fn(t) (cdecl) and returns to the original stack.
+ * C4100 justified: in a naked function the parameters are only read from the asm. */
 #pragma warning(push)
 #pragma warning(disable : 4100)
 static __declspec(naked) void __cdecl call_on_stack(uint32_t new_esp,
@@ -180,10 +180,10 @@ static __declspec(naked) void __cdecl call_on_stack(uint32_t new_esp,
 }
 #pragma warning(pop)
 
-/* El hilo termina: el ETHREAD queda señalado con su código de salida. GetExitCodeThread de
- * XAPI lee Header.SignalState (+4) y, si no es 0, ExitStatus (+0x120); sin esto el juego
- * espera para siempre a los hilos que crea (la pantalla negra tras los avisos). Las esperas
- * KeWaitFor* sobre el hilo usan el handle del host, que Windows señala por su cuenta. */
+/* The thread ends: the ETHREAD is signaled with its exit code. XAPI's GetExitCodeThread
+ * reads Header.SignalState (+4) and, if it is not 0, ExitStatus (+0x120); without this the
+ * game waits forever for the threads it creates (the black screen after the warnings). The
+ * KeWaitFor* waits on the thread use the host handle, which Windows signals on its own. */
 static void mark_exited(ngb_thread_t *t, uint32_t status) {
     *(volatile uint32_t *)(t->ethread + 0x120) = status;
     MemoryBarrier();
@@ -210,8 +210,8 @@ static void teb_overlay(ngb_thread_t *t) {
     __writefsdword(0x28, (unsigned long)(uintptr_t)t->ethread);
 }
 
-/* C4733 justificado: se escribe fs:[0] a propósito para reiniciar la cadena SEH en la pila
- * Xbox con el manejador final de ntdll (no es un manejador nuestro sin registrar). */
+/* C4733 justified: fs:[0] is written on purpose to restart the SEH chain on the Xbox stack
+ * with ntdll's final handler (it is not an unregistered handler of ours). */
 #pragma warning(push)
 #pragma warning(disable : 4733)
 static DWORD WINAPI thread_proc(LPVOID param) {
@@ -225,7 +225,7 @@ static DWORD WINAPI thread_proc(LPVOID param) {
     size = (size + 0xFFFFu) & ~0xFFFFu;
     stack = (uint8_t *)VirtualAlloc(NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     if (!stack)
-        ngb_stop(NGB_EXIT_CRASH, "T%d: sin memoria para la pila Xbox (%u bytes)", t->index, size);
+        ngb_stop(NGB_EXIT_CRASH, "T%d: out of memory for the Xbox stack (%u bytes)", t->index, size);
     t->xbox_stack = stack;
     top = (uint32_t)(uintptr_t)stack + size;
     tls_data = top - t->tls_size;
@@ -246,7 +246,7 @@ static DWORD WINAPI thread_proc(LPVOID param) {
     t->saved_stack_limit = __readfsdword(0x08);
     t->saved_seh = __readfsdword(0x00);
     teb_overlay(t);
-    ngb_log("hilo T%d (tid %lu): %s 0x%08X ctx 0x%08X, pila [0x%08X, 0x%08X), TlsData 0x%08X "
+    ngb_log("thread T%d (tid %lu): %s 0x%08X ctx 0x%08X, stack [0x%08X, 0x%08X), TlsData 0x%08X "
             "(%u B), ETHREAD %p",
             t->index, t->tid, t->is_entry ? "entry" : "start", t->start_routine, t->start_context,
             (uint32_t)(uintptr_t)stack, top, tls_data, t->tls_size, (void *)t->ethread);
@@ -260,7 +260,7 @@ static DWORD WINAPI thread_proc(LPVOID param) {
     __writefsdword(0x04, t->saved_stack_base);
     __writefsdword(0x08, t->saved_stack_limit);
     mark_exited(t, 0);
-    ngb_log("hilo T%d: %s ha vuelto", t->index, t->is_entry ? "el entry point" : "la rutina");
+    ngb_log("thread T%d: %s returned", t->index, t->is_entry ? "the entry point" : "the routine");
     return 0;
 }
 #pragma warning(pop)
@@ -304,19 +304,19 @@ ngb_thread_t *ngb_thread_spawn(uint32_t start_routine, uint32_t start_context,
     *(uint32_t *)(t->kpcr + 0x1C) = (uint32_t)(uintptr_t)t->kpcr;
     *(uint32_t *)(t->kpcr + 0x20) = (uint32_t)(uintptr_t)(t->kpcr + 0x28);
     *(uint32_t *)(t->kpcr + 0x28) = (uint32_t)(uintptr_t)t->ethread;
-    /* KTHREAD.Header: Type = ThreadObject (6), Size en dwords. */
+    /* KTHREAD.Header: Type = ThreadObject (6), Size in dwords. */
     t->ethread[0] = 6;
     t->ethread[2] = (uint8_t)(NGB_KTHREAD_SIZE / 4);
     *(uint32_t *)(t->ethread + 0x130) = start_routine; /* ETHREAD.StartAddress */
 
     t->handle = CreateThread(NULL, 0x40000, thread_proc, t, CREATE_SUSPENDED, &t->tid);
     if (!t->handle) {
-        ngb_log("hilo: CreateThread falló (%lu)", GetLastError());
+        ngb_log("thread: CreateThread failed (%lu)", GetLastError());
         VirtualFree(block, 0, MEM_RELEASE);
         free(t);
         return NULL;
     }
-    SetThreadAffinityMask(t->handle, 1); /* la CPU de la Xbox: un núcleo para todos sus hilos */
+    SetThreadAffinityMask(t->handle, 1); /* the Xbox CPU: one core for all its threads */
     *(uint32_t *)(t->ethread + 0x12C) = t->tid; /* ETHREAD.UniqueThread */
     EnterCriticalSection(&g_threads_lock);
     t->next = g_threads;
@@ -354,9 +354,9 @@ __declspec(noreturn) void ngb_thread_exit(uint32_t status) {
     ngb_thread_t *t = ngb_thread_current();
     if (t) {
         mark_exited(t, status);
-        ngb_log("hilo T%d: PsTerminateSystemThread(0x%08X)", t->index, status);
+        ngb_log("thread T%d: PsTerminateSystemThread(0x%08X)", t->index, status);
     }
-    /* Seguimos en la pila Xbox, que el TEB describe bien: ExitThread puede correr aquí. */
+    /* We are still on the Xbox stack, which the TEB describes correctly: ExitThread can run here. */
     ExitThread(status);
 }
 
@@ -379,7 +379,7 @@ int ngb_thread_alive_count(void) {
 static void log_inflight(const ngb_thread_t *t) {
     if (t->inflight_ordinal) {
         const ngb_kexport_t *e = ngb_kexport(t->inflight_ordinal);
-        ngb_log("  T%d dentro de %u %s (llamada desde 0x%08X)", t->index, t->inflight_ordinal,
+        ngb_log("  T%d inside %u %s (called from 0x%08X)", t->index, t->inflight_ordinal,
                 e ? e->name : "?", t->inflight_caller);
     }
 }
@@ -390,23 +390,23 @@ void ngb_thread_dump_all(void) {
         return;
     if (!TryEnterCriticalSection(&g_threads_lock))
         return;
-    ngb_log("hilos Xbox:");
+    ngb_log("Xbox threads:");
     for (t = g_threads; t; t = t->next) {
         CONTEXT ctx;
         char bytes[200];
         if (t->exited) {
-            ngb_log("  T%d (tid %lu): terminado", t->index, t->tid);
+            ngb_log("  T%d (tid %lu): finished", t->index, t->tid);
             continue;
         }
         if (t->internal)
-            ngb_log("  T%d (tid %lu): hilo interno del loader (DPC/timers)", t->index, t->tid);
+            ngb_log("  T%d (tid %lu): loader internal thread (DPC/timers)", t->index, t->tid);
         if (t == self) {
-            ngb_log("  T%d (tid %lu): hilo actual (el que para)", t->index, t->tid);
+            ngb_log("  T%d (tid %lu): current thread (the one stopping)", t->index, t->tid);
             log_inflight(t);
             continue;
         }
         if (SuspendThread(t->handle) == (DWORD)-1) {
-            ngb_log("  T%d (tid %lu): no se pudo suspender", t->index, t->tid);
+            ngb_log("  T%d (tid %lu): could not be suspended", t->index, t->tid);
             continue;
         }
         memset(&ctx, 0, sizeof ctx);
@@ -421,7 +421,7 @@ void ngb_thread_dump_all(void) {
                     "EDX 0x%08lX ESI 0x%08lX EDI 0x%08lX | %s",
                     t->index, t->tid, ctx.Eip, ctx.Esp, ctx.Eax, ctx.Ebx, ctx.Ecx, ctx.Edx, ctx.Esi,
                     ctx.Edi, bytes);
-            ngb_log("     pila: %08X %08X %08X %08X %08X %08X %08X %08X", stackw[0], stackw[1],
+            ngb_log("     stack: %08X %08X %08X %08X %08X %08X %08X %08X", stackw[0], stackw[1],
                     stackw[2], stackw[3], stackw[4], stackw[5], stackw[6], stackw[7]);
         }
         log_inflight(t);

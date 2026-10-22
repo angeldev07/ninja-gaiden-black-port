@@ -1,13 +1,13 @@
 /*
- * main.c: punto de entrada de ngb-core.dll (lo llama ngb-loader.exe, ver loader_stub.c).
+ * main.c: entry point of ngb-core.dll (called by ngb-loader.exe, see loader_stub.c).
  *
- *   ngb-loader.exe <ruta.xbe> [--log ARCHIVO] [--max-calls N] [--timeout S] [--idle S]
+ *   ngb-loader.exe <path.xbe> [--log FILE] [--max-calls N] [--timeout S] [--idle S]
  *                  [--lenient] [--echo] [--window] [--symbols CSV]
- *                  [--input-script GUION] [--no-host-input]
+ *                  [--input-script SCRIPT] [--no-host-input]
  *
- * Carga el XBE en su dirección base, enlaza el kernel thunk con los stubs, prepara el
- * primer hilo Xbox (KPCR/KTHREAD falsos, pila con TLS) y salta al entry point. El hilo
- * principal hace de vigilante: tiempo máximo, inactividad y fin de todos los hilos.
+ * Loads the XBE at its base address, links the kernel thunk to the stubs, sets up the first
+ * Xbox thread (fake KPCR/KTHREAD, stack with TLS) and jumps to the entry point. The main
+ * thread acts as a watchdog: maximum time, inactivity and the end of all threads.
  */
 #include "ngb.h"
 
@@ -28,40 +28,40 @@ extern volatile DWORD g_ngb_last_call_tick;
 
 static void usage(void) {
     fprintf(stderr,
-            "uso: ngb-loader.exe <ruta.xbe> [--log ARCHIVO] [--max-calls N] [--timeout S]\n"
-            "                    [--idle S] [--lenient] [--echo] [--window] [--no-pacing]\n"
-            "                    [--renderer gl|soft]\n"
-            "                    [--mmio-strict] [--mmio-gpu-ram] [--pgraph-frames N]\n"
-            "                    [--log-cap N] [--symbols CSV]\n"
-            "                    [--input-script GUION] [--no-host-input]\n"
-            "  --log        log de la ejecución (por defecto %%NGB_DATA%%\\runs\\h6-<fecha>.log)\n"
-            "  --max-calls  para tras N llamadas al kernel (por defecto 200000; 0 = sin límite)\n"
-            "  --timeout    segundos máximos de ejecución (por defecto 60)\n"
-            "  --idle       para si pasan S segundos sin llamadas al kernel (por defecto 10)\n"
-            "  --lenient    una llamada sin implementar devuelve STATUS_SUCCESS y sigue\n"
-            "  --echo       copia el log a stderr\n"
-            "  --window     abre la ventana del presentador de frames (H7; F12 = captura); --window-hidden: la crea sin mostrarla (pruebas)\n"
-            "  --no-pacing  FLIP_STALL no espera al siguiente 1/60 s (frames tan rápido como pueda)\n"
-            "  --renderer   gl (OpenGL 4.x, por defecto si hay contexto) o soft (rasterizador)\n"
-            "  --mmio-strict   para en el primer MMIO o E/S de puertos que no sea el NV2A modelado\n"
-            "  --mmio-gpu-ram  NV2A como RAM trazada en vez del modelo (exploración de H6)\n"
-            "  --pgraph-frames N  frames con todos los métodos en el log de PGRAPH (3)\n"
-            "  --log-cap N  líneas de log por función del kernel; luego solo se cuentan (2000)\n"
-            "  --symbols CSV  nombres de funciones (CSV de Ghidra) en el log y los crashes\n"
-            "  --mute       sin sonido (la APU emulada sigue avanzando)\n"
-            "  --audio-wav  guarda lo que suena en <log>-audio.wav\n"
-            "  --rdoc-frame N  captura el frame N con RenderDoc (render GL; .rdc junto al log)\n"
-            "  --rdoc-key     carga RenderDoc y F11 captura el frame siguiente (jugar y capturar)\n"
+            "usage: ngb-loader.exe <path.xbe> [--log FILE] [--max-calls N] [--timeout S]\n"
+            "                      [--idle S] [--lenient] [--echo] [--window] [--no-pacing]\n"
+            "                      [--renderer gl|soft]\n"
+            "                      [--mmio-strict] [--mmio-gpu-ram] [--pgraph-frames N]\n"
+            "                      [--log-cap N] [--symbols CSV]\n"
+            "                      [--input-script SCRIPT] [--no-host-input]\n"
+            "  --log        execution log (default %%NGB_DATA%%\\runs\\h6-<date>.log)\n"
+            "  --max-calls  stop after N kernel calls (default 200000; 0 = unlimited)\n"
+            "  --timeout    maximum run time in seconds (default 60)\n"
+            "  --idle       stop after S seconds without kernel calls (default 10)\n"
+            "  --lenient    an unimplemented call returns STATUS_SUCCESS and execution continues\n"
+            "  --echo       copy the log to stderr\n"
+            "  --window     open the frame presenter window (H7; F12 = screenshot); --window-hidden: create it without showing it (tests)\n"
+            "  --no-pacing  FLIP_STALL does not wait for the next 1/60 s (frames as fast as possible)\n"
+            "  --renderer   gl (OpenGL 4.x, default when a context is available) or soft (rasterizer)\n"
+            "  --mmio-strict   stop at the first MMIO or port I/O that is not the modeled NV2A\n"
+            "  --mmio-gpu-ram  NV2A as traced RAM instead of the model (H6 exploration)\n"
+            "  --pgraph-frames N  frames with all methods in the PGRAPH log (3)\n"
+            "  --log-cap N  log lines per kernel function; after that they are only counted (2000)\n"
+            "  --symbols CSV  function names (Ghidra CSV) in the log and in crashes\n"
+            "  --mute       no sound (the emulated APU keeps advancing)\n"
+            "  --audio-wav  save what plays to <log>-audio.wav\n"
+            "  --rdoc-frame N  capture frame N with RenderDoc (GL render; .rdc next to the log)\n"
+            "  --rdoc-key     load RenderDoc and F11 captures the next frame (play and capture)\n"
             "  --dump-ram FRAMES  guest RAM snapshots at those frames (\"2400,3000\"); F10 too\n"
-            "  --watch LISTA  vigila direcciones del juego (0xADDR[:1|2|4],...) y registra los "
-            "cambios\n"
-            "  --input-script  pulsaciones del mando, p. ej. \"t=3s:START,t=5s:A@500ms\"\n"
-            "                  (\"t=2400p:A@10p\": en lecturas del mando, no en ms)\n"
-            "  --no-host-input ni mando de PC ni teclado: solo el guion\n");
+            "  --watch LIST  watch game addresses (0xADDR[:1|2|4],...) and log the "
+            "changes\n"
+            "  --input-script  gamepad presses, e.g. \"t=3s:START,t=5s:A@500ms\"\n"
+            "                  (\"t=2400p:A@10p\": in gamepad reads, not in ms)\n"
+            "  --no-host-input neither PC gamepad nor keyboard: only the script\n");
 }
 
-/* 1 si `path` (o alguna carpeta que lo contiene) está dentro de un repo git: algún ancestro
-   tiene un `.git` (carpeta, o archivo en un worktree). */
+/* 1 if `path` (or any folder containing it) is inside a git repo: some ancestor has a
+   `.git` (folder, or file in a worktree). */
 static int inside_git_repo(const char *path) {
     char full[MAX_PATH], probe[MAX_PATH];
     char *cut;
@@ -88,7 +88,7 @@ static void default_log_path(char *out, size_t outlen) {
     else if (home && *home)
         snprintf(dir, sizeof dir, "%s\\ngb-data\\runs", home);
     else {
-        out[0] = 0; /* sin NGB_DATA ni USERPROFILE: hay que pasar --log */
+        out[0] = 0; /* no NGB_DATA or USERPROFILE: --log must be passed */
         return;
     }
     CreateDirectoryA(dir, NULL);
@@ -100,14 +100,14 @@ static void default_log_path(char *out, size_t outlen) {
 static int parse_args(void) {
     int argc = 0, i, explicit_limits = 0; /* bits: 1 max-calls, 2 timeout, 4 idle */
     LPWSTR *wargv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    static char argbuf[32][2048]; /* un --input-script largo no cabe en MAX_PATH */
+    static char argbuf[32][2048]; /* a long --input-script does not fit in MAX_PATH */
     char *argv[32];
     if (!wargv || argc < 2 || argc > 32)
         return -1;
     for (i = 0; i < argc; i++) {
         if (!WideCharToMultiByte(CP_ACP, 0, wargv[i], -1, argbuf[i], (int)sizeof argbuf[i], NULL,
                                  NULL))
-            return -1; /* argumento demasiado largo: mejor fallar que truncarlo */
+            return -1; /* argument too long: better to fail than to truncate it */
         argv[i] = argbuf[i];
     }
     g_ngb_opts.max_calls = 200000;
@@ -185,8 +185,8 @@ static int parse_args(void) {
         else
             g_ngb_opts.xbe_path = _strdup(a);
     }
-    /* Con ventana visible se juega: sin límites salvo los que se pidan expresamente (los
-     * límites por defecto son para las ejecuciones de diagnóstico y los tests). */
+    /* With a visible window the game is played: no limits except the ones explicitly requested
+     * (the default limits are for diagnostic runs and tests). */
     if (g_ngb_opts.window == 1) {
         if (!(explicit_limits & 1))
             g_ngb_opts.max_calls = 0;
@@ -200,13 +200,13 @@ static int parse_args(void) {
     if (!g_ngb_opts.log_path[0])
         default_log_path(g_ngb_opts.log_path, MAX_PATH);
     if (!g_ngb_opts.log_path[0]) {
-        fprintf(stderr, "ngb-loader: sin NGB_DATA ni USERPROFILE; indica el log con --log\n");
+        fprintf(stderr, "ngb-loader: no NGB_DATA or USERPROFILE; give the log with --log\n");
         return -1;
     }
     if (inside_git_repo(g_ngb_opts.log_path)) {
-        /* Junto al log se vuelcan texturas y superficies del juego en PNG: nunca dentro de un repo. */
-        fprintf(stderr, "ngb-loader: el log (%s) está dentro de un repo git; los volcados del juego "
-                        "no pueden ir ahí. Usa una ruta bajo NGB_DATA.\n", g_ngb_opts.log_path);
+        /* Game textures and surfaces are dumped as PNG next to the log: never inside a repo. */
+        fprintf(stderr, "ngb-loader: the log (%s) is inside a git repo; game dumps "
+                        "must not go there. Use a path under NGB_DATA.\n", g_ngb_opts.log_path);
         return -1;
     }
     LocalFree(wargv);
@@ -215,18 +215,18 @@ static int parse_args(void) {
 
 static void log_header(const xbe_t *xbe) {
     uint32_t tls_total = ngb_tls_total_size(xbe);
-    ngb_log("ngb-loader H6: arranque nativo de un XBE (proyecto pedagógico)");
+    ngb_log("ngb-loader H6: native boot of an XBE");
     ngb_log("xbe: %s", g_ngb_opts.xbe_path);
-    ngb_log("xbe: base 0x%08X, imagen 0x%X, cabeceras 0x%X, %u secciones, title id 0x%08X",
+    ngb_log("xbe: base 0x%08X, image 0x%X, headers 0x%X, %u sections, title id 0x%08X",
             xbe->base, xbe->size_of_image, xbe->size_of_headers, xbe->section_count,
             xbe->title_id);
-    ngb_log("xbe: %s, entry 0x%08X, kernel thunk 0x%08X, TLS 0x%08X, pila 0x%X", xbe->build,
+    ngb_log("xbe: %s, entry 0x%08X, kernel thunk 0x%08X, TLS 0x%08X, stack 0x%X", xbe->build,
             xbe->entry, xbe->thunk, xbe->tls_addr, xbe->stack_size);
     if (xbe->has_tls)
-        ngb_log("tls: datos [0x%08X, 0x%08X), ceros 0x%X, índice en 0x%08X -> bloque de %u B",
+        ngb_log("tls: data [0x%08X, 0x%08X), zeros 0x%X, index at 0x%08X -> block of %u B",
                 xbe->tls.raw_start, xbe->tls.raw_end, xbe->tls.zero_fill, xbe->tls.index_addr,
                 tls_total);
-    ngb_log("opciones: max-calls %lu, timeout %u s, idle %u s%s", g_ngb_opts.max_calls,
+    ngb_log("options: max-calls %lu, timeout %u s, idle %u s%s", g_ngb_opts.max_calls,
             g_ngb_opts.timeout_s, g_ngb_opts.idle_s, g_ngb_opts.lenient ? ", lenient" : "");
 }
 
@@ -240,51 +240,51 @@ __declspec(dllexport) int __cdecl ngb_main(void) {
         ExitProcess(NGB_EXIT_USAGE);
     }
     if (ngb_log_open(g_ngb_opts.log_path)) {
-        fprintf(stderr, "ngb-loader: no se puede crear el log %s\n", g_ngb_opts.log_path);
+        fprintf(stderr, "ngb-loader: cannot create the log %s\n", g_ngb_opts.log_path);
         ExitProcess(NGB_EXIT_USAGE);
     }
-    fprintf(stderr, "ngb-loader: log en %s\n", g_ngb_opts.log_path);
-    /* Resolución del reloj del sistema a 1 ms. Por defecto Windows redondea cada Sleep y cada
-     * espera con timeout a 15,6 ms, y el código de la Xbox da por hechas esperas de 1 ms: el
-     * hilo de ficheros de CRI (KeDelayExecutionThread en bucle) cargaba cada bloque 15 veces
-     * más lento y la carga de la caché agotaba su timeout de 10 s una y otra vez (el bucle de
-     * los avisos). Se restaura sola al salir del proceso. */
+    fprintf(stderr, "ngb-loader: log at %s\n", g_ngb_opts.log_path);
+    /* System clock resolution at 1 ms. By default Windows rounds every Sleep and every
+     * timed wait to 15.6 ms, and the Xbox code assumes 1 ms waits: the CRI file thread
+     * (KeDelayExecutionThread in a loop) loaded each block 15 times slower and the cache
+     * load hit its 10 s timeout over and over (the warning loop). It is restored on its own
+     * when the process exits. */
     timeBeginPeriod(1);
     if (xbe_load_file(g_ngb_opts.xbe_path, &g_ngb_xbe, err, sizeof err))
-        ngb_stop(NGB_EXIT_USAGE, "XBE inválido: %s", err);
+        ngb_stop(NGB_EXIT_USAGE, "invalid XBE: %s", err);
     log_header(&g_ngb_xbe);
     if (g_ngb_opts.symbols && ngb_symbols_load(g_ngb_opts.symbols))
-        ngb_log("símbolos: no se pudo leer %s", g_ngb_opts.symbols);
+        ngb_log("symbols: could not read %s", g_ngb_opts.symbols);
 
-    /* Ventana del presentador (H7). El enganche está en gpu/pgraph.c: en cada FLIP_STALL se
-     * presenta el búfer de color de 720 de ancho que el juego limpió o dibujó (rasterizado
-     * por software en gpu/raster.c) y se espera al siguiente 1/60 s (--no-pacing lo quita). */
+    /* Presenter window (H7). The hook is in gpu/pgraph.c: on every FLIP_STALL the 720-wide
+     * color buffer that the game cleared or drew is presented (software-rasterized in
+     * gpu/raster.c) and it waits for the next 1/60 s (--no-pacing removes that). */
     if (g_ngb_opts.window) {
         gfx_config_t cfg;
         memset(&cfg, 0, sizeof cfg);
-        cfg.title = "Ninja Gaiden Black · native port"; /* UTF-8: gfx_init_ex lo pasa a UTF-16 */
+        cfg.title = "Ninja Gaiden Black · native port"; /* UTF-8: gfx_init_ex converts it to UTF-16 */
         cfg.width = 720;
         cfg.height = 480;
         cfg.scale = 2;
         cfg.aspect = GFX_ASPECT_4_3;
-        cfg.hidden = g_ngb_opts.window == 2; /* render y capturas igual, sin ventana visible */
+        cfg.hidden = g_ngb_opts.window == 2; /* render and captures all the same, no visible window */
         if (gfx_init_ex(&cfg))
-            ngb_log("gfx: no se pudo abrir la ventana; se sigue sin ella");
+            ngb_log("gfx: could not open the window; continuing without it");
         else
-            ngb_log("gfx: ventana 720x480 x2 (4:3), F12 guarda captura en runs\\shots");
+            ngb_log("gfx: window 720x480 x2 (4:3), F12 saves a screenshot in runs\\shots");
     }
 
-    /* Xbox: un solo núcleo y sin NX. Los hilos Xbox se fijan al núcleo 0 (ngb_thread_spawn);
-     * los que emulan hardware, al resto (ngb_pin_hardware_thread). */
+    /* Xbox: a single core and no NX. Xbox threads are pinned to core 0 (ngb_thread_spawn);
+     * the ones that emulate hardware, to the rest (ngb_pin_hardware_thread). */
     SetThreadAffinityMask(GetCurrentThread(), 1);
     SetProcessDEPPolicy(0);
 
     ngb_kernel_init();
     ngb_kdata_init(g_ngb_opts.xbe_path);
     if (ngb_memory_init() || ngb_memory_map_xbe(&g_ngb_xbe))
-        ngb_stop(NGB_EXIT_USAGE, "no se pudo preparar la memoria de la imagen");
+        ngb_stop(NGB_EXIT_USAGE, "could not prepare the image memory");
     {
-        /* Log de PGRAPH junto al principal: <log>-pgraph.log (y los PNG, <log>-pgraph-NNN.png). */
+        /* PGRAPH log next to the main one: <log>-pgraph.log (and the PNGs, <log>-pgraph-NNN.png). */
         char pg[MAX_PATH];
         char *dot;
         snprintf(pg, sizeof pg, "%s", g_ngb_opts.log_path);
@@ -296,24 +296,24 @@ __declspec(dllexport) int __cdecl ngb_main(void) {
     }
     ngb_memory_patch_irql(&g_ngb_xbe);
     if (ngb_memory_patch_thunk(&g_ngb_xbe))
-        ngb_stop(NGB_EXIT_USAGE, "el thunk importa ordinales desconocidos");
-    /* H8: el mando, por HLE de XAPI (el USB no tiene dispositivos). Antes del primer hilo. */
+        ngb_stop(NGB_EXIT_USAGE, "the thunk imports unknown ordinals");
+    /* H8: the gamepad, through XAPI HLE (USB has no devices). Before the first thread. */
     if (ngb_input_install(g_ngb_opts.symbols, g_ngb_opts.input_script,
                           !g_ngb_opts.no_host_input) < 0)
-        ngb_stop(NGB_EXIT_USAGE, "--input-script inválido");
+        ngb_stop(NGB_EXIT_USAGE, "invalid --input-script");
     tls_total = ngb_tls_total_size(&g_ngb_xbe);
     if (g_ngb_xbe.has_tls && g_ngb_xbe.tls.index_addr)
         *(int32_t *)(uintptr_t)g_ngb_xbe.tls.index_addr = -(int32_t)(tls_total / 4);
-    ngb_log("kernel: %u exports en la tabla, %u implementados", (unsigned)ngb_kexport_count,
+    ngb_log("kernel: %u exports in the table, %u implemented", (unsigned)ngb_kexport_count,
             (unsigned)ngb_kernel_impl_count());
     ngb_crash_install();
-    ngb_log("---- saltando al entry point 0x%08X", g_ngb_xbe.entry);
+    ngb_log("---- jumping to the entry point 0x%08X", g_ngb_xbe.entry);
     ngb_log_flush();
 
     g_ngb_last_call_tick = GetTickCount();
     boot = ngb_thread_spawn(g_ngb_xbe.entry, 0, 0, g_ngb_xbe.stack_size, tls_total, 0, 1);
     if (!boot)
-        ngb_stop(NGB_EXIT_CRASH, "no se pudo crear el hilo de arranque");
+        ngb_stop(NGB_EXIT_CRASH, "could not create the boot thread");
 
     start = GetTickCount();
     for (;;) {
@@ -322,17 +322,17 @@ __declspec(dllexport) int __cdecl ngb_main(void) {
         ngb_kdata_tick();
         now = GetTickCount();
         if (ngb_thread_alive_count() == 0)
-            ngb_stop(NGB_EXIT_OK, "el entry point y todos los hilos Xbox terminaron");
+            ngb_stop(NGB_EXIT_OK, "the entry point and all Xbox threads finished");
         if (g_ngb_opts.window && gfx_poll())
-            ngb_stop(NGB_EXIT_OK, "ventana cerrada por el usuario");
+            ngb_stop(NGB_EXIT_OK, "window closed by the user");
         if (g_ngb_opts.timeout_s && now - start > g_ngb_opts.timeout_s * 1000u)
-            ngb_stop(NGB_EXIT_TIMEOUT, "--timeout de %u s agotado", g_ngb_opts.timeout_s);
-        /* Con signo: si otro hilo apunta su llamada después de leer `now`, la resta sin signo
-         * daba ~49 días y paraba la ejecución con un falso "sin llamadas". */
+            ngb_stop(NGB_EXIT_TIMEOUT, "--timeout of %u s expired", g_ngb_opts.timeout_s);
+        /* Signed: if another thread stamps its call after `now` was read, the unsigned
+         * subtraction gave ~49 days and stopped the run with a false "no calls". */
         if (g_ngb_opts.idle_s &&
             (LONG)(now - g_ngb_last_call_tick) > (LONG)(g_ngb_opts.idle_s * 1000u))
             ngb_stop(NGB_EXIT_TIMEOUT,
-                     "%u s sin llamadas al kernel (bucle de espera, hilo bloqueado o cálculo largo)",
+                     "%u s without kernel calls (wait loop, blocked thread or long computation)",
                      g_ngb_opts.idle_s);
         if ((now - start) % 1000 < 5)
             ngb_log_flush();

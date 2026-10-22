@@ -1,6 +1,6 @@
 /*
- * impl_mm.c: memoria (Mm*, Nt*VirtualMemory, pool Ex*).
- * Prototipos: nxdk lib/xboxkrnl/xboxkrnl.h (CC0).
+ * impl_mm.c: memory (Mm*, Nt*VirtualMemory, Ex* pool).
+ * Prototypes: nxdk lib/xboxkrnl/xboxkrnl.h (CC0).
  */
 #include "../ngb.h"
 
@@ -44,9 +44,9 @@ static uint64_t MmPersistContiguousMemory(uint32_t *args) {
 
 /* 173 ULONG_PTR MmGetPhysicalAddress(PVOID BaseAddress) */
 static uint64_t MmGetPhysicalAddress(uint32_t *args) {
-    /* "Física" simplificada (ver gpu/nv2a.c, nv2a_phys): la arena contigua es la RAM
-     * 0..64 MB; la imagen del XBE se ve en la ventana NGB_PHYS_XBE (96 MB + VA), para que la
-     * GPU lea texturas y búferes que el juego tiene en .data; el resto, identidad. */
+    /* Simplified "physical" (see gpu/nv2a.c, nv2a_phys): the contiguous arena is the RAM
+     * 0..64 MB; the XBE image is seen in the NGB_PHYS_XBE window (96 MB + VA), so that the
+     * GPU reads textures and buffers the game keeps in .data; the rest, identity. */
     if (ngb_contig_contains(PTR(0)))
         return RET32(ARG(0) - NGB_CONTIG_BASE);
     if (ARG(0) >= NGB_RESERVE_BASE && ARG(0) < NGB_RESERVE_END)
@@ -87,11 +87,11 @@ static uint64_t NtAllocateVirtualMemory(uint32_t *args) {
     DWORD type = ARG(3) & ~XBOX_MEM_NOZERO;
     void *p = VirtualAlloc((void *)(uintptr_t)*base, *size, type, win_protect(ARG(4)));
     if (!p) {
-        ngb_log("    · VirtualAlloc(0x%08X, 0x%X, 0x%X, 0x%X) falló: %lu", *base, *size, type,
+        ngb_log("    · VirtualAlloc(0x%08X, 0x%X, 0x%X, 0x%X) failed: %lu", *base, *size, type,
                 ARG(4), GetLastError());
         return RET32(GetLastError() == ERROR_INVALID_ADDRESS ? 0xC0000018u : STATUS_NO_MEMORY);
     }
-    /* VirtualAlloc ya devuelve la base redondeada (64 KB al reservar, página al confirmar). */
+    /* VirtualAlloc already returns the rounded base (64 KB when reserving, page when committing). */
     if (*base)
         *size = ((*base + *size + 0xFFFu) & ~0xFFFu) - (uint32_t)(uintptr_t)p;
     else
@@ -114,7 +114,7 @@ static uint64_t NtQueryVirtualMemory(uint32_t *args) {
     MEMORY_BASIC_INFORMATION m;
     if (!VirtualQuery(PTR(0), &m, sizeof m))
         return RET32(STATUS_INVALID_PARAMETER);
-    memcpy(PTR(1), &m, sizeof m); /* mismo layout de 28 bytes en Xbox y en Win32 */
+    memcpy(PTR(1), &m, sizeof m); /* same 28-byte layout on Xbox and Win32 */
     return STATUS_SUCCESS;
 }
 
@@ -155,8 +155,8 @@ static uint64_t MmLockUnlock(uint32_t *args) {
 }
 
 /* 168 PVOID MmClaimGpuInstanceMemory(SIZE_T NumberOfBytes, PSIZE_T NumberOfPaddingBytes):
- * la memoria de instancia del NV2A está en la cima de la RAM física. Con 64 MB, los
- * últimos 64 KB son relleno y la función devuelve el FINAL de la zona (0x83FF0000). */
+ * the NV2A instance memory is at the top of physical RAM. With 64 MB, the
+ * last 64 KB are padding and the function returns the END of the area (0x83FF0000). */
 static uint64_t MmClaimGpuInstanceMemory(uint32_t *args) {
     uint32_t padding = 0x10000u, top = NGB_CONTIG_BASE + NGB_CONTIG_SIZE - padding;
     uint32_t size = (ARG(0) + 0xFFFu) & ~0xFFFu;
@@ -166,7 +166,7 @@ static uint64_t MmClaimGpuInstanceMemory(uint32_t *args) {
     if (size &&
         !(VirtualQuery((void *)(uintptr_t)(top - size), &m, sizeof m) && m.State == MEM_COMMIT) &&
         !VirtualAlloc((void *)(uintptr_t)(top - size), size + padding, MEM_COMMIT, PAGE_READWRITE))
-        ngb_log("    · MmClaimGpuInstanceMemory: no se pudo confirmar [0x%08X, 0x%08X)",
+        ngb_log("    · MmClaimGpuInstanceMemory: could not commit [0x%08X, 0x%08X)",
                 top - size, top + padding);
     return RET32(top);
 }

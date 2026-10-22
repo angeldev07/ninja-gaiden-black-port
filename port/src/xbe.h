@@ -1,6 +1,6 @@
 /*
- * xbe.h: parseo mínimo de un XBE (cabecera, secciones, TLS) y des-XOR del entry point
- * y del kernel thunk. Equivale a la parte de carga de ngb_tools.xbe.
+ * xbe.h: minimal XBE parsing (header, sections, TLS) and un-XOR of the entry point
+ * and the kernel thunk. Equivalent to the loading part of ngb_tools.xbe.
  */
 #pragma once
 
@@ -17,7 +17,7 @@
 
 typedef struct xbe_section {
     uint32_t flags, va, vsize, raw, rsize, name_addr;
-    uint32_t header_va; /* VA de su cabecera de sección (lo que recibe XeLoadSection) */
+    uint32_t header_va; /* VA of its section header (what XeLoadSection receives) */
     char name[16];
 } xbe_section_t;
 
@@ -31,16 +31,16 @@ typedef struct xbe {
     uint32_t base, size_of_headers, size_of_image, size_of_image_header;
     uint32_t cert_addr, section_count, sections_addr, init_flags;
     uint32_t entry, thunk, tls_addr, stack_size;
-    const char *build; /* "retail" o "debug" según la clave XOR válida */
+    const char *build; /* "retail" or "debug" depending on the valid XOR key */
     xbe_section_t *sections;
     int has_tls;
     xbe_tls_t tls;
     uint32_t title_id;
 } xbe_t;
 
-/* Toma posesión de `data` (malloc). Devuelve 0 si va bien; si no, deja el motivo en err. */
+/* Takes ownership of `data` (malloc). Returns 0 on success; otherwise leaves the reason in err. */
 int xbe_parse(uint8_t *data, size_t size, xbe_t *out, char *err, size_t errlen);
 int xbe_load_file(const char *path, xbe_t *out, char *err, size_t errlen);
-/* Puntero a los bytes del archivo que respaldan [va, va+len), o NULL. */
+/* Pointer to the file bytes that back [va, va+len), or NULL. */
 const uint8_t *xbe_va_ptr(const xbe_t *xbe, uint32_t va, uint32_t len);
 void xbe_free(xbe_t *xbe);

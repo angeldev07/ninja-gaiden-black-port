@@ -1,10 +1,10 @@
 /*
- * nv2a.h: modelo mínimo de la GPU NV2A (H7a): registros MMIO, PRAMIN y el FIFO de comandos.
+ * nv2a.h: minimal model of the NV2A GPU (H7a): MMIO registers, PRAMIN and the command FIFO.
  *
- * No dibuja nada: atiende los registros que D3D lee y escribe durante su inicialización
- * con valores coherentes (identificación, timers, estados "ocioso", flushes que terminan
- * solos), decodifica el push buffer cada vez que avanza DMA_PUT (pgraph.c lo registra en
- * un log aparte) y sintetiza el vblank para que D3D no espere para siempre.
+ * It draws nothing: it serves the registers D3D reads and writes during initialization
+ * with consistent values (identification, timers, "idle" states, flushes that finish
+ * on their own), decodes the push buffer every time DMA_PUT advances (pgraph.c logs it to
+ * a separate log) and synthesizes the vblank so D3D does not wait forever.
  */
 #pragma once
 
@@ -15,49 +15,49 @@
 
 #define NV2A_MMIO_BASE 0xFD000000u
 #define NV2A_MMIO_SIZE 0x01000000u
-#define NV2A_PRAMIN 0x00700000u /* ventana a la RAM de instancias (último MB de la RAM) */
+#define NV2A_PRAMIN 0x00700000u /* window onto the instance RAM (last MB of RAM) */
 #define NV2A_PRAMIN_SIZE 0x00100000u
 #define NV2A_USER 0x00800000u
-#define NV2A_RAMIN_PHYS 0x03F00000u /* física: 64 MB - 1 MB */
+#define NV2A_RAMIN_PHYS 0x03F00000u /* physical: 64 MB - 1 MB */
 
-/* Prepara las reservas (MMIO, alias de PRAMIN) y el log de PGRAPH. */
+/* Sets up the reservations (MMIO, PRAMIN alias) and the PGRAPH log. */
 int nv2a_init(const char *pgraph_log_path);
 
-/* VEH: acceso a [0xFD000000, 0xFE000000). Devuelve EXCEPTION_CONTINUE_EXECUTION si lo
- * atiende (deja TF puesto para nv2a_single_step) o EXCEPTION_CONTINUE_SEARCH si no. */
+/* VEH: access to [0xFD000000, 0xFE000000). Returns EXCEPTION_CONTINUE_EXECUTION if it
+ * serves it (leaves TF set for nv2a_single_step) or EXCEPTION_CONTINUE_SEARCH if not. */
 LONG nv2a_mmio_fault(EXCEPTION_RECORD *rec, CONTEXT *ctx);
-/* VEH: EXCEPTION_SINGLE_STEP tras un acceso. 1 si era nuestro. */
+/* VEH: EXCEPTION_SINGLE_STEP after an access. 1 if it was ours. */
 int nv2a_single_step(CONTEXT *ctx);
 
-/* Vblank sintético (lo llama el hilo de DPC a 60 Hz): 1 si hay que llamar a la ISR. */
+/* Synthetic vblank (called by the DPC thread at 60 Hz): 1 if the ISR must be called. */
 int nv2a_vblank(void);
 int nv2a_vblank_enabled(void);
 
-/* Registro (sombra de lo escrito o valor modelado), offset desde 0xFD000000. */
+/* Register (shadow of what was written, or modeled value), offset from 0xFD000000. */
 uint32_t nv2a_reg_read(uint32_t off);
-/* Accesos MMIO atendidos hasta ahora (medidas de H7c). */
+/* MMIO accesses served so far (H7c measurements). */
 uint32_t nv2a_mmio_count(void);
 
-/* Memoria física de la Xbox (0..64 MB) a puntero del proceso, o NULL. */
+/* Xbox physical memory (0..64 MB) to process pointer, or NULL. */
 uint8_t *nv2a_phys(uint32_t phys, uint32_t len);
 uint32_t nv2a_phys_span(uint32_t phys);
-/* RAM de instancias (RAMIN): offset -> puntero, o NULL. */
+/* Instance RAM (RAMIN): offset -> pointer, or NULL. */
 uint8_t *nv2a_ramin(uint32_t off, uint32_t len);
 
-/* Resumen de registros y de PGRAPH al log principal. */
+/* Register and PGRAPH summary to the main log. */
 void nv2a_summary(void);
 
 /* pgraph.c */
 int pgraph_init(const char *log_path);
-/* Decodifica el push buffer de GET a PUT; devuelve el GET final. */
+/* Decodes the push buffer from GET to PUT; returns the final GET. */
 uint32_t pgraph_kick(uint32_t dma_instance, uint32_t get, uint32_t put);
-/* GET del FIFO: con el pusher asíncrono (render GL), hasta dónde ha llegado de verdad; si
- * no, `fallback` (el modelo síncrono de nv2a.c). Escribir GET solo vale con el pusher quieto. */
+/* FIFO GET: with the asynchronous pusher (GL render), how far it has really got; otherwise
+ * `fallback` (the synchronous model in nv2a.c). Writing GET is only valid with the pusher idle. */
 uint32_t pgraph_fifo_get(uint32_t fallback);
 void pgraph_fifo_set_get(uint32_t get);
-/* PGRAPH_PATT_COLOR0: el último SET_MONOCHROME_COLOR0 del objeto pattern (marcador de D3D). */
+/* PGRAPH_PATT_COLOR0: the last SET_MONOCHROME_COLOR0 of the pattern object (D3D marker). */
 uint32_t pgraph_patt_color0(void);
-/* Pacing de 60 Hz pendiente del último FLIP_STALL; se llama ya sin locks. */
+/* 60 Hz pacing pending from the last FLIP_STALL; called with no locks held. */
 void pgraph_pace(void);
 void pgraph_vblank(uint32_t count);
 void pgraph_summary(void);

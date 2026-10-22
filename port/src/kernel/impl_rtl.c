@@ -1,11 +1,11 @@
 /*
- * impl_rtl.c: Rtl* (cadenas, secciones críticas, excepciones, conversiones).
+ * impl_rtl.c: Rtl* (strings, critical sections, exceptions, conversions).
  *
- * Secciones críticas: el RTL_CRITICAL_SECTION de Xbox (0x1C bytes: DISPATCHER_HEADER,
- * LockCount, RecursionCount, OwningThread) no coincide con el de Win32. Cada dirección
- * Xbox se asocia (tabla hash) a un CRITICAL_SECTION de Windows creado al primer uso, y se
- * reflejan LockCount/RecursionCount/OwningThread en la estructura Xbox por si el juego
- * los mira.
+ * Critical sections: the Xbox RTL_CRITICAL_SECTION (0x1C bytes: DISPATCHER_HEADER,
+ * LockCount, RecursionCount, OwningThread) does not match the Win32 one. Each Xbox
+ * address is associated (hash table) with a Windows CRITICAL_SECTION created on first use, and
+ * LockCount/RecursionCount/OwningThread are mirrored into the Xbox structure in case the game
+ * looks at them.
  */
 #include "../ngb.h"
 
@@ -58,7 +58,7 @@ static CRITICAL_SECTION *cs_lookup(uint32_t addr, int create) {
     }
     ReleaseSRWLockExclusive(&g_cs_lock);
     if (!found)
-        ngb_stop(NGB_EXIT_CRASH, "tabla de secciones críticas llena");
+        ngb_stop(NGB_EXIT_CRASH, "critical section table full");
     return found;
 }
 
@@ -188,7 +188,7 @@ static uint64_t RtlNtStatusToDosError(uint32_t *args) {
 }
 
 /* 312 VOID RtlUnwind(PVOID TargetFrame, PVOID TargetIp, PEXCEPTION_RECORD, PVOID ReturnValue):
- * se reenvía a ntdll; la cadena SEH (fs:[0]) y los registros tienen el mismo formato. */
+ * forwarded to ntdll; the SEH chain (fs:[0]) and the records have the same format. */
 static uint64_t RtlUnwind_(uint32_t *args) {
     static rtl_unwind_fn fn;
     if (!fn)
@@ -200,7 +200,7 @@ static uint64_t RtlUnwind_(uint32_t *args) {
 /* 302 VOID RtlRaiseException(PEXCEPTION_RECORD ExceptionRecord) */
 static uint64_t RtlRaiseException_(uint32_t *args) {
     EXCEPTION_RECORD *r = (EXCEPTION_RECORD *)PTR(0);
-    ngb_log("    · RtlRaiseException código 0x%08lX en 0x%p", r->ExceptionCode, r->ExceptionAddress);
+    ngb_log("    · RtlRaiseException code 0x%08lX at 0x%p", r->ExceptionCode, r->ExceptionAddress);
     RaiseException(r->ExceptionCode, r->ExceptionFlags, r->NumberParameters,
                    r->ExceptionInformation);
     return 0;

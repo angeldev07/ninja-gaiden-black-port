@@ -71,7 +71,7 @@ class GfxTestRun(unittest.TestCase):
 
     def test_exits_cleanly_with_no_failed_checks(self) -> None:
         self.assertEqual(self.result.returncode, 0, self.result.stderr)
-        self.assertIn("0 fallos", self.result.stdout)
+        self.assertIn("0 failures", self.result.stdout)
 
     def test_gradient_capture_is_a_720x480_png(self) -> None:
         path = self.shots / "gfx_test-gradient.png"

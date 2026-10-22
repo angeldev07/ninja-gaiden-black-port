@@ -1,4 +1,4 @@
-/* version.h: versión del port. La usan los recursos (.rc) y el launcher. */
+/* version.h: port version. Used by the resources (.rc) and the launcher. */
 #pragma once
 
 #define NGB_VERSION_STR "0.1.0"

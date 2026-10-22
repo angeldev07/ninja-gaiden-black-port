@@ -1,22 +1,22 @@
 /*
- * gl_test.c: prueba visual del backend de OpenGL con shaders traducidos del NV2A.
+ * gl_test.c: visual test of the OpenGL backend with shaders translated from the NV2A.
  *
- * Dibuja en el FBO de 720x480, arriba, un triángulo con color por vértice y un quad con una
- * textura de tablero; abajo, un quad con una textura DXT1 y otro con una P8 swizzled (las
- * dos convertidas por texconv), y encima una banda roja translúcida con blend alfa aplicado
- * por glstate desde valores NV097. Los vertex programs están escritos a mano en microcódigo
- * NV2A y pasan por nv2a_vsh_to_glsl; los fragment shaders son register combiners (r0 = v0 y
- * modulate t0 * v0) traducidos por nv2a_psh_to_glsl. Los vértices usan los formatos del
- * NV2A (float, D3DCOLOR, UB_OGL, short normalizado), con y sin índices y con QUADS. Lee el
- * FBO, comprueba unos píxeles y guarda la captura en %NGB_DATA%\runs\shots\gl_test.png.
+ * Draws into the 720x480 FBO, at the top, a triangle with per-vertex color and a quad with a
+ * checkerboard texture; at the bottom, a quad with a DXT1 texture and another with a swizzled
+ * P8 (both converted by texconv), and over them a translucent red bar with alpha blending applied
+ * by glstate from NV097 values. The vertex programs are hand-written in NV2A microcode
+ * and go through nv2a_vsh_to_glsl; the fragment shaders are register combiners (r0 = v0 and
+ * modulate t0 * v0) translated by nv2a_psh_to_glsl. The vertices use the NV2A formats
+ * (float, D3DCOLOR, UB_OGL, normalized short), with and without indices and with QUADS. It reads
+ * the FBO, checks a few pixels and saves the screenshot to %NGB_DATA%\runs\shots\gl_test.png.
  *
- *   gl_test [--hidden] [--out PNG]   la prueba (sin --hidden enseña la ventana 2 s)
- *   gl_test --compile DIR            compila con el driver todos los *.vert y *.frag de DIR
- *   gl_test --stress                 genera y compila variantes: cada operación MAC e ILU,
- *                                    A0, escritura de c[], cada mapeo, escala, mux, modo de
- *                                    textura y opción del combiner final
+ *   gl_test [--hidden] [--out PNG]   the test (without --hidden it shows the window for 2 s)
+ *   gl_test --compile DIR            compiles with the driver every *.vert and *.frag in DIR
+ *   gl_test --stress                 generates and compiles variants: every MAC and ILU operation,
+ *                                    A0, c[] write, every mapping, scale, mux, texture
+ *                                    mode and final combiner option
  *
- * Códigos de salida: 0 bien, 1 fallo, 77 no hay contexto OpenGL 4.x (los tests lo saltan).
+ * Exit codes: 0 ok, 1 failure, 77 no OpenGL 4.x context (the tests skip it).
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,15 +34,15 @@
 #define H GLB_DEFAULT_HEIGHT
 
 /*
- * Transformación a la screen space de la Xbox con c[96]-c[99] y diffuse (v3) a oD0:
+ * Transformation to the Xbox screen space with c[96]-c[99] and diffuse (v3) to oD0:
  *   DP4 oPos.x, v0, c[96]   w1 = MAC 7 << 21 | CONST 96 << 13 (0xC0000) | A.swz xyzw (0x1B)
  *                           w2 = A.mux v (0x08000000) | B.swz (0x00360000) | B.mux c (0x1800)
- *                                | C.swz (0x6C);  w3 = máscara x (0x8000) | o[] (0x800) | oPos
- *   DP4 oPos.y/z/w          igual con CONST 97/98/99 y máscara y/z/w (0x4000/0x2000/0x1000)
+ *                                | C.swz (0x6C);  w3 = x mask (0x8000) | o[] (0x800) | oPos
+ *   DP4 oPos.y/z/w          same with CONST 97/98/99 and y/z/w mask (0x4000/0x2000/0x1000)
  *   MOV oD0, v3             w1 = MAC 1 << 21 | V 3 << 9 (0x600) | 0x1B; w2 = A.mux v | swz;
- *                           w3 = máscara xyzw (0xF000) | o[] | dirección 3 << 3 (0x18) | FINAL
+ *                           w3 = xyzw mask (0xF000) | o[] | address 3 << 3 (0x18) | FINAL
  *   MOV oT0, v9             w1 = MAC 1 << 21 | V 9 << 9 (0x1200) | 0x1B; w3 = 0xF000 | 0x800
- *                                | dirección 9 << 3 (0x48) | FINAL
+ *                                | address 9 << 3 (0x48) | FINAL
  */
 static const uint32_t k_vs_color[] = {
     0, 0x00EC001Bu, 0x0836186Cu, 0x00008800u, /* DP4 oPos.x, v0, c[96] */
@@ -65,7 +65,7 @@ static int g_failures;
 #define CHECK(cond)                                                                 \
     do {                                                                            \
         if (!(cond)) {                                                              \
-            fprintf(stderr, "FALLO %s:%d: %s\n", __FILE__, __LINE__, #cond);        \
+            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);        \
             g_failures++;                                                           \
         }                                                                           \
     } while (0)
@@ -81,7 +81,7 @@ static int translate_vs(const uint32_t *words, int n, char *out, size_t len) {
     return r < 0 ? -1 : 0;
 }
 
-/* Una etapa: AB = A * B -> r0 en RGB y alfa; el final queda a 0 (sale r0). */
+/* One stage: AB = A * B -> r0 in RGB and alpha; the final one is left at 0 (r0 comes out). */
 static int translate_fs(uint32_t rgb_in, uint32_t alpha_in, uint32_t tex_modes, char *out,
                         size_t len) {
     psh_registers regs;
@@ -104,11 +104,11 @@ static int build_shaders(void) {
         translate_vs(k_vs_textured, 6, g_vs_textured, sizeof g_vs_textured)) {
         return -1;
     }
-    /* r0 = v0 * 1 (A = V0, B = cero invertido = 1) */
+    /* r0 = v0 * 1 (A = V0, B = inverted zero = 1) */
     if (translate_fs(0x04200000u, 0x14200000u, PSH_TEX_NONE, g_fs_color, sizeof g_fs_color)) {
         return -1;
     }
-    /* modulate: r0 = t0 * v0, etapa 0 PROJECT2D */
+    /* modulate: r0 = t0 * v0, stage 0 PROJECT2D */
     return translate_fs(0x08040000u, 0x18140000u, PSH_TEX_PROJECT2D, g_fs_textured,
                         sizeof g_fs_textured);
 }
@@ -135,7 +135,7 @@ static char *read_text(const char *path) {
     return text;
 }
 
-/* Compila cada *.vert (enlazado con el FS modulate) y cada *.frag (con el VS textured). */
+/* Compiles each *.vert (linked with the modulate FS) and each *.frag (with the textured VS). */
 static int compile_dir(const char *dir) {
     static const char *const patterns[2] = {"*.vert", "*.frag"};
     int k, ok = 0, total = 0;
@@ -157,7 +157,7 @@ static int compile_dir(const char *dir) {
             text = read_text(path);
             total++;
             if (!text) {
-                printf("FALLO %s: no se puede leer\n", found.cFileName);
+                printf("FAIL %s: cannot be read\n", found.cFileName);
                 continue;
             }
             r = k == 0 ? glb_compile(text, g_fs_textured, &prog, g_log, sizeof g_log)
@@ -167,23 +167,23 @@ static int compile_dir(const char *dir) {
                 printf("OK    %s\n", found.cFileName);
                 glb_delete_program(prog);
             } else {
-                printf("FALLO %s\n%s\n", found.cFileName, g_log);
+                printf("FAIL %s\n%s\n", found.cFileName, g_log);
             }
             free(text);
         } while (FindNextFileA(h, &found));
         FindClose(h);
     }
-    printf("gl_test: compilan %d de %d shaders\n", ok, total);
+    printf("gl_test: %d of %d shaders compile\n", ok, total);
     return ok == total && total > 0 ? 0 : 1;
 }
 
-/* ---- --stress: variantes generadas con el emisor y compiladas con el driver ----------- */
+/* ---- --stress: variants generated with the emitter and compiled with the driver ------- */
 
 static void put(uint32_t *w, int word, int shift, unsigned bits, unsigned value) {
     w[word] |= (value & ((1u << bits) - 1u)) << shift;
 }
 
-/* Una instrucción con A = R1, B = c[k] y C = v2 (lo que la operación no use se ignora). */
+/* An instruction with A = R1, B = c[k] and C = v2 (whatever the operation does not use is ignored). */
 static void encode_op(uint32_t *w, unsigned mac, unsigned ilu, unsigned constant,
                       unsigned out_reg, unsigned final) {
     memset(w, 0, 4 * sizeof *w);
@@ -201,7 +201,7 @@ static void encode_op(uint32_t *w, unsigned mac, unsigned ilu, unsigned constant
     put(w, 3, 24, 4, mac && mac != 13 ? 0xF : 0);
     put(w, 3, 20, 4, 3);      /* R3 */
     put(w, 3, 16, 4, ilu ? 0xF : 0);
-    put(w, 3, 12, 4, 0xF);    /* salida xyzw */
+    put(w, 3, 12, 4, 0xF);    /* xyzw output */
     put(w, 3, 11, 1, 1);
     put(w, 3, 3, 8, out_reg);
     put(w, 3, 2, 1, ilu ? 1u : 0u);
@@ -214,11 +214,11 @@ static int stress_vs(const uint32_t *words, int n, const char *what, int *total)
     unsigned handle = 0;
     (*total)++;
     if (nv2a_vsh_decode(words, n, &prog) != n || nv2a_vsh_to_glsl(&prog, glsl, sizeof glsl) < 0) {
-        printf("FALLO vsh %s: no se traduce\n", what);
+        printf("FAIL vsh %s: does not translate\n", what);
         return 0;
     }
     if (glb_compile(glsl, g_fs_textured, &handle, g_log, sizeof g_log)) {
-        printf("FALLO vsh %s\n%s\n", what, g_log);
+        printf("FAIL vsh %s\n%s\n", what, g_log);
         return 0;
     }
     glb_delete_program(handle);
@@ -231,11 +231,11 @@ static int stress_fs(const psh_registers *regs, const char *what, int *total) {
     unsigned handle = 0;
     (*total)++;
     if (nv2a_psh_decode(regs, &prog) < 0 || nv2a_psh_to_glsl(&prog, glsl, sizeof glsl) < 0) {
-        printf("FALLO psh %s: no se traduce\n", what);
+        printf("FAIL psh %s: does not translate\n", what);
         return 0;
     }
     if (glb_compile(g_vs_textured, glsl, &handle, g_log, sizeof g_log)) {
-        printf("FALLO psh %s\n%s\n", what, g_log);
+        printf("FAIL psh %s\n%s\n", what, g_log);
         return 0;
     }
     glb_delete_program(handle);
@@ -252,27 +252,27 @@ static int run_stress(void) {
         encode_op(prog, op, 0, 7, op == 13 ? 0 : VSH_OUT_T0, 0);
         encode_op(prog + 4, 1, 0, 8, VSH_OUT_POS, 1);
         if (op == 13) {
-            prog[3] &= ~(0xFu << 12); /* ARL no escribe salidas */
+            prog[3] &= ~(0xFu << 12); /* ARL writes no outputs */
         }
         snprintf(what, sizeof what, "MAC %s", nv2a_vsh_mac_name((int)op));
         ok += stress_vs(prog, 2, what, &total);
     }
     for (op = 1; op <= 7; op++) {
-        encode_op(prog, 4, op, 9, VSH_OUT_D1, 1); /* MAD emparejado: el ILU va a R1 */
+        encode_op(prog, 4, op, 9, VSH_OUT_D1, 1); /* paired MAD: the ILU goes to R1 */
         snprintf(what, sizeof what, "ILU %s", nv2a_vsh_ilu_name((int)op));
         ok += stress_vs(prog, 1, what, &total);
     }
-    /* ARL + lectura relativa + escritura de c[] + todas las salidas */
+    /* ARL + relative read + c[] write + all the outputs */
     encode_op(prog, 13, 0, 0, 0, 0);
     prog[3] &= ~(0xFu << 12);
     encode_op(prog + 4, 1, 0, 20, VSH_OUT_FOG, 0);
     put(prog + 4, 3, 1, 1, 1); /* A0X: B = c[A0 + 20] */
     encode_op(prog + 8, 2, 0, 30, 40, 0);
-    prog[8 + 3] &= ~(1u << 11); /* ORB = 0: escribe c[40] */
+    prog[8 + 3] &= ~(1u << 11); /* ORB = 0: writes c[40] */
     encode_op(prog + 12, 3, 0, 40, VSH_OUT_PTS, 1);
-    ok += stress_vs(prog, 4, "A0 y c[] escribible", &total);
+    ok += stress_vs(prog, 4, "A0 and writable c[]", &total);
 
-    for (k = 0; k < 8; k++) { /* cada mapeo en cada posición, con canal alfa en B y D */
+    for (k = 0; k < 8; k++) { /* every mapping in every position, with alpha channel in B and D */
         memset(&r, 0, sizeof r);
         r.combiner_control = 1;
         r.rgb_inputs[0] = (k << 29) | (0x08u << 24) | (k << 21) | (0x14u << 16) | (k << 13) |
@@ -281,10 +281,10 @@ static int run_stress(void) {
         r.rgb_outputs[0] = 0xC0 | (0xD << 8);
         r.alpha_outputs[0] = 0xC0;
         r.texture_modes = 1;
-        snprintf(what, sizeof what, "mapeo %u", k);
+        snprintf(what, sizeof what, "mapping %u", k);
         ok += stress_fs(&r, what, &total);
     }
-    for (k = 0; k < 8; k++) { /* escala, dot, mux por bit bajo y alto, blue-to-alpha */
+    for (k = 0; k < 8; k++) { /* scale, dot, mux by low and high bit, blue-to-alpha */
         if (k == 5 || k == 7) {
             continue;
         }
@@ -297,20 +297,20 @@ static int run_stress(void) {
         r.alpha_inputs[1] = 0x1C1D2000u;
         r.alpha_outputs[1] = (0xC << 8) | (1u << 14);
         r.texture_modes = 1 | (1u << 5);
-        snprintf(what, sizeof what, "escala %u", k);
+        snprintf(what, sizeof what, "scale %u", k);
         ok += stress_fs(&r, what, &total);
     }
-    for (k = 0; k <= 18; k++) { /* cada modo de textura en la etapa 1 (dependientes de la 0) */
+    for (k = 0; k <= 18; k++) { /* every texture mode in stage 1 (dependent on stage 0) */
         memset(&r, 0, sizeof r);
         r.combiner_control = 1;
         r.rgb_inputs[0] = 0x08090000u;
         r.rgb_outputs[0] = 0xC0;
         r.texture_modes = 1u | (k << 5) | (3u << 10) | (2u << 15);
         r.compare_mode = 0xA5A5u;
-        snprintf(what, sizeof what, "textura modo %u", k);
+        snprintf(what, sizeof what, "texture mode %u", k);
         ok += stress_fs(&r, what, &total);
     }
-    for (k = 0; k < 8; k++) { /* combiner final: complementos, clamp, EF_PROD y V1R0_SUM */
+    for (k = 0; k < 8; k++) { /* final combiner: complements, clamp, EF_PROD and V1R0_SUM */
         memset(&r, 0, sizeof r);
         r.combiner_control = 1;
         r.rgb_inputs[0] = 0x08040000u;
@@ -321,11 +321,11 @@ static int run_stress(void) {
         snprintf(what, sizeof what, "final %u", k);
         ok += stress_fs(&r, what, &total);
     }
-    printf("gl_test: --stress compilan %d de %d variantes\n", ok, total);
+    printf("gl_test: --stress compiled %d of %d variants\n", ok, total);
     return ok == total ? 0 : 1;
 }
 
-/* Vértices: v0 = posición (x, y, z, w), v3 = color, v9 = uv. */
+/* Vertices: v0 = position (x, y, z, w), v3 = color, v9 = uv. */
 typedef struct vertex {
     float pos[4];
     float color[4];
@@ -378,33 +378,33 @@ static void output_path(char *path, size_t len, const char *override) {
     snprintf(path, len, "%s\\gl_test.png", dir);
 }
 
-/* Vértice con color D3DCOLOR (B G R A en memoria) y uv en shorts normalizados. */
+/* Vertex with D3DCOLOR color (B G R A in memory) and uv in normalized shorts. */
 typedef struct vertex_nv {
     float pos[4];
     uint32_t color;
     int16_t uv[2];
 } vertex_nv;
 
-/* Con S3TC: DXT1 de 8x8, cuatro bloques de un color (rojo, verde, azul, blanco). */
+/* With S3TC: 8x8 DXT1, four single-color blocks (red, green, blue, white). */
 static void make_dxt1(uint8_t blocks[32]) {
     static const uint16_t colors[4] = {0xF800, 0x07E0, 0x001F, 0xFFFF};
     int k;
     for (k = 0; k < 4; k++) {
         blocks[8 * k + 0] = (uint8_t)(colors[k] & 0xFF);
         blocks[8 * k + 1] = (uint8_t)(colors[k] >> 8);
-        blocks[8 * k + 2] = (uint8_t)(colors[k] & 0xFF); /* c1 = c0: índices 0 = c0 */
+        blocks[8 * k + 2] = (uint8_t)(colors[k] & 0xFF); /* c1 = c0: index 0 = c0 */
         blocks[8 * k + 3] = (uint8_t)(colors[k] >> 8);
         memset(blocks + 8 * k + 4, 0, 4);
     }
 }
 
-/* P8 de 16x16 en orden swizzled: bandas diagonales de 4 texels con 4 colores de paleta. */
+/* 16x16 P8 in swizzled order: diagonal bands of 4 texels with 4 palette colors. */
 static void make_p8(uint8_t indices[256], uint8_t palette[16]) {
     static const uint8_t bgra[16] = {
-        0, 128, 255, 255,   /* naranja (D3DCOLOR: B, G, R, A) */
-        200, 200, 0, 255,   /* cian */
-        255, 0, 128, 255,   /* morado */
-        255, 255, 255, 255, /* blanco */
+        0, 128, 255, 255,   /* orange (D3DCOLOR: B, G, R, A) */
+        200, 200, 0, 255,   /* cyan */
+        255, 0, 128, 255,   /* purple */
+        255, 255, 255, 255, /* white */
     };
     int x, y;
     for (y = 0; y < 16; y++) {
@@ -454,7 +454,7 @@ static int run_visual(int hidden, const char *out_override) {
         {{0.85f, 0.90f, 0, 1}, {1, 1, 1, 1}, {1, 0}},
         {{0.85f, 0.15f, 0, 1}, {1, 1, 1, 1}, {1, 1}},
     };
-    /* abajo a la izquierda (DXT1) y a la derecha (P8); uv 32767 = 1.0 en short normalizado */
+    /* bottom left (DXT1) and right (P8); uv 32767 = 1.0 in normalized short */
     const vertex_nv dxt_quad[4] = {
         {{-0.85f, -0.30f, 0, 1}, 0xFFFFFFFFu, {0, 0}},
         {{-0.15f, -0.30f, 0, 1}, 0xFFFFFFFFu, {32767, 0}},
@@ -467,7 +467,7 @@ static int run_visual(int hidden, const char *out_override) {
         {{0.15f, -0.90f, 0, 1}, 0xFFFFFFFFu, {0, 32767}},
         {{0.85f, -0.90f, 0, 1}, 0xFFFFFFFFu, {32767, 32767}},
     };
-    /* banda roja al 50 %: D3DCOLOR 0x80FF0000 (A = 0x80, R = 0xFF), QUADS en orden de perímetro */
+    /* 50 % red bar: D3DCOLOR 0x80FF0000 (A = 0x80, R = 0xFF), QUADS in perimeter order */
     const vertex_nv bar[4] = {
         {{-0.90f, 0.25f, 0, 1}, 0x80FF0000u, {0, 0}},
         {{0.90f, 0.25f, 0, 1}, 0x80FF0000u, {0, 0}},
@@ -476,7 +476,7 @@ static int run_visual(int hidden, const char *out_override) {
     };
     static const uint16_t idx16[6] = {0, 1, 2, 2, 1, 3};
     static const uint32_t idx32[6] = {0, 1, 2, 2, 1, 3};
-    /* formato NV2A: posición F x4, color UB_D3D (o UB_OGL), uv S1 x2 */
+    /* NV2A format: position F x4, color UB_D3D (or UB_OGL), uv S1 x2 */
     glb_format nv_format;
     glb_uniform uniforms[5];
     glb_draw_call call;
@@ -486,7 +486,7 @@ static int run_visual(int hidden, const char *out_override) {
     char path[MAX_PATH];
     const uint8_t *p;
     int r, dxt_compressed = 0;
-    /* Del cuadrado [-1, 1] a píxeles: x' = 360x + 360, y' = -240y + 240, z = 0.5, w = 1. */
+    /* From the [-1, 1] square to pixels: x' = 360x + 360, y' = -240y + 240, z = 0.5, w = 1. */
     constants[96 * 4 + 0] = W / 2.0f;
     constants[96 * 4 + 3] = W / 2.0f;
     constants[97 * 4 + 1] = -H / 2.0f;
@@ -509,7 +509,7 @@ static int run_visual(int hidden, const char *out_override) {
     uniforms[3].name = "tex0";
     uniforms[3].kind = GLB_U_INT;
     uniforms[3].ivalue = 0;
-    uniforms[4].name = "texScale"; /* psh.c: 1 = coordenadas ya normalizadas */
+    uniforms[4].name = "texScale"; /* psh.c: 1 = already normalized coordinates */
     uniforms[4].kind = GLB_U_VEC2;
     uniforms[4].count = 4;
     uniforms[4].values = tex_scale;
@@ -525,12 +525,12 @@ static int run_visual(int hidden, const char *out_override) {
 
     r = glb_compile(g_vs_color, g_fs_color, &prog_color, g_log, sizeof g_log);
     if (r) {
-        fprintf(stderr, "programa de color:\n%s\n", g_log);
+        fprintf(stderr, "color program:\n%s\n", g_log);
     }
     CHECK(r == 0);
     r = glb_compile(g_vs_textured, g_fs_textured, &prog_textured, g_log, sizeof g_log);
     if (r) {
-        fprintf(stderr, "programa con textura:\n%s\n", g_log);
+        fprintf(stderr, "textured program:\n%s\n", g_log);
     }
     CHECK(r == 0);
     if (g_failures) {
@@ -540,13 +540,13 @@ static int run_visual(int hidden, const char *out_override) {
     CHECK(glstate_apply(&state, NULL) == 0);
     CHECK(glb_clear(0.10f, 0.10f, 0.12f, 1.0f) == 0);
 
-    /* arriba: triángulo y tablero (float, sin índices) */
+    /* top: triangle and checkerboard (float, no indices) */
     make_checker(checker, 64, 8);
     CHECK(glb_set_texture(0, 64, 64, checker, 0) == 0);
     CHECK(glb_draw(prog_color, triangle, &k_format, GLB_TRIANGLES, 3, uniforms, 3) == 0);
     CHECK(glb_draw(prog_textured, quad, &k_format, GLB_TRIANGLE_STRIP, 4, uniforms, 5) == 0);
 
-    /* abajo a la izquierda: DXT1 (comprimida si hay S3TC), índices u16 */
+    /* bottom left: DXT1 (compressed if S3TC is available), u16 indices */
     make_dxt1(dxt);
     CHECK(upload(0x0C, 3, dxt, sizeof dxt, NULL, 0, &dxt_compressed) == 0);
     memset(&call, 0, sizeof call);
@@ -562,10 +562,10 @@ static int run_visual(int hidden, const char *out_override) {
     call.n_uniforms = 5;
     CHECK(glb_draw_ex(&call) == 0);
 
-    /* abajo a la derecha: P8 swizzled con paleta, índices u32 y color UB_OGL */
+    /* bottom right: swizzled P8 with palette, u32 indices and UB_OGL color */
     make_p8(p8, palette);
     CHECK(upload(0x0B, 4, p8, sizeof p8, palette, sizeof palette, NULL) == 0);
-    nv_format.attribs[1].type = GLB_ATTR_UB_OGL; /* 0xFFFFFFFF: blanco en los dos órdenes */
+    nv_format.attribs[1].type = GLB_ATTR_UB_OGL; /* 0xFFFFFFFF: white in both orders */
     call.vertices = p8_quad;
     call.vertex_bytes = sizeof p8_quad;
     call.indices = idx32;
@@ -573,7 +573,7 @@ static int run_visual(int hidden, const char *out_override) {
     CHECK(glb_draw_ex(&call) == 0);
     nv_format.attribs[1].type = GLB_ATTR_UB_D3D;
 
-    /* banda translúcida: SET_BLEND_ENABLE 1, SRC_ALPHA (0x302), ONE_MINUS_SRC_ALPHA (0x303) */
+    /* translucent bar: SET_BLEND_ENABLE 1, SRC_ALPHA (0x302), ONE_MINUS_SRC_ALPHA (0x303) */
     state.blend_enable = 1;
     state.blend_sfactor = 0x0302;
     state.blend_dfactor = 0x0303;
@@ -591,7 +591,7 @@ static int run_visual(int hidden, const char *out_override) {
     CHECK(glstate_apply(&state, NULL) == 0);
     CHECK(glb_read_rgba(image, sizeof image) == 0);
 
-    /* fondo, centro del triángulo, cerca del vértice rojo y del azul */
+    /* background, center of the triangle, near the red and the blue vertex */
     p = pixel(image, 20, 20);
     CHECK(in_range(p[0], 20, 32) && in_range(p[1], 20, 32) && in_range(p[2], 25, 37));
     p = pixel(image, 180, 144);
@@ -600,21 +600,21 @@ static int run_visual(int hidden, const char *out_override) {
     CHECK(p[0] > p[1] + 80 && p[0] > p[2] + 80);
     p = pixel(image, 180, 40);
     CHECK(p[2] > p[0] + 80 && p[2] > p[1] + 80);
-    /* tablero: casillas vecinas distintas y la diagonal igual */
+    /* checkerboard: neighboring squares differ and the diagonal is the same */
     CHECK(check_rgb(image, 429, 35, 240, 200, 60));
     CHECK(check_rgb(image, 461, 35, 30, 60, 160));
     CHECK(check_rgb(image, 461, 58, 240, 200, 60));
-    /* DXT1: rojo, verde, azul y blanco por cuadrantes */
+    /* DXT1: red, green, blue and white by quadrants */
     CHECK(check_rgb(image, 117, 348, 255, 0, 0));
     CHECK(check_rgb(image, 243, 348, 0, 255, 0));
     CHECK(check_rgb(image, 117, 420, 0, 0, 255));
     CHECK(check_rgb(image, 243, 420, 255, 255, 255));
-    /* P8: texel (1,1) naranja, (5,1) cian, (1,9) morado, (9,5) blanco */
+    /* P8: texel (1,1) orange, (5,1) cyan, (1,9) purple, (9,5) white */
     CHECK(check_rgb(image, 437, 325, 255, 128, 0));
     CHECK(check_rgb(image, 500, 325, 0, 200, 200));
     CHECK(check_rgb(image, 437, 397, 128, 0, 255));
     CHECK(check_rgb(image, 563, 361, 255, 255, 255));
-    /* banda: rojo al 50 % sobre el fondo y sobre una casilla oscura del tablero */
+    /* bar: 50 % red over the background and over a dark checkerboard square */
     p = pixel(image, 360, 240);
     CHECK(in_range(p[0], 132, 148) && p[1] < 25 && p[2] < 25);
     p = pixel(image, 429, 190);
@@ -622,8 +622,8 @@ static int run_visual(int hidden, const char *out_override) {
 
     output_path(path, sizeof path, out_override);
     CHECK(glb_write_png(path, W, H, image) == 0);
-    printf("gl_test: DXT1 %s; captura en %s\n",
-           dxt_compressed ? "subida comprimida (S3TC)" : "descomprimida en CPU", path);
+    printf("gl_test: DXT1 %s; screenshot at %s\n",
+           dxt_compressed ? "uploaded compressed (S3TC)" : "decompressed on the CPU", path);
     if (!hidden) {
         glb_show_window(1);
         glb_present();
@@ -648,17 +648,17 @@ int main(int argc, char **argv) {
         } else if (!strcmp(argv[k], "--out") && k + 1 < argc) {
             out = argv[++k];
         } else {
-            fprintf(stderr, "uso: gl_test [--hidden] [--out PNG] | --compile DIR | --stress\n");
+            fprintf(stderr, "usage: gl_test [--hidden] [--out PNG] | --compile DIR | --stress\n");
             return 1;
         }
     }
     if (build_shaders()) {
-        fprintf(stderr, "gl_test: no se pudieron traducir los shaders de prueba\n");
+        fprintf(stderr, "gl_test: could not translate the test shaders\n");
         return 1;
     }
     r = glb_init(NULL, W, H);
     if (r) {
-        printf("gl_test: SIN GL (%s)\n", glb_error_text(r));
+        printf("gl_test: NO GL (%s)\n", glb_error_text(r));
         return EXIT_NO_GL;
     }
     info = glb_get_info();

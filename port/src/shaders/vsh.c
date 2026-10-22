@@ -1,43 +1,43 @@
 /*
- * vsh.c: decodificador de vertex programs del NV2A y traductor a GLSL 4.00.
+ * vsh.c: NV2A vertex program decoder and GLSL 4.00 translator.
  *
- * Implementación propia escrita a partir de la descripción del formato; no reutiliza
- * código de xemu ni de Cxbx-Reloaded (GPL) ni nada del XDK. Fuentes consultadas para el
- * formato y la semántica:
- *   - xemu, hw/xbox/nv2a/pgraph/vsh.c y hw/xbox/nv2a/pgraph/glsl/vsh-prog.c: tabla de
- *     campos de la instrucción, códigos MAC/ILU, alias R12 = oPos, el ILU escribe R1
- *     cuando va emparejado con un MAC, y el paso de "screen space" a clip space.
+ * Own implementation written from the format description; it does not reuse code from
+ * xemu or Cxbx-Reloaded (GPL) nor anything from the XDK. Sources consulted for the
+ * format and semantics:
+ *   - xemu, hw/xbox/nv2a/pgraph/vsh.c and hw/xbox/nv2a/pgraph/glsl/vsh-prog.c: instruction
+ *     field table, MAC/ILU codes, alias R12 = oPos, the ILU writes R1
+ *     when paired with a MAC, and the conversion from "screen space" to clip space.
  *     https://github.com/xemu-project/xemu/tree/master/hw/xbox/nv2a/pgraph
- *   - Cxbx-Reloaded, src/core/hle/D3D8/XbVertexShader.cpp: los mismos campos, la cabecera
- *     0x2078 del binario de D3D y las constantes c[-96..95] = c[0..191] del NV2A.
+ *   - Cxbx-Reloaded, src/core/hle/D3D8/XbVertexShader.cpp: the same fields, the 0x2078
+ *     header of the D3D binary and the NV2A constants c[-96..95] = c[0..191].
  *     https://github.com/Cxbx-Reloaded/Cxbx-Reloaded
- *   - envytools (docs de la clase Kelvin, NV097): método SET_TRANSFORM_PROGRAM 0x0B00 y
- *     los registros de carga (LOAD 0x1E9C, START 0x1EA0).
+ *   - envytools (Kelvin class docs, NV097): method SET_TRANSFORM_PROGRAM 0x0B00 and
+ *     the load registers (LOAD 0x1E9C, START 0x1EA0).
  *     https://github.com/envytools/envytools
- *   - Microsoft, especificación de vs_1_1 de D3D8 (semántica de DST, LIT, EXPP, LOGP).
+ *   - Microsoft, D3D8 vs_1_1 specification (semantics of DST, LIT, EXPP, LOGP).
  *
- * Instrucción: 4 u32 (w0 sin uso). Campos (palabra, bit inicial, bits):
+ * Instruction: 4 u32 (w0 unused). Fields (word, start bit, bits):
  *
- *   w1: ILU 25,3 | MAC 21,4 | CONST 13,8 | V 9,4 | A.neg 8,1 | A.swz x 6 y 4 z 2 w 0 (2 c/u)
+ *   w1: ILU 25,3 | MAC 21,4 | CONST 13,8 | V 9,4 | A.neg 8,1 | A.swz x 6 y 4 z 2 w 0 (2 each)
  *   w2: A.R 28,4 | A.mux 26,2 | B.neg 25,1 | B.swz x 23 y 21 z 19 w 17 | B.R 13,4 |
- *       B.mux 11,2 | C.neg 10,1 | C.swz x 8 y 6 z 4 w 2 | C.R alto 0,2
- *   w3: C.R bajo 30,2 | C.mux 28,2 | máscara MAC 24,4 | OUT_R 20,4 | máscara ILU 16,4 |
- *       máscara de salida 12,4 | ORB 11,1 (1 = o[], 0 = c[]) | dirección 3,8 |
+ *       B.mux 11,2 | C.neg 10,1 | C.swz x 8 y 6 z 4 w 2 | C.R high 0,2
+ *   w3: C.R low 30,2 | C.mux 28,2 | MAC mask 24,4 | OUT_R 20,4 | ILU mask 16,4 |
+ *       output mask 12,4 | ORB 11,1 (1 = o[], 0 = c[]) | address 3,8 |
  *       OUT_MUX 2,1 (1 = ILU, 0 = MAC) | A0X 1,1 (c[A0 + CONST]) | FINAL 0,1
  *
- * MUX de un operando: 1 = R, 2 = v, 3 = c. Swizzle: 0 = x ... 3 = w. Máscaras: bit 3 = x.
- * Los tres operandos se leen antes de cualquier escritura, así que el MAC y el ILU de una
- * misma instrucción ven los mismos valores. El ILU usa el operando C (su componente x
- * tras el swizzle, salvo MOV y LIT, que usan el vector).
+ * MUX of an operand: 1 = R, 2 = v, 3 = c. Swizzle: 0 = x ... 3 = w. Masks: bit 3 = x.
+ * The three operands are read before any write, so the MAC and the ILU of the same
+ * instruction see the same values. The ILU uses operand C (its x component
+ * after the swizzle, except MOV and LIT, which use the vector).
  *
- * **oPos y la "screen space" de la Xbox.** El runtime de D3D de la Xbox termina cada
- * vertex program con un epílogo que divide por w y aplica la escala y el desplazamiento
- * del viewport (c[58] y c[59], c[-38] y c[-37] en el ensamblador): oPos.xyz sale en
- * píxeles y en unidades del depth buffer, ya dividido por w, y oPos.w conserva w para la
- * corrección de perspectiva. OpenGL espera clip space, así que el GLSL generado lo
- * deshace al final: x_ndc = 2x/ancho - 1, y_ndc = 1 - 2y/alto (la Xbox tiene el origen
- * arriba), z_ndc = 2(z - zmin)/(zmax - zmin) - 1 y multiplica xyz por w (con w acotado
- * como hace el NV2A para no dividir por 0). `surfaceSize` y `clipRange` son uniforms.
+ * **oPos and the Xbox "screen space".** The Xbox D3D runtime ends every vertex program
+ * with an epilogue that divides by w and applies the viewport scale and offset
+ * (c[58] and c[59], c[-38] and c[-37] in the assembler): oPos.xyz comes out in pixels and
+ * in depth buffer units, already divided by w, and oPos.w keeps w for perspective
+ * correction. OpenGL expects clip space, so the generated GLSL undoes it at the end:
+ * x_ndc = 2x/width - 1, y_ndc = 1 - 2y/height (the Xbox has its origin at the top),
+ * z_ndc = 2(z - zmin)/(zmax - zmin) - 1 and multiplies xyz by w (with w clamped
+ * as the NV2A does to avoid dividing by 0). `surfaceSize` and `clipRange` are uniforms.
  */
 #include "vsh.h"
 
@@ -75,18 +75,18 @@ const char *nv2a_vsh_ilu_name(int op) {
 
 const char *nv2a_vsh_error(int code) {
     switch (code) {
-    case VSH_ERR_ARGS: return "argumentos inválidos";
-    case VSH_ERR_OPCODE: return "operación MAC desconocida";
-    case VSH_ERR_MUX: return "operando usado sin origen (MUX 0)";
-    case VSH_ERR_REGISTER: return "registro temporal o constante fuera de rango";
-    case VSH_ERR_OUTPUT: return "salida inválida";
-    case VSH_ERR_NO_FINAL: return "ninguna instrucción lleva el bit FINAL";
-    case VSH_ERR_SPACE: return "el GLSL no cabe en el buffer";
-    default: return code >= 0 ? "ok" : "error desconocido";
+    case VSH_ERR_ARGS: return "invalid arguments";
+    case VSH_ERR_OPCODE: return "unknown MAC operation";
+    case VSH_ERR_MUX: return "operand used without a source (MUX 0)";
+    case VSH_ERR_REGISTER: return "temporary or constant register out of range";
+    case VSH_ERR_OUTPUT: return "invalid output";
+    case VSH_ERR_NO_FINAL: return "no instruction carries the FINAL bit";
+    case VSH_ERR_SPACE: return "the GLSL does not fit in the buffer";
+    default: return code >= 0 ? "ok" : "unknown error";
     }
 }
 
-/* Qué operandos lee cada operación: bit 0 = A, 1 = B, 2 = C. */
+/* Which operands each operation reads: bit 0 = A, 1 = B, 2 = C. */
 static unsigned mac_operands(int op) {
     switch (op) {
     case VSH_MAC_NOP: return 0;
@@ -105,7 +105,7 @@ static void decode_swizzle(const uint32_t *w, int word, int shift_x, uint8_t swi
     }
 }
 
-/* Comprueba un operando que la instrucción usa; acumula entradas leídas y uso de A0. */
+/* Checks an operand the instruction uses; accumulates inputs read and A0 usage. */
 static int check_operand(const vsh_operand *op, vsh_program *p) {
     switch (op->mux) {
     case VSH_MUX_TEMP:
@@ -151,7 +151,7 @@ static int decode_insn(const uint32_t *w, vsh_insn *in, vsh_program *p) {
     in->c.index = c_index;
     in->c.mux = (uint8_t)field(w, 3, 28, MUX_FIELD_BITS);
 
-    /* Las entradas y las constantes no van en el campo R sino en V y CONST, comunes. */
+    /* Inputs and constants are not in the R field but in the common V and CONST fields. */
     {
         vsh_operand *ops[3];
         int k;
@@ -198,7 +198,7 @@ static int decode_insn(const uint32_t *w, vsh_insn *in, vsh_program *p) {
     if (in->mac == VSH_MAC_ARL) {
         p->uses_a0 = 1;
         if (in->mac_mask || (in->out_mask && !in->out_from_ilu)) {
-            return VSH_ERR_OUTPUT; /* ARL solo escribe A0 */
+            return VSH_ERR_OUTPUT; /* ARL only writes A0 */
         }
     }
     if (in->mac == VSH_MAC_NOP && in->mac_mask) {
@@ -214,7 +214,7 @@ static int decode_insn(const uint32_t *w, vsh_insn *in, vsh_program *p) {
     if (in->out_mask) {
         int unit = in->out_from_ilu ? in->ilu : in->mac;
         if (unit == 0) {
-            return VSH_ERR_OUTPUT; /* la salida tomaría el resultado de un NOP */
+            return VSH_ERR_OUTPUT; /* the output would take the result of a NOP */
         }
         if (in->out_is_output) {
             if (in->out_address >= VSH_OUT_COUNT || !k_out_names[in->out_address]) {
@@ -398,7 +398,7 @@ static void emit_insn(glsl_buf *b, int i, const vsh_insn *in, const vsh_program 
 }
 
 static const char k_helpers[] =
-    "/* ILU: reciproco acotado, EXP y LOG parciales de D3D y LIT. */\n"
+    "/* ILU: clamped reciprocal, partial D3D EXP and LOG, and LIT. */\n"
     "vec4 nv_rcc(float x) {\n"
     "    float r = 1.0 / x;\n"
     "    float m = clamp(abs(r), 5.42101e-20, 1.84467e19);\n"
@@ -421,8 +421,8 @@ static const char k_helpers[] =
     "}\n\n";
 
 static const char k_epilogue[] =
-    "    /* oPos sale en la screen space de la Xbox (pixeles, unidades del depth buffer y\n"
-    "     * ya dividido por w): se pasa a NDC y se multiplica por w para OpenGL. */\n"
+    "    /* oPos comes out in the Xbox screen space (pixels, depth buffer units and\n"
+    "     * already divided by w): it is converted to NDC and multiplied by w for OpenGL. */\n"
     "    vec4 pos = oPos;\n"
     "    pos.x = pos.x * (2.0 / surfaceSize.x) - 1.0;\n"
     "    pos.y = 1.0 - pos.y * (2.0 / surfaceSize.y);\n"
@@ -440,7 +440,7 @@ int nv2a_vsh_to_glsl(const vsh_program *p, char *out, size_t outlen) {
         return VSH_ERR_ARGS;
     }
     glsl_buf_init(&b, out, outlen);
-    glsl_emit(&b, "#version 400\n/* Vertex program del NV2A: %d instrucciones (ngb, vsh.c). */\n",
+    glsl_emit(&b, "#version 400\n/* NV2A vertex program: %d instructions (ngb, vsh.c). */\n",
               p->n_insn);
     for (i = 0; i < VSH_NUM_INPUTS; i++) {
         if (p->inputs_read & (1u << i)) {

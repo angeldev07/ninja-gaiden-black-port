@@ -1,22 +1,22 @@
 /*
- * glstate.c: traducción del estado fijo del NV2A a OpenGL (ver glstate.h).
+ * glstate.c: translation of the NV2A fixed-function state to OpenGL (see glstate.h).
  *
- * Los valores de los métodos del NV2A son, casi siempre, los mismos enums de OpenGL: la
- * clase Kelvin (NV097) se diseñó para el driver de GL de NVIDIA. Fuente de todos los
- * valores: xemu, hw/xbox/nv2a/nv2a_regs.h (NV097_SET_BLEND_FUNC_SFACTOR_V_*,
+ * The values of the NV2A methods are, almost always, the same OpenGL enums: the Kelvin
+ * class (NV097) was designed for NVIDIA's GL driver. Source of all the values: xemu,
+ * hw/xbox/nv2a/nv2a_regs.h (NV097_SET_BLEND_FUNC_SFACTOR_V_*,
  * _BLEND_EQUATION_V_*, _CULL_FACE_V_*, _FRONT_FACE_V_*, _STENCIL_OP_V_*, _FOG_MODE_V_*,
- * máscaras de SET_COLOR_MASK, SET_FOG_COLOR y SET_SURFACE_CLIP_*). Lo que no es idéntico:
+ * masks of SET_COLOR_MASK, SET_FOG_COLOR and SET_SURFACE_CLIP_*). What is not identical:
  *
- *   - Comparaciones (depth, stencil, alfa): el NV2A guarda los 4 bits bajos; se aceptan
- *     0-7 o 0x200-0x207 y salen como GL_NEVER + n.
- *   - Ecuaciones FUNC_ADD_SIGNED (0xF006) y FUNC_REVERSE_SUBTRACT_SIGNED (0xF005): GL no
- *     tiene blend con signo; se aproximan con la ecuación normal y se marca `blend_signed`.
- *   - Sentido de giro: el vertex shader traducido (vsh.c) invierte la Y al pasar de la
- *     screen space de la Xbox (Y hacia abajo) a NDC, así que lo que en la Xbox es CW en
- *     pantalla es CCW para GL: SET_FRONT_FACE se invierte.
- *   - Scissor: SET_SURFACE_CLIP da x, y desde arriba; GL cuenta y desde abajo.
- *   - Colores: SET_BLEND_COLOR es ARGB (A en el byte alto); SET_FOG_COLOR es ABGR (R en
- *     el byte bajo).
+ *   - Comparisons (depth, stencil, alpha): the NV2A stores the low 4 bits; 0-7 or
+ *     0x200-0x207 are accepted and come out as GL_NEVER + n.
+ *   - Equations FUNC_ADD_SIGNED (0xF006) and FUNC_REVERSE_SUBTRACT_SIGNED (0xF005): GL has
+ *     no signed blend; they are approximated with the normal equation and `blend_signed` is set.
+ *   - Winding order: the translated vertex shader (vsh.c) flips Y when going from the
+ *     Xbox screen space (Y down) to NDC, so what is CW on screen on the Xbox is CCW for GL:
+ *     SET_FRONT_FACE is inverted.
+ *   - Scissor: SET_SURFACE_CLIP gives x, y from the top; GL counts y from the bottom.
+ *   - Colors: SET_BLEND_COLOR is ARGB (A in the high byte); SET_FOG_COLOR is ABGR (R in
+ *     the low byte).
  */
 #include "glstate.h"
 
@@ -42,14 +42,14 @@
 
 const char *glstate_error_text(int code) {
     switch (code) {
-    case GLSTATE_ERR_ARGS: return "argumentos inválidos";
-    case GLSTATE_ERR_BLEND: return "factor o ecuación de blend desconocidos";
-    case GLSTATE_ERR_COMPARE: return "función de comparación desconocida";
-    case GLSTATE_ERR_CULL: return "cara de cull o sentido de giro desconocidos";
-    case GLSTATE_ERR_STENCIL: return "operación de stencil desconocida";
-    case GLSTATE_ERR_FOG: return "modo de niebla desconocido";
-    case GLSTATE_ERR_GL: return "error de OpenGL al aplicar";
-    default: return code >= 0 ? "ok" : "error desconocido";
+    case GLSTATE_ERR_ARGS: return "invalid arguments";
+    case GLSTATE_ERR_BLEND: return "unknown blend factor or equation";
+    case GLSTATE_ERR_COMPARE: return "unknown comparison function";
+    case GLSTATE_ERR_CULL: return "unknown cull face or winding order";
+    case GLSTATE_ERR_STENCIL: return "unknown stencil operation";
+    case GLSTATE_ERR_FOG: return "unknown fog mode";
+    case GLSTATE_ERR_GL: return "OpenGL error while applying";
+    default: return code >= 0 ? "ok" : "unknown error";
     }
 }
 
@@ -159,9 +159,9 @@ int glstate_translate(const nv2a_state *in, gl_state *out) {
     if (in->front_face != GL_CW_ && in->front_face != GL_CCW_) {
         return GLSTATE_ERR_CULL;
     }
-    /* Invertido, como hace xemu. Comprobado con RenderDoc y con capturas de xemu de la demo
-     * del título: sin invertir, el culling descarta los muros y el suelo del templo vistos
-     * desde dentro. */
+    /* Inverted, as xemu does. Checked with RenderDoc and with xemu captures of the title
+     * demo: without inverting, culling discards the temple walls and floor seen from
+     * inside. */
     out->front_face = in->front_face == GL_CW_ ? GL_CCW_ : GL_CW_;
 
     out->stencil = in->stencil_test_enable != 0;

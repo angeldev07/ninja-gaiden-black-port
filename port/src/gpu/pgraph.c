@@ -1,16 +1,16 @@
 /*
- * pgraph.c: lo que hace la GPU con los comandos del push buffer (H7a: casi nada).
+ * pgraph.c: what the GPU does with the push buffer commands (H7a: almost nothing).
  *
- * Cada vez que D3D avanza DMA_PUT, nv2a.c llama a pgraph_kick: el decodificador
- * (pushbuf.c) recorre los comandos de GET a PUT y aquí:
- *   - se escribe cada método en el log de PGRAPH (h7-pgraph-<fecha>.log), agrupando las
- *     rachas del mismo método (matrices, programas, datos de vértices en línea);
- *   - se mantiene el estado mínimo para entender el frame: objeto de cada subcanal
- *     (SET_OBJECT vía RAMHT), objetos DMA, superficie de color, valor de clear;
- *   - se ejecutan los dos efectos que D3D espera de vuelta: los semáforos
- *     (BACK_END_WRITE_SEMAPHORE_RELEASE escribe en memoria) y el CLEAR_SURFACE de color,
- *     que se aplica a la superficie y se vuelca a PNG. Nada más se dibuja.
- * Referencias: xemu hw/xbox/nv2a/pgraph/pgraph.c (métodos), pfifo.c (RAMHT), nv2a.c (DMA).
+ * Every time D3D advances DMA_PUT, nv2a.c calls pgraph_kick: the decoder
+ * (pushbuf.c) walks the commands from GET to PUT and here:
+ *   - each method is written to the PGRAPH log (h7-pgraph-<date>.log), grouping runs of
+ *     the same method (matrices, programs, inline vertex data);
+ *   - the minimal state needed to understand the frame is kept: object of each subchannel
+ *     (SET_OBJECT via RAMHT), DMA objects, color surface, clear value;
+ *   - the two effects D3D expects back are executed: semaphores
+ *     (BACK_END_WRITE_SEMAPHORE_RELEASE writes to memory) and the color CLEAR_SURFACE,
+ *     which is applied to the surface and dumped to PNG. Nothing else is drawn.
+ * References: xemu hw/xbox/nv2a/pgraph/pgraph.c (methods), pfifo.c (RAMHT), nv2a.c (DMA).
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,7 +27,7 @@
 #define PFIFO_RAMHT 0x002210u
 #define PFIFO_CACHE1_PUSH1 0x003204u
 #define MAX_PNG 24
-#define PNG_FIRST_FLIPS 10 /* PNG de cada FLIP de los 10 primeros frames; luego cada 100 */
+#define PNG_FIRST_FLIPS 10 /* PNG on each FLIP of the first 10 frames; then every 100 */
 #define MAX_TEXTURES 4096
 #define RUN_PARAMS 4
 
@@ -38,7 +38,7 @@ static pb_state_t g_pb;
 static uint32_t g_frame, g_kicks, g_words;
 static uint32_t g_hist[0x2000 / 4], g_hist_frame0[0x2000 / 4];
 static uint32_t g_class[8];
-static uint32_t g_dma[0x80 / 4]; /* instancias de SET_CONTEXT_DMA_* (métodos 0x180..0x1FC) */
+static uint32_t g_dma[0x80 / 4]; /* instances of SET_CONTEXT_DMA_* (methods 0x180..0x1FC) */
 static uint32_t g_clip_h, g_clip_v, g_format, g_pitch, g_color_offset;
 static uint32_t g_clear_value, g_clear_h, g_clear_v, g_sem_offset;
 static uint32_t g_begin_end, g_prims[16], g_draw_arrays, g_clears, g_color_clears, g_flips;
@@ -47,53 +47,53 @@ static int g_png_count;
 static int g_frame0_done;
 static uint32_t g_first_draw_frame = 0xFFFFFFFFu, g_tex_sets, g_ntex;
 static uint32_t g_tex[MAX_TEXTURES];
-/* Estado de textura por etapa: offset, formato, control0, control1 (pitch), rectángulo. */
+/* Per-stage texture state: offset, format, control0, control1 (pitch), rectangle. */
 static uint32_t g_tex_offset[4], g_tex_format[4], g_tex_ctl0[4], g_tex_ctl1[4], g_tex_rect[4];
 #define MAX_TEX_PNG 12
 #define MAX_TEX_SEEN 256
-static uint32_t g_tex_seen[MAX_TEX_SEEN][2]; /* (offset, formato) ya vistos al dibujar */
+static uint32_t g_tex_seen[MAX_TEX_SEEN][2]; /* (offset, format) already seen when drawing */
 static uint32_t g_tex_nseen;
 static int g_tex_png;
 static uint32_t g_tex_palette[4];
 
-/* H7b: estado para el rasterizador por software (raster.c). */
-static uint32_t g_vfmt[16];      /* SET_VERTEX_DATA_ARRAY_FORMAT por atributo */
-static uint32_t g_vconst_diffuse = 0xFFFFFFFFu; /* SET_VERTEX_DATA4UB del difuso (slot 3) */
-static uint32_t g_prim;          /* primitiva de BEGIN_END en curso (0 = ninguna) */
-static uint32_t *g_inline;       /* palabras de INLINE_ARRAY de la primitiva en curso */
+/* H7b: state for the software rasterizer (raster.c). */
+static uint32_t g_vfmt[16];      /* SET_VERTEX_DATA_ARRAY_FORMAT per attribute */
+static uint32_t g_vconst_diffuse = 0xFFFFFFFFu; /* SET_VERTEX_DATA4UB of the diffuse (slot 3) */
+static uint32_t g_prim;          /* BEGIN_END primitive in progress (0 = none) */
+static uint32_t *g_inline;       /* INLINE_ARRAY words of the primitive in progress */
 static uint32_t g_inline_n, g_inline_cap;
 static uint32_t g_blend_enable, g_sfactor = 1, g_dfactor, g_alpha_test, g_alpha_func = 0x207;
 static uint32_t g_alpha_ref, g_exec_mode;
 static uint32_t g_drawn_tris, g_drawn_pixels, g_skipped_draws, g_skip_pos, g_skip_target, g_skip_prim;
 static uint32_t g_present_offset, g_present_pitch, g_present_w, g_present_h;
 static LARGE_INTEGER g_pace_next, g_pace_freq;
-static volatile LONG g_pace_pending; /* FLIP_STALL hecho; el pacing va al salir de los locks */
+static volatile LONG g_pace_pending; /* FLIP_STALL done; pacing runs on leaving the locks */
 
-/* Pusher asíncrono (con GL): la cola es un solo tramo [g_q_get, g_q_put) del push buffer en
- * curso. El juego mueve PUT; el hilo de render consume y mueve GET al terminar cada tramo. */
+/* Asynchronous pusher (with GL): the queue is a single span [g_q_get, g_q_put) of the current
+ * push buffer. The game moves PUT; the render thread consumes and moves GET when each span ends. */
 static CRITICAL_SECTION g_q_lock;
-static volatile LONG g_patt_color0; /* PGRAPH_PATT_COLOR0, escrito por el pusher */
-static uint32_t g_block_wakes;       /* NO_OPERATION(5) de D3D_BlockOnTime atendidos */
+static volatile LONG g_patt_color0; /* PGRAPH_PATT_COLOR0, written by the pusher */
+static uint32_t g_block_wakes;       /* D3D_BlockOnTime NO_OPERATION(5) served */
 static uint32_t g_q_inst, g_q_get, g_q_put;
 static int g_q_busy, g_q_started;
-static volatile int g_q_running; /* el hilo de render está dentro de pb_run para la cola */
+static volatile int g_q_running; /* the render thread is inside pb_run for the queue */
 
-/* H7c: render OpenGL (--renderer gl). g_r es el estado NV097 que necesita pgraph_gl.c; los
- * índices de ARRAY_ELEMENT y DRAW_ARRAYS de la primitiva en curso van en g_aidx. */
+/* H7c: OpenGL render (--renderer gl). g_r is the NV097 state pgraph_gl.c needs; the
+ * ARRAY_ELEMENT and DRAW_ARRAYS indices of the primitive in progress go in g_aidx. */
 static int g_gl;
 static pgl_regs g_r;
 static uint32_t *g_aidx;
 static uint32_t g_aidx_n, g_aidx_cap;
-#define SHOT_EVERY 300 /* con --window, captura automática cada 300 frames presentados */
+#define SHOT_EVERY 300 /* with --window, automatic capture every 300 presented frames */
 
-/* H7c: medidas por frame con QueryPerformanceCounter (baratas: ~20 ns cada lectura). Se
- * acumulan ticks por fase y cada PERF_EVERY frames se escribe una línea "perf:" con la
- * media por frame y los fps reales (frames / tiempo de reloj de la ventana de medida). */
+/* H7c: per-frame measurements with QueryPerformanceCounter (cheap: ~20 ns per read). Ticks
+ * are accumulated per phase and every PERF_EVERY frames a "perf:" line is written with the
+ * per-frame average and the real fps (frames / wall-clock time of the measurement window). */
 #define PERF_EVERY 300
 static struct {
     LONGLONG kick, draw, clear, present, pace, t0, log0;
-    LONGLONG pb, body; /* dentro de pb_run y de kick_body (en el hilo que lo ejecuta) */
-    LONGLONG lockwait, call; /* esperando g_pg_lock y dentro de pgl_call */
+    LONGLONG pb, body; /* inside pb_run and kick_body (on the thread that runs it) */
+    LONGLONG lockwait, call; /* waiting for g_pg_lock and inside pgl_call */
     long kcalls0;
     uint32_t mmio0, flips0, kicks0, tris0;
     char last[320];
@@ -111,7 +111,7 @@ static double ticks_ms(LONGLONG t) {
     return (double)t * 1000.0 / (double)f.QuadPart;
 }
 
-/* Cierra una ventana de medida: media por frame de cada fase y fps reales. */
+/* Closes a measurement window: per-frame average of each phase and real fps. */
 static void perf_report(void) {
     LONGLONG now = qpc(), log_now = ngb_log_ticks();
     long kc = ngb_kernel_calls();
@@ -121,14 +121,14 @@ static void perf_report(void) {
         g_perf.t0 = now;
         if (g_gl) {
             char gl[700];
-            pgl_perf_take(gl, sizeof gl, 1); /* descarta lo acumulado antes de la primera ventana */
+            pgl_perf_take(gl, sizeof gl, 1); /* discards what was accumulated before the first window */
         }
     } else {
         wall = ticks_ms(now - g_perf.t0);
         snprintf(g_perf.last, sizeof g_perf.last,
-                 "perf: frames %u-%u: %.1f fps reales, %.2f ms/frame; por frame: pusher %.2f ms "
-                 "(dibujo %.2f, clear %.2f), present %.2f, pacing %.2f, log %.2f ms; %.0f llamadas "
-                 "al kernel, %.0f MMIO, %.1f kicks, %.0f primitivas; pb_run %.2f ms, kick_body %.2f ms, lock %.2f ms, pgl_call %.2f ms",
+                 "perf: frames %u-%u: %.1f real fps, %.2f ms/frame; per frame: pusher %.2f ms "
+                 "(draw %.2f, clear %.2f), present %.2f, pacing %.2f, log %.2f ms; %.0f kernel calls, "
+                 "%.0f MMIO, %.1f kicks, %.0f primitives; pb_run %.2f ms, kick_body %.2f ms, lock %.2f ms, pgl_call %.2f ms",
                  g_perf.flips0, g_flips, n * 1000.0 / wall, wall / n,
                  ticks_ms(g_perf.kick - g_perf.present) / n,
                  ticks_ms(g_perf.draw) / n, ticks_ms(g_perf.clear) / n, ticks_ms(g_perf.present) / n,
@@ -155,7 +155,7 @@ static void perf_report(void) {
     g_perf.pb = g_perf.body = g_perf.lockwait = g_perf.call = 0;
 }
 
-/* Racha de palabras del mismo método (para no escribir 10000 líneas de INLINE_ARRAY). */
+/* Run of words of the same method (to avoid writing 10000 lines of INLINE_ARRAY). */
 static struct {
     int active;
     uint32_t sub, method, count, params[RUN_PARAMS];
@@ -171,8 +171,8 @@ static void pg_printf(const char *fmt, ...) {
     va_end(ap);
 }
 
-/* Frames con todos los métodos en el log (--pgraph-frames, 3 por defecto) y además el
- * primer frame que dibuja (con BEGIN_END); el resto solo se cuenta. */
+/* Frames with all methods in the log (--pgraph-frames, 3 by default) plus the first
+ * frame that draws (with BEGIN_END); the rest are only counted. */
 static int logging(void) {
     return g_frame < g_ngb_opts.pgraph_frames || g_frame == g_first_draw_frame ||
            (g_ngb_opts.pgraph_at && g_frame >= g_ngb_opts.pgraph_at &&
@@ -187,22 +187,22 @@ static const char *prim_name(uint32_t p) {
     return p < 11 ? names[p] : "?";
 }
 
-/* Anotación legible del parámetro de algunos métodos. */
+/* Readable annotation of the parameter of some methods. */
 static void annotate(uint32_t method, uint32_t p, char *out, size_t outlen) {
     out[0] = 0;
     switch (method) {
     case 0x17FC: snprintf(out, outlen, "  (%s)", prim_name(p)); break;
-    case 0x1810: snprintf(out, outlen, "  (inicio %u, %u vértices)", p & 0xFFFFFF, (p >> 24) + 1); break;
+    case 0x1810: snprintf(out, outlen, "  (start %u, %u vertices)", p & 0xFFFFFF, (p >> 24) + 1); break;
     case 0x1D94:
         snprintf(out, outlen, "  (%s%s%s)", (p & 0xF0) ? "color " : "", (p & 1) ? "Z " : "",
                  (p & 2) ? "stencil" : "");
         break;
     case 0x0200: case 0x0204: snprintf(out, outlen, "  (%u + %u)", p & 0xFFFF, p >> 16); break;
     case 0x0208:
-        snprintf(out, outlen, "  (color fmt %u, zeta %u, tipo %u, %ux%u log2)", p & 0xF,
+        snprintf(out, outlen, "  (color fmt %u, zeta %u, type %u, %ux%u log2)", p & 0xF,
                  (p >> 4) & 0xF, (p >> 8) & 0xF, (p >> 16) & 0xFF, p >> 24);
         break;
-    case 0x020C: snprintf(out, outlen, "  (pitch color %u, zeta %u)", p & 0xFFFF, p >> 16); break;
+    case 0x020C: snprintf(out, outlen, "  (color pitch %u, zeta %u)", p & 0xFFFF, p >> 16); break;
     default: break;
     }
 }
@@ -229,7 +229,7 @@ static void flush_run(void) {
     pg_printf("%s\n", g_run.count > RUN_PARAMS ? " ..." : "");
 }
 
-/* Nombre sin el índice "+N" (clave de agrupación de la racha). */
+/* Name without the "+N" index (grouping key of the run). */
 static void group_name(const char *name, char *out, size_t outlen) {
     const char *plus = strchr(name, '+');
     size_t n = plus ? (size_t)(plus - name) : strlen(name);
@@ -242,8 +242,8 @@ static void group_name(const char *name, char *out, size_t outlen) {
 static void record(uint32_t sub, uint32_t method, uint32_t param, int non_inc) {
     char name[64], group[64];
     if (!logging()) {
-        /* Fuera de los frames del log no hay nada que agrupar: buscar el nombre del método y
-         * compararlo costaba ~1 µs por palabra, decenas de ms por frame en el 3D. */
+        /* Outside the logged frames there is nothing to group: looking up the method name and
+         * comparing it cost ~1 µs per word, tens of ms per frame in 3D. */
         g_run.active = 0;
         return;
     }
@@ -268,7 +268,7 @@ static void record(uint32_t sub, uint32_t method, uint32_t param, int non_inc) {
     snprintf(g_run.name, sizeof g_run.name, "%s", group);
 }
 
-/* RAMHT: handle -> instancia (bytes en RAMIN). Hash de xemu pfifo.c (ramht_hash). */
+/* RAMHT: handle -> instance (bytes in RAMIN). Hash from xemu pfifo.c (ramht_hash). */
 static int ramht_lookup(uint32_t handle, uint32_t *instance) {
     uint32_t r = nv2a_reg_read(PFIFO_RAMHT);
     uint32_t base = ((r >> 4) & 0x1Fu) << 12, size = 1u << (((r >> 16) & 3u) + 12);
@@ -284,7 +284,7 @@ static int ramht_lookup(uint32_t handle, uint32_t *instance) {
     hash ^= chid << (bits - 4);
     if (!table)
         return 0;
-    for (i = 0; i < size / 8; i++) { /* la entrada del hash o, si no cuadra, búsqueda lineal */
+    for (i = 0; i < size / 8; i++) { /* the hash entry or, if it does not fit, linear search */
         uint32_t slot = i ? i - 1 : hash, e[2];
         if (slot * 8 + 8 > size)
             continue;
@@ -297,7 +297,7 @@ static int ramht_lookup(uint32_t handle, uint32_t *instance) {
     return 0;
 }
 
-/* Objeto DMA en RAMIN: dirección física base y límite (xemu nv_dma_load). */
+/* DMA object in RAMIN: base physical address and limit (xemu nv_dma_load). */
 static int dma_object(uint32_t instance, uint32_t *phys, uint32_t *limit) {
     uint32_t o[3];
     uint8_t *p = nv2a_ramin(instance, 12);
@@ -329,7 +329,7 @@ static void dump_png(const char *why) {
     if (!dma_object(g_dma[(0x194 - 0x180) / 4], &phys, &limit))
         phys = 0;
     phys += g_color_offset;
-    if (g_present_offset) { /* el búfer de 720 que se presenta (H7b) */
+    if (g_present_offset) { /* the 720-wide buffer that is presented (H7b) */
         phys = g_present_offset;
         pitch = g_present_pitch;
         w = g_present_w;
@@ -348,7 +348,7 @@ static void dump_png(const char *why) {
         for (x = 0; x < w; x++) {
             const uint8_t *s = surface + (size_t)y * pitch + (size_t)x * bpp;
             uint8_t *d = rgb + ((size_t)y * w + x) * 3;
-            if (bpp == 4) { /* X8R8G8B8 / A8R8G8B8 en little endian: B, G, R, A */
+            if (bpp == 4) { /* X8R8G8B8 / A8R8G8B8 little endian: B, G, R, A */
                 d[0] = s[2];
                 d[1] = s[1];
                 d[2] = s[0];
@@ -364,15 +364,15 @@ static void dump_png(const char *why) {
     snprintf(path, sizeof path, "%s-%03d.png", g_png_base, g_png_count);
     if (!png_write_rgb(path, w, h, rgb)) {
         g_png_count++;
-        ngb_log("    · PGRAPH: %s -> %s (%ux%u, %u B/píxel, física 0x%08X)", why, path, w, h, bpp,
+        ngb_log("    · PGRAPH: %s -> %s (%ux%u, %u B/pixel, physical 0x%08X)", why, path, w, h, bpp,
                 phys);
         pg_printf("== PNG %s: %s (%ux%u)\n", why, path, w, h);
     }
     free(rgb);
 }
 
-/* Coordenada swizzle (Morton) de (x, y) en una textura w x h potencia de 2 (como en xemu,
- * swizzle.c): los bits de x e y se intercalan mientras ambos tengan bits. */
+/* Swizzle (Morton) coordinate of (x, y) in a power-of-two w x h texture (as in xemu,
+ * swizzle.c): the bits of x and y are interleaved as long as both have bits left. */
 static uint32_t swizzle_offset(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     uint32_t off = 0, bit = 0, mx = 1, my = 1;
     while (mx < w || my < h) {
@@ -392,7 +392,7 @@ static uint32_t swizzle_offset(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     return off;
 }
 
-/* Vuelca a PNG la textura de una etapa (formatos de 32 y 16 bits, lineales o swizzle). */
+/* Dumps a stage's texture to PNG (32- and 16-bit formats, linear or swizzled). */
 static void dump_texture(uint32_t stage) {
     uint32_t fmt = g_tex_format[stage], color = (fmt >> 8) & 0xFF, phys, limit, x, y, bpp;
     uint32_t w = 1u << ((fmt >> 20) & 0xF), h = 1u << ((fmt >> 24) & 0xF), pitch = 0;
@@ -402,14 +402,14 @@ static void dump_texture(uint32_t stage) {
     const uint8_t *pal = NULL;
     char path[MAX_PATH + 32];
     switch (color) {
-    case 0x06: case 0x07: bpp = 4; linear = 0; break; /* A8R8G8B8 / X8R8G8B8 swizzle */
+    case 0x06: case 0x07: bpp = 4; linear = 0; break; /* A8R8G8B8 / X8R8G8B8 swizzled */
     case 0x12: case 0x1E: bpp = 4; linear = 1; break; /* LU_IMAGE_A8R8G8B8 / X8R8G8B8 */
-    case 0x05: bpp = 2; linear = 0; break;             /* R5G6B5 swizzle */
+    case 0x05: bpp = 2; linear = 0; break;             /* R5G6B5 swizzled */
     case 0x11: bpp = 2; linear = 1; break;             /* LU_IMAGE_R5G6B5 */
-    case 0x0B: bpp = 1; linear = 0; break;             /* I8_A8R8G8B8: índice a paleta, swizzle */
-    case 0x19: bpp = 1; linear = 0; break;             /* A8 swizzle (solo alfa) */
+    case 0x0B: bpp = 1; linear = 0; break;             /* I8_A8R8G8B8: palette index, swizzled */
+    case 0x19: bpp = 1; linear = 0; break;             /* A8 swizzled (alpha only) */
     default:
-        pg_printf("== textura etapa %u: formato de color 0x%02X no volcado (offset 0x%08X)\n", stage,
+        pg_printf("== texture stage %u: color format 0x%02X not dumped (offset 0x%08X)\n", stage,
                   color, g_tex_offset[stage]);
         return;
     }
@@ -424,7 +424,7 @@ static void dump_texture(uint32_t stage) {
     if (!w || !h || w > 4096 || h > 4096 || !dma_object(dma, &phys, &limit))
         return;
     src = nv2a_phys(phys + g_tex_offset[stage], swz ? w * h * bpp : pitch * h);
-    if (color == 0x0B) { /* SET_TEXTURE_PALETTE: dma en bits 0-1, dirección alineada a 64 */
+    if (color == 0x0B) { /* SET_TEXTURE_PALETTE: dma in bits 0-1, address aligned to 64 */
         uint32_t pdma = g_dma[(((g_tex_palette[stage] & 3) == 2 ? 0x188u : 0x184u) - 0x180u) / 4];
         uint32_t pphys, plimit;
         if (dma_object(pdma, &pphys, &plimit))
@@ -461,14 +461,14 @@ static void dump_texture(uint32_t stage) {
     snprintf(path, sizeof path, "%s-tex%02d.png", g_png_base, g_tex_png);
     if (!png_write_rgb(path, w, h, rgb)) {
         g_tex_png++;
-        ngb_log("    · PGRAPH: textura etapa %u (formato 0x%02X %s, %ux%u, física 0x%08X) -> %s",
-                stage, color, linear ? "lineal" : "swizzle", w, h, phys + g_tex_offset[stage], path);
-        pg_printf("== PNG textura etapa %u, formato 0x%02X, %ux%u: %s\n", stage, color, w, h, path);
+        ngb_log("    · PGRAPH: texture stage %u (format 0x%02X %s, %ux%u, physical 0x%08X) -> %s",
+                stage, color, linear ? "linear" : "swizzle", w, h, phys + g_tex_offset[stage], path);
+        pg_printf("== PNG texture stage %u, format 0x%02X, %ux%u: %s\n", stage, color, w, h, path);
     }
     free(rgb);
 }
 
-/* Al empezar una primitiva: vuelca las texturas activas que aún no se hayan visto. */
+/* At the start of a primitive: dumps the active textures not seen yet. */
 static void dump_active_textures(void) {
     uint32_t s, i;
     for (s = 0; s < 4 && g_tex_png < MAX_TEX_PNG; s++) {
@@ -487,20 +487,20 @@ static void dump_active_textures(void) {
     }
 }
 
-/* Superficie de color actual como destino del rasterizador. 0 si no hay. */
+/* Current color surface as the rasterizer's target. 0 if there is none. */
 static int color_target(rs_target_t *t) {
     uint32_t phys, limit, pitch = g_pitch & 0xFFFF, w = g_clip_h >> 16, h = g_clip_v >> 16;
     uint32_t cf = g_format & 0xF;
     memset(t, 0, sizeof *t);
-    if (((g_format >> 8) & 0xF) == 2 || !w || !h || !pitch) /* swizzle: no soportado */
+    if (((g_format >> 8) & 0xF) == 2 || !w || !h || !pitch) /* swizzled: not supported */
         return 0;
     if (!dma_object(g_dma[(0x194 - 0x180) / 4], &phys, &limit))
         phys = 0;
     t->bpp = (cf == 3 || cf == 1 || cf == 2) ? 2 : 4;
     t->width = w + (g_clip_h & 0xFFFF);
     t->height = h + (g_clip_v & 0xFFFF);
-    /* El rasterizador escribe filas [0, height) y columnas [0, width): el búfer entero tiene
-     * que caber en la RAM de la GPU y cada fila en el pitch (datos que manda el juego). */
+    /* The rasterizer writes rows [0, height) and columns [0, width): the whole buffer has to
+     * fit in the GPU RAM and each row in the pitch (data sent by the game). */
     if ((uint64_t)t->width * t->bpp > pitch || (uint64_t)pitch * t->height > 0x04000000u)
         return 0;
     t->pixels = nv2a_phys(phys + g_color_offset, pitch * t->height);
@@ -511,7 +511,7 @@ static int color_target(rs_target_t *t) {
     t->clip_y0 = (int)(g_clip_v & 0xFFFF);
     t->clip_x1 = (int)t->width;
     t->clip_y1 = (int)t->height;
-    if (w == 720) { /* el búfer que acabará en pantalla */
+    if (w == 720) { /* the buffer that will end up on screen */
         g_present_offset = phys + g_color_offset;
         g_present_pitch = pitch;
         g_present_w = w;
@@ -520,7 +520,7 @@ static int color_target(rs_target_t *t) {
     return 1;
 }
 
-/* Textura de la etapa 0 para el rasterizador (formatos de dump_texture). */
+/* Stage 0 texture for the rasterizer (dump_texture formats). */
 static int stage0_texture(rs_texture_t *tex) {
     uint32_t fmt = g_tex_format[0], color = (fmt >> 8) & 0xFF, phys, limit, bpp;
     uint64_t size;
@@ -538,7 +538,7 @@ static int stage0_texture(rs_texture_t *tex) {
     case 0x05: tex->format = RS_TEX_R5G6B5; break;
     case 0x19: tex->format = RS_TEX_A8; break;
     case 0x0B: tex->format = RS_TEX_I8; break;
-    case 0x12: case 0x1E: case 0x11: /* LU_IMAGE: lineales, coordenadas en texels */
+    case 0x12: case 0x1E: case 0x11: /* LU_IMAGE: linear, coordinates in texels */
         tex->format = color == 0x11 ? RS_TEX_R5G6B5 : color == 0x12 ? RS_TEX_A8R8G8B8 : RS_TEX_X8R8G8B8;
         tex->swizzled = 0;
         tex->normalized = 0;
@@ -549,8 +549,8 @@ static int stage0_texture(rs_texture_t *tex) {
     default:
         return 0;
     }
-    /* Tamaños que manda el juego: hasta 4096 de lado (como el volcado) y en 64 bits, para que
-     * un 32768x32768 no dé 0 por desbordamiento y deje leer fuera de la RAM de la GPU. */
+    /* Sizes sent by the game: up to 4096 per side (as in the dump) and in 64 bits, so that
+     * a 32768x32768 does not give 0 through overflow and allow reads outside the GPU RAM. */
     if (!tex->width || !tex->height || tex->width > 4096 || tex->height > 4096)
         return 0;
     bpp = tex->format == RS_TEX_R5G6B5 ? 2u : tex->format >= RS_TEX_A8 ? 1u : 4u;
@@ -578,7 +578,7 @@ static float word_float(uint32_t w) {
 }
 
 static void unpack_color(uint32_t c, int ogl, rs_vertex_t *v) {
-    if (ogl) /* UB_OGL: bytes R, G, B, A en memoria */
+    if (ogl) /* UB_OGL: bytes R, G, B, A in memory */
         c = (c & 0xFF00FF00u) | ((c & 0xFFu) << 16) | ((c >> 16) & 0xFFu);
     v->r = (float)((c >> 16) & 0xFF) / 255.0f;
     v->g = (float)((c >> 8) & 0xFF) / 255.0f;
@@ -586,7 +586,7 @@ static void unpack_color(uint32_t c, int ogl, rs_vertex_t *v) {
     v->a = (float)(c >> 24) / 255.0f;
 }
 
-/* Palabras que ocupa un atributo con este formato en INLINE_ARRAY. */
+/* Words an attribute with this format takes in INLINE_ARRAY. */
 static uint32_t attr_words(uint32_t f) {
     uint32_t type = f & 0xF, size = (f >> 4) & 0xF;
     if (!size)
@@ -601,8 +601,8 @@ static uint32_t attr_words(uint32_t f) {
 static void aidx_push(uint32_t v) {
     if (g_aidx_n == g_aidx_cap) {
         uint32_t cap = g_aidx_cap ? g_aidx_cap * 2 : 4096, *p;
-        /* El tope se mira antes del realloc: si no, el bloque viejo ya se habría movido y
-           g_aidx quedaría colgando (los counts vienen del juego). */
+        /* The cap is checked before the realloc: otherwise the old block would already have
+           moved and g_aidx would be left dangling (the counts come from the game). */
         if (cap > (1u << 24) || (p = (uint32_t *)realloc(g_aidx, (size_t)cap * 4)) == NULL)
             return;
         g_aidx = p;
@@ -616,17 +616,17 @@ int pgraph_dma_base(uint32_t method, uint32_t *phys) {
     if (method < 0x180 || method >= 0x200)
         return 0;
     if (!dma_object(g_dma[(method - 0x180) / 4], phys, &limit))
-        *phys = 0; /* sin objeto DMA: offsets como físicas (lo mismo que el rasterizador) */
+        *phys = 0; /* no DMA object: offsets as physical (same as the rasterizer) */
     return 1;
 }
 
-/* Estado que el render GL lee de métodos con efectos (cargas de programa y constantes,
- * atributos constantes). El resto se guarda tal cual en g_r.m. */
+/* State the GL render reads from methods with side effects (program and constant loads,
+ * constant attributes). The rest is stored as is in g_r.m. */
 static void gl_track(uint32_t method, uint32_t param) {
     float f;
     memcpy(&f, &param, 4);
-    /* D3D reenvía muchos registros con el mismo valor (luces, material): solo un valor nuevo
-     * cuenta como cambio para los uniforms. */
+    /* D3D resends many registers with the same value (lights, material): only a new value
+     * counts as a change for the uniforms. */
     if (g_r.m[method / 4] != param) {
         g_r.m[method / 4] = param;
         g_r.blk_stamp[method / PGL_BLOCK] = ++g_r.stamp;
@@ -668,7 +668,7 @@ static void gl_track(uint32_t method, uint32_t param) {
     }
 }
 
-/* Cierra la primitiva en curso con OpenGL (en el hilo de render). */
+/* Closes the primitive in progress with OpenGL (on the render thread). */
 static void gl_draw_end(void) {
     pgl_draw_t d;
     memset(&d, 0, sizeof d);
@@ -685,7 +685,7 @@ static void gl_draw_end(void) {
     pgl_draw(&g_r, &d);
 }
 
-/* Vértices de INLINE_ARRAY (posición XYZRHW en pantalla, difuso, texcoord0) -> triángulos. */
+/* INLINE_ARRAY vertices (XYZRHW screen position, diffuse, texcoord0) -> triangles. */
 static void draw_inline(void) {
     rs_target_t t;
     rs_texture_t tex;
@@ -696,8 +696,8 @@ static void draw_inline(void) {
         return;
     for (slot = 0; slot < 16; slot++)
         per += attr_words(g_vfmt[slot]);
-    /* Posición de 4 floats = XYZRHW ya transformada; la de 3D (3 floats) necesita el
-     * intérprete de vertex programs (siguiente paso). */
+    /* A 4-float position = already transformed XYZRHW; the 3D one (3 floats) needs the
+     * vertex program interpreter (next step). */
     if (!per || (g_vfmt[0] & 0xF) != 2 || ((g_vfmt[0] >> 4) & 0xF) != 4) {
         g_skipped_draws++;
         g_skip_pos++;
@@ -780,7 +780,7 @@ static void draw_inline(void) {
         }
         break;
     default:
-        g_skipped_draws++; /* puntos y líneas: no se dibujan */
+        g_skipped_draws++; /* points and lines: not drawn */
         g_skip_prim++;
         break;
     }
@@ -791,8 +791,8 @@ static void draw_inline(void) {
 static void inline_push(uint32_t w) {
     if (g_inline_n == g_inline_cap) {
         uint32_t cap = g_inline_cap ? g_inline_cap * 2 : 4096, *p;
-        /* El tope se mira antes del realloc: si no, el bloque viejo ya se habría movido y
-           g_inline quedaría colgando (los counts vienen del juego). */
+        /* The cap is checked before the realloc: otherwise the old block would already have
+           moved and g_inline would be left dangling (the counts come from the game). */
         if (cap > (1u << 24) || (p = (uint32_t *)realloc(g_inline, (size_t)cap * 4)) == NULL)
             return;
         g_inline = p;
@@ -801,7 +801,7 @@ static void inline_push(uint32_t w) {
     g_inline[g_inline_n++] = w;
 }
 
-/* Espera al siguiente "vblank" (1/60 s de reloj) para ir a ~60 fps como la consola. */
+/* Waits for the next "vblank" (1/60 s of wall clock) to run at ~60 fps like the console. */
 static void pace(void) {
     LARGE_INTEGER now;
     LONGLONG t1 = qpc();
@@ -814,7 +814,7 @@ static void pace(void) {
     g_pace_next.QuadPart += g_pace_freq.QuadPart / 60;
     QueryPerformanceCounter(&now);
     if (now.QuadPart > g_pace_next.QuadPart + g_pace_freq.QuadPart / 10) {
-        g_pace_next = now; /* muy atrasados: no intentar recuperar */
+        g_pace_next = now; /* far behind: do not try to catch up */
         return;
     }
     while (now.QuadPart < g_pace_next.QuadPart) {
@@ -825,9 +825,10 @@ static void pace(void) {
     InterlockedExchangeAdd64(&g_perf.pace, qpc() - t1);
 }
 
-/* Lo llama nv2a.c al volver del kick, ya sin el lock del NV2A ni g_pg_lock (issue #35): el
- * Sleep del pacing ya no bloquea al hilo del vblank ni a otros accesos MMIO. Con el pusher
- * asíncrono el pacing es del hilo de render (kick_worker): el juego no espera aquí. */
+/* Called by nv2a.c on returning from the kick, with the NV2A lock and g_pg_lock already
+ * released (issue #35): the pacing Sleep no longer blocks the vblank thread or other MMIO
+ * accesses. With the asynchronous pusher the pacing belongs to the render thread
+ * (kick_worker): the game does not wait here. */
 void pgraph_pace(void) {
     if (g_gl)
         return;
@@ -835,9 +836,9 @@ void pgraph_pace(void) {
         pace();
 }
 
-/* FLIP_STALL: presenta el búfer de 720 de ancho en la ventana y deja el pacing pendiente
- * para cuando se suelten los locks. Si el mismo kick ya traía otro FLIP_STALL sin esperar
- * (push buffers en bucle, como el del vídeo), ese pacing se hace aquí. */
+/* FLIP_STALL: presents the 720-wide buffer in the window and leaves the pacing pending
+ * until the locks are released. If the same kick already carried another FLIP_STALL without
+ * waiting (looping push buffers, like the video one), that pacing is done here. */
 static void present_and_pace(void) {
     uint8_t *fb;
     LONGLONG t0 = qpc();
@@ -849,7 +850,7 @@ static void present_and_pace(void) {
         if (shot)
             snprintf(path, sizeof path, "%s-shot-%05u.png", g_png_base, g_flips);
         if (!pgl_flip(&g_r, shot ? path : NULL))
-            ngb_log("    · gfx: captura del frame %u -> %s (%.1f fps, GL)", g_flips, path, gfx_fps());
+            ngb_log("    · gfx: capture of frame %u -> %s (%.1f fps, GL)", g_flips, path, gfx_fps());
     } else if (g_present_offset && g_ngb_opts.window) {
         fb = nv2a_phys(g_present_offset, g_present_pitch * g_present_h);
         if (fb) {
@@ -859,7 +860,7 @@ static void present_and_pace(void) {
                 char path[MAX_PATH + 32], used[MAX_PATH + 32];
                 snprintf(path, sizeof path, "%s-shot-%05u.png", g_png_base, g_flips);
                 if (!gfx_screenshot(path, used, sizeof used))
-                    ngb_log("    · gfx: captura del frame %u -> %s (%.1f fps)", g_flips, used, gfx_fps());
+                    ngb_log("    · gfx: capture of frame %u -> %s (%.1f fps)", g_flips, used, gfx_fps());
             }
         }
     }
@@ -867,7 +868,7 @@ static void present_and_pace(void) {
     InterlockedExchange(&g_pace_pending, 1);
 }
 
-/* CLEAR_SURFACE de color: se rellena el rectángulo de clear de la superficie. */
+/* Color CLEAR_SURFACE: fills the surface's clear rectangle. */
 static void do_clear(uint32_t flags) {
     uint32_t phys, limit, pitch = g_pitch & 0xFFFF, bpp = bytes_per_pixel(g_format & 0xF);
     uint32_t x0 = g_clear_h & 0xFFFF, x1 = g_clear_h >> 16, y0 = g_clear_v & 0xFFFF;
@@ -885,8 +886,8 @@ static void do_clear(uint32_t flags) {
     }
     if (!pitch)
         pitch = ((g_clip_h >> 16) ? (g_clip_h >> 16) : 640) * bpp;
-    /* Cada fila del rectángulo tiene que caber en el pitch: si no, la escritura pisaría la
-     * fila siguiente o saldría del búfer. */
+    /* Each row of the rectangle has to fit in the pitch: otherwise the write would overwrite the
+     * next row or run past the buffer. */
     if (x1 >= 4096 || y1 >= 4096 || x0 > x1 || y0 > y1 || (x1 + 1) * bpp > pitch)
         return;
     if ((g_clip_h >> 16) == 720) {
@@ -911,30 +912,31 @@ static void do_clear(uint32_t flags) {
                 *p = (uint8_t)v;
         }
     if (g_color_clears == 1)
-        dump_png("primer clear de color");
+        dump_png("first color clear");
 }
 
 /*
- * HLE del "fixup" de push buffers estáticos de D3D (D3DDevice_RunPushBuffer, 0x3CD680).
+ * HLE of the static push buffer "fixup" of D3D (D3DDevice_RunPushBuffer, 0x3CD680).
  *
- * D3D salta desde su anillo a un push buffer estático que termina en un JUMP de vuelta, y
- * reescribe ese JUMP en cada uso. Si la GPU todavía no ha terminado el uso anterior, no
- * puede reescribirlo aún: mete en el anillo NO_OPERATION (0x100) con un parámetro que en la
- * Xbox detiene la GPU y lanza una interrupción; la rutina de D3D hace entonces el parcheo
- * (el mismo que FUN_003cd5e0 hace directamente cuando la GPU ya pasó) y la GPU sigue con el
- * JUMP al push buffer. Aquí no hay interrupción: el parcheo se hace en el acto.
- *   parámetro (i << 5) | 0xD: registro i de la tabla del dispositivo (dev + 0x264 + i·20);
- *   parámetro (va << 5) | 0xC: registro en el propio anillo, en va (contigua, 0x8xxxxxxx).
- * Registro (5 palabras): [0] retorno en el anillo | flags, [1] siguiente registro, [2] palabra
- * final del push buffer (donde va el JUMP de vuelta), [3] lista de fixups, [4] base.
- * Sin esto, el JUMP de vuelta seguía apuntando al uso anterior: la GPU emulada daba vueltas
- * hasta el tope de 4 M palabras, pisaba el fence de D3D con valores viejos y el juego se
- * colgaba en D3D_BlockOnTime (al empezar la demo del título).
+ * D3D jumps from its ring to a static push buffer that ends in a JUMP back, and rewrites
+ * that JUMP on every use. If the GPU has not finished the previous use yet, it cannot
+ * rewrite it yet: it puts into the ring a NO_OPERATION (0x100) with a parameter that on the
+ * Xbox halts the GPU and raises an interrupt; the D3D routine then does the patching
+ * (the same that FUN_003cd5e0 does directly when the GPU is already past) and the GPU
+ * continues with the JUMP to the push buffer. There is no interrupt here: the patching is
+ * done on the spot.
+ *   parameter (i << 5) | 0xD: record i of the device table (dev + 0x264 + i·20);
+ *   parameter (va << 5) | 0xC: record in the ring itself, at va (contiguous, 0x8xxxxxxx).
+ * Record (5 words): [0] return in the ring | flags, [1] next record, [2] final word of the
+ * push buffer (where the JUMP back goes), [3] fixup list, [4] base.
+ * Without this, the JUMP back kept pointing to the previous use: the emulated GPU looped
+ * up to the 4 M word cap, overwrote the D3D fence with old values and the game hung in
+ * D3D_BlockOnTime (at the start of the title demo).
  */
-#define D3D_G_PDEVICE_VA 0x003DAA88u /* D3D_g_pDevice de NGB (symbols.csv de H5) */
+#define D3D_G_PDEVICE_VA 0x003DAA88u /* D3D_g_pDevice of NGB (H5 symbols.csv) */
 static uint32_t g_pb_fixups;
 
-/* Memoria del juego accesible: RAM contigua o la imagen del XBE. */
+/* Accessible game memory: contiguous RAM or the XBE image. */
 static void *game_mem(uint32_t va, uint32_t len) {
     if (va >= NGB_CONTIG_BASE && va - NGB_CONTIG_BASE <= NGB_CONTIG_SIZE &&
         len <= NGB_CONTIG_SIZE - (va - NGB_CONTIG_BASE))
@@ -961,59 +963,59 @@ static void d3d_apply_fixups(uint32_t list, uint32_t base) {
     }
 }
 
-/* Último registro que cerró el fixup (su siguiente quedó en 0xFFFFFFFF), o 0. */
+/* Last record closed by the fixup (its next was left at 0xFFFFFFFF), or 0. */
 static uint32_t g_fix_tail;
 static uint32_t g_pb_fixups_late;
 
-/* Recorre la cadena de registros desde rec, como FUN_003cd5e0. */
+/* Walks the record chain from rec, like FUN_003cd5e0. */
 static void d3d_fixup_chain(uint32_t rec) {
     uint32_t n;
     for (n = 0; n < 64 && rec != 0 && rec != 0xFFFFFFFFu; n++) {
         uint32_t *r = (uint32_t *)game_mem(rec, 20), *end, w0, next;
         if (!r || (end = (uint32_t *)game_mem(r[2], 4)) == NULL) {
-            ngb_log("    · PGRAPH: fixup de push buffer con registro inválido 0x%08X", rec);
+            ngb_log("    · PGRAPH: push buffer fixup with invalid record 0x%08X", rec);
             g_fix_tail = 0;
             return;
         }
         w0 = r[0];
-        *end = (w0 & 0x0FFFFFFFu) + 1u; /* JUMP de vuelta al anillo */
+        *end = (w0 & 0x0FFFFFFFu) + 1u; /* JUMP back to the ring */
         if (w0 & 0x20000000u)
             d3d_apply_fixups(r[3], r[4]);
         if ((int32_t)w0 < 0)
             r[0] = w0 & 0xBFFFFFFFu;
-        /* En la Xbox esto lo hace la ISR; aquí corre en paralelo con el juego, que en
-           D3DDevice_RunPushBuffer lee el siguiente del último registro y, si es 0, le encadena uno
-           nuevo. Leer y cerrar en dos pasos perdía ese registro (su JUMP de vuelta quedaba viejo y
-           la GPU daba vueltas hasta el tope: el cuelgue del render). */
+        /* On the Xbox the ISR does this; here it runs in parallel with the game, which in
+           D3DDevice_RunPushBuffer reads the next one of the last record and, if it is 0, chains a
+           new one to it. Reading and closing in two steps lost that record (its JUMP back stayed
+           stale and the GPU looped up to the cap: the render hang). */
         next = (uint32_t)InterlockedExchange((volatile LONG *)&r[1], (LONG)0xFFFFFFFFu);
         g_fix_tail = rec;
         rec = next;
     }
 }
 
-/* El juego aún puede encadenar un registro al que acabamos de cerrar (leyó el 0 antes del
- * cierre y escribe después). Ese registro llega a la GPU sin interrupción propia: se atiende
- * antes de seguir un salto, y el JUMP del anillo al push buffer estático va después del enlace. */
+/* The game can still chain a record to the one we just closed (it read the 0 before the
+ * close and writes after). That record reaches the GPU without an interrupt of its own: it is
+ * served before following a jump, and the ring's JUMP to the static push buffer goes after the link. */
 static void d3d_fixup_late(void) {
     uint32_t *r, *dev, *last, next;
     if (!g_fix_tail)
         return;
     dev = (uint32_t *)game_mem(D3D_G_PDEVICE_VA, 4);
     r = (uint32_t *)game_mem(g_fix_tail, 20);
-    last = dev && *dev ? (uint32_t *)game_mem(*dev + 0x58u, 4) : NULL; /* último registro de D3D */
+    last = dev && *dev ? (uint32_t *)game_mem(*dev + 0x58u, 4) : NULL; /* last D3D record */
     if (!r || !last) {
         g_fix_tail = 0;
         return;
     }
-    if (*last == g_fix_tail) /* D3D no ha creado otro registro: aún puede encadenarlo */
+    if (*last == g_fix_tail) /* D3D has not created another record: it can still chain it */
         return;
     next = r[1];
-    g_fix_tail = 0; /* D3D ya pasó a otro registro: este no se encadena más */
+    g_fix_tail = 0; /* D3D moved on to another record: this one is no longer chained */
     if (next == 0xFFFFFFFFu || next == 0)
         return;
     {
-        /* Un enlace de verdad lleva, siguiendo los siguientes, al último registro de D3D. Si
-           no, el registro estaba en el anillo y el juego ya lo ha reescrito: es basura. */
+        /* A real link leads, following the nexts, to D3D's last record. If
+           not, the record was in the ring and the game has already rewritten it: it is garbage. */
         uint32_t k, at = next, *q;
         for (k = 0; k < 64 && at != *last; k++) {
             if ((q = (uint32_t *)game_mem(at, 20)) == NULL || q[1] == 0 || q[1] == 0xFFFFFFFFu)
@@ -1039,8 +1041,8 @@ static void d3d_pushbuffer_fixup(uint32_t param) {
     } else {
         d3d_fixup_chain((param >> 5) | 0x80000000u);
     }
-    /* La ISR de D3D descuenta las interrupciones de fixup pendientes (dev + 0x50) en 0xC y 0xD,
-       no en 0xE. D3D solo encadena registros mientras queda alguna pendiente. */
+    /* The D3D ISR discounts the pending fixup interrupts (dev + 0x50) at 0xC and 0xD,
+       not at 0xE. D3D only chains records while some is pending. */
     if ((param & 0x1Fu) != 0xEu && dev && *dev) {
         LONG *pending = (LONG *)game_mem(*dev + 0x50u, 4);
         if (pending && *pending > 0)
@@ -1085,42 +1087,42 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
         g_hist_frame0[method / 4]++;
     record(sub, method, param, non_inc);
     if (method == 0x0100 && (param & 0x1Fu) >= 0xCu && (param & 0x1Fu) <= 0xEu) {
-        d3d_pushbuffer_fixup(param); /* NO_OPERATION con interrupción: fixup de D3D */
+        d3d_pushbuffer_fixup(param); /* NO_OPERATION with interrupt: D3D fixup */
         return;
     }
     if (method == 0x0100 && (param & 0x1Fu) == 5u) {
-        /* D3D_BlockOnTime, con la GPU muy atrás, mete NO_OPERATION(5) y espera al KEVENT del
-         * dispositivo (+0x773 palabras) que su ISR señala cuando la GPU llega ahí. */
+        /* D3D_BlockOnTime, with the GPU far behind, puts in NO_OPERATION(5) and waits for the device
+         * KEVENT (+0x773 words) that its ISR signals when the GPU gets there. */
         uint32_t *dev = (uint32_t *)game_mem(D3D_G_PDEVICE_VA, 4);
         if (dev && *dev)
             ngb_ke_set_event(*dev + 0x773u * 4u);
         g_block_wakes++;
         return;
     }
-    if (method == 0) { /* SET_OBJECT: el handle se busca en RAMHT; la clase está en RAMIN */
+    if (method == 0) { /* SET_OBJECT: the handle is looked up in RAMHT; the class is in RAMIN */
         uint8_t *obj;
         if (ramht_lookup(param, &inst) && (obj = nv2a_ramin(inst, 4)) != NULL) {
             g_class[sub & 7] = obj[0];
             flush_run();
             if (logging())
-                pg_printf("   subcanal %u = objeto 0x%08X, clase 0x%02X (instancia 0x%05X)\n", sub,
+                pg_printf("   subchannel %u = object 0x%08X, class 0x%02X (instance 0x%05X)\n", sub,
                           param, obj[0], inst);
         }
         return;
     }
-    if (method >= 0x180 && method < 0x200) { /* SET_CONTEXT_DMA_*: handle -> instancia */
-        if (!g_class[sub & 7] || g_class[sub & 7] == 0x97) /* los de la clase 3D */
+    if (method >= 0x180 && method < 0x200) { /* SET_CONTEXT_DMA_*: handle -> instance */
+        if (!g_class[sub & 7] || g_class[sub & 7] == 0x97) /* those of the 3D class */
             g_dma[(method - 0x180) / 4] = ramht_lookup(param, &inst) ? inst : 0;
         return;
     }
     if (g_class[sub & 7] == 0x44 && method == 0x0310) {
-        /* Pattern, SET_MONOCHROME_COLOR0: el hardware lo deja en PGRAPH_PATT_COLOR0 (0x400B10).
-         * D3D lo usa de marcador: al esperar a la GPU compara sus bits 2-6 con su valla. */
+        /* Pattern, SET_MONOCHROME_COLOR0: the hardware leaves it in PGRAPH_PATT_COLOR0 (0x400B10).
+         * D3D uses it as a marker: when waiting for the GPU it compares its bits 2-6 with its fence. */
         InterlockedExchange(&g_patt_color0, (LONG)param);
         return;
     }
     if (g_class[sub & 7] && g_class[sub & 7] != 0x97)
-        return; /* objetos 2D (blit, superficies): solo se registran */
+        return; /* 2D objects (blit, surfaces): only logged */
     if (g_gl)
         gl_track(method, param);
     switch (method) {
@@ -1160,14 +1162,14 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
         if (param) {
             if (g_first_draw_frame == 0xFFFFFFFFu) {
                 g_first_draw_frame = g_frame;
-                pg_printf("==== primer BEGIN_END con primitivas en el frame %u\n", g_frame);
+                pg_printf("==== first BEGIN_END with primitives in frame %u\n", g_frame);
             }
             g_begin_end++;
             dump_active_textures();
             g_prims[param & 15]++;
         }
         break;
-    case 0x1810: /* DRAW_ARRAYS: inicio en los bits 0-23, número de vértices - 1 en 24-31 */
+    case 0x1810: /* DRAW_ARRAYS: start in bits 0-23, vertex count - 1 in 24-31 */
         g_draw_arrays++;
         if (g_gl) {
             uint32_t k, first = param & 0xFFFFFF, count = (param >> 24) + 1;
@@ -1175,7 +1177,7 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
                 aidx_push(first + k);
         }
         break;
-    case 0x1800: /* ARRAY_ELEMENT16: dos índices por palabra, el bajo primero */
+    case 0x1800: /* ARRAY_ELEMENT16: two indices per word, the low one first */
         if (g_gl) {
             aidx_push(param & 0xFFFF);
             aidx_push(param >> 16);
@@ -1186,7 +1188,7 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
             aidx_push(param);
         break;
     case 0x1818: inline_push(param); break; /* INLINE_ARRAY */
-    case 0x194C: g_vconst_diffuse = param; break; /* SET_VERTEX_DATA4UB del difuso */
+    case 0x194C: g_vconst_diffuse = param; break; /* SET_VERTEX_DATA4UB of the diffuse */
     case 0x0300: g_alpha_test = param & 1; break;
     case 0x0304: g_blend_enable = param & 1; break;
     case 0x033C: g_alpha_func = param; break;
@@ -1209,7 +1211,7 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
     case 0x1B1C: case 0x1B5C: case 0x1B9C: case 0x1BDC:
         g_tex_rect[(method - 0x1B00) / 0x40] = param;
         break;
-    case 0x1B00: case 0x1B40: case 0x1B80: case 0x1BC0: { /* SET_TEXTURE_OFFSET[etapa] */
+    case 0x1B00: case 0x1B40: case 0x1B80: case 0x1BC0: { /* SET_TEXTURE_OFFSET[stage] */
         uint32_t k;
         g_tex_offset[(method - 0x1B00) / 0x40] = param;
         g_tex_sets++;
@@ -1225,7 +1227,7 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
     case 0x1790: case 0x1794: case 0x1798: case 0x179C:
         g_vfmt[(method - 0x1760) / 4] = param;
         break;
-    case 0x1D70: { /* BACK_END_WRITE_SEMAPHORE_RELEASE: D3D espera ver este valor */
+    case 0x1D70: { /* BACK_END_WRITE_SEMAPHORE_RELEASE: D3D waits to see this value */
         uint32_t phys, limit;
         uint8_t *p;
         if (dma_object(g_dma[(0x1A4 - 0x180) / 4], &phys, &limit) &&
@@ -1234,7 +1236,7 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
         g_sem_releases++;
         break;
     }
-    case 0x0130: /* FLIP_STALL: fin de frame */
+    case 0x0130: /* FLIP_STALL: end of frame */
         flush_run();
         g_flips++;
         maybe_dump_ram();
@@ -1243,11 +1245,11 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
             perf_report();
         if (!g_gl && (g_flips <= PNG_FIRST_FLIPS || g_flips % 100 == 0)) {
             char why[48];
-            snprintf(why, sizeof why, "FLIP_STALL del frame %u", g_frame);
+            snprintf(why, sizeof why, "FLIP_STALL of frame %u", g_frame);
             dump_png(why);
         }
         if (logging())
-            pg_printf("==== fin del frame %u (FLIP_STALL): %u BEGIN_END, %u DRAW_ARRAYS, %u clears\n",
+            pg_printf("==== end of frame %u (FLIP_STALL): %u BEGIN_END, %u DRAW_ARRAYS, %u clears\n",
                       g_frame, g_begin_end, g_draw_arrays, g_clears);
         if (!g_frame0_done)
             g_frame0_done = 1;
@@ -1257,7 +1259,7 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
     }
 }
 
-/* Primeros saltos/llamadas del kick en curso, para explicar un kick enorme (kick_body). */
+/* First jumps/calls of the kick in progress, to explain a huge kick (kick_body). */
 static struct {
     int kind;
     uint32_t at, word, target;
@@ -1265,7 +1267,7 @@ static struct {
 static int g_kick_nev;
 
 static void on_event(void *user, int kind, uint32_t at, uint32_t word, uint32_t target) {
-    static const char *names[] = {"?", "JMP", "JMP antiguo", "CALL", "RETURN", "ERROR"};
+    static const char *names[] = {"?", "JMP", "old JMP", "CALL", "RETURN", "ERROR"};
     (void)user;
     if (kind == PB_EVENT_JUMP || kind == PB_EVENT_OLD_JUMP || kind == PB_EVENT_CALL)
         d3d_fixup_late();
@@ -1278,13 +1280,13 @@ static void on_event(void *user, int kind, uint32_t at, uint32_t word, uint32_t 
     }
     flush_run();
     if (logging() || kind == PB_EVENT_ERROR)
-        pg_printf("   pb %s en 0x%08X (palabra 0x%08X) -> 0x%08X\n", names[kind <= 5 ? kind : 0],
+        pg_printf("   pb %s at 0x%08X (word 0x%08X) -> 0x%08X\n", names[kind <= 5 ? kind : 0],
                   at, word, target);
 }
 
-/* Datos de vértices en bloque (INLINE_ARRAY y ARRAY_ELEMENT16/32): son dos tercios de las
- * palabras del push buffer, y por on_method cada una pagaba el despacho entero. Con el log
- * del frame activo van palabra a palabra, para que record() las vea. */
+/* Bulk vertex data (INLINE_ARRAY and ARRAY_ELEMENT16/32): they are two thirds of the push
+ * buffer words, and through on_method each one paid for the whole dispatch. With the frame
+ * log active they go word by word, so that record() sees them. */
 static int on_bulk(void *user, uint32_t sub, uint32_t method, const uint32_t *words, uint32_t n) {
     uint32_t i, *dst;
     (void)user;
@@ -1296,14 +1298,14 @@ static int on_bulk(void *user, uint32_t sub, uint32_t method, const uint32_t *wo
     if (!g_frame0_done)
         g_hist_frame0[method / 4] += n;
     g_run.active = 0;
-    if (g_gl && g_r.m[method / 4] != words[n - 1]) { /* lo mismo que gl_track con la última */
+    if (g_gl && g_r.m[method / 4] != words[n - 1]) { /* same as gl_track with the last one */
         g_r.m[method / 4] = words[n - 1];
         g_r.blk_stamp[method / PGL_BLOCK] = ++g_r.stamp;
     }
     if (method == 0x1818) {
         while (n) {
             uint32_t k = g_inline_cap - g_inline_n;
-            if (!k) { /* lleno: inline_push lo hace crecer, o descarta la palabra en el tope */
+            if (!k) { /* full: inline_push makes it grow, or drops the word at the cap */
                 inline_push(*words++);
                 n--;
                 if (g_inline_n == g_inline_cap)
@@ -1326,7 +1328,7 @@ static int on_bulk(void *user, uint32_t sub, uint32_t method, const uint32_t *wo
             aidx_push(words[i]);
         return 1;
     }
-    /* ARRAY_ELEMENT16: dos índices por palabra, el bajo primero */
+    /* ARRAY_ELEMENT16: two indices per word, the low one first */
     if (g_aidx_cap - g_aidx_n >= 2 * n) {
         dst = g_aidx + g_aidx_n;
         for (i = 0; i < n; i++) {
@@ -1343,12 +1345,12 @@ static int on_bulk(void *user, uint32_t sub, uint32_t method, const uint32_t *wo
     return 1;
 }
 
-/* Base en el host del objeto DMA del kick en curso (para on_readable). */
+/* Host base of the DMA object of the kick in progress (for on_readable). */
 static const uint8_t *g_kick_base;
 
-/* Un salto o una llamada del push buffer puede llevar a una página de la arena que el juego
- * nunca reservó (en la Xbox sería RAM con basura): leerla aquí sería un fallo de página en el
- * loader. Se comprueba al entrar en cada página. */
+/* A push buffer jump or call can lead to an arena page the game
+ * never reserved (on the Xbox it would be RAM with garbage): reading it here would be a page
+ * fault in the loader. It is checked on entering each page. */
 static int on_readable(void *user, uint32_t offset) {
     MEMORY_BASIC_INFORMATION m;
     (void)user;
@@ -1369,7 +1371,7 @@ static void kick_body(void *arg) {
     uint32_t phys = 0, limit = NGB_CONTIG_SIZE - 1, end, span;
     uint8_t *base;
     if (!dma_object(dma_instance << 4, &phys, &limit)) {
-        phys = 0; /* sin objeto DMA válido: GET/PUT como direcciones físicas */
+        phys = 0; /* no valid DMA object: GET/PUT as physical addresses */
         limit = NGB_CONTIG_SIZE - 1;
     }
     span = nv2a_phys_span(phys);
@@ -1378,7 +1380,7 @@ static void kick_body(void *arg) {
     base = span ? nv2a_phys(phys, 1) : NULL;
     g_kicks++;
     if (logging())
-        pg_printf("-- kick %u: GET 0x%08X -> PUT 0x%08X (objeto DMA 0x%05X: física 0x%08X)\n",
+        pg_printf("-- kick %u: GET 0x%08X -> PUT 0x%08X (DMA object 0x%05X: physical 0x%08X)\n",
                   g_kicks, get, put, dma_instance << 4, phys);
     g_kick_base = base;
     if (g_gl)
@@ -1391,33 +1393,33 @@ static void kick_body(void *arg) {
         end = base ? pb_run(&g_pb, base, limit + 1, get, put, 1u << 22, &k_cb, NULL) : put;
         g_perf.pb += qpc() - t_pb;
         if (g_words - words0 > (1u << 20)) {
-            ngb_log("    · PGRAPH: kick enorme: al entrar count %d, subrutina %d; eventos:", st_count,
+            ngb_log("    · PGRAPH: huge kick: on entry count %d, subroutine %d; events:", st_count,
                     st_sub);
             for (e = 0; e < g_kick_nev; e++)
-                ngb_log("        %d en 0x%08X (palabra 0x%08X) -> 0x%08X", g_kick_ev[e].kind,
+                ngb_log("        %d at 0x%08X (word 0x%08X) -> 0x%08X", g_kick_ev[e].kind,
                         g_kick_ev[e].at, g_kick_ev[e].word, g_kick_ev[e].target);
         }
-        /* Un kick normal son miles de palabras: uno de más de un millón es un replay de un
-           push buffer viejo (el síntoma de los cuelgues de D3D_BlockOnTime). */
+        /* A normal kick is thousands of words: one of over a million is a replay of an old
+           push buffer (the symptom of the D3D_BlockOnTime hangs). */
         if (g_words - words0 > (1u << 20))
-            ngb_log("    · PGRAPH: kick %u enorme: %u palabras, GET 0x%08X -> PUT 0x%08X, acaba en 0x%08X",
+            ngb_log("    · PGRAPH: huge kick %u: %u words, GET 0x%08X -> PUT 0x%08X, ends at 0x%08X",
                     g_kicks, g_words - words0, get, put, end);
     }
     flush_run();
     if (end != put) {
         int e;
-        pg_printf("   pb: parada en 0x%08X sin llegar a PUT 0x%08X; se fuerza GET = PUT\n", end, put);
-        ngb_log("    · PGRAPH: kick %u parado en 0x%08X (GET 0x%08X, PUT 0x%08X); primeros saltos:", g_kicks,
+        pg_printf("   pb: stopped at 0x%08X without reaching PUT 0x%08X; GET = PUT forced\n", end, put);
+        ngb_log("    · PGRAPH: kick %u stopped at 0x%08X (GET 0x%08X, PUT 0x%08X); first jumps:", g_kicks,
                 end, get, put);
         for (e = 0; e < g_kick_nev; e++)
-            ngb_log("        %d en 0x%08X (palabra 0x%08X) -> 0x%08X", g_kick_ev[e].kind, g_kick_ev[e].at,
+            ngb_log("        %d at 0x%08X (word 0x%08X) -> 0x%08X", g_kick_ev[e].kind, g_kick_ev[e].at,
                     g_kick_ev[e].word, g_kick_ev[e].target);
     }
     fflush(g_pg);
     g_perf.body += qpc() - t_body;
 }
 
-/* Hilo de render: consume la cola hasta vaciarla. El pacing va fuera de g_pg_lock. */
+/* Render thread: consumes the queue until it is empty. The pacing runs outside g_pg_lock. */
 static void kick_worker(void *unused) {
     (void)unused;
     for (;;) {
@@ -1441,7 +1443,7 @@ static void kick_worker(void *unused) {
         LeaveCriticalSection(&g_pg_lock);
         EnterCriticalSection(&g_q_lock);
         g_q_running = 0;
-        g_q_get = k.put; /* tramo hecho: GET llega a PUT */
+        g_q_get = k.put; /* span done: GET reaches PUT */
         LeaveCriticalSection(&g_q_lock);
         if (InterlockedExchange(&g_pace_pending, 0))
             pace();
@@ -1455,8 +1457,8 @@ uint32_t pgraph_fifo_get(uint32_t fallback) {
     if (!g_gl || !g_q_started)
         return fallback;
     EnterCriticalSection(&g_q_lock);
-    /* Mientras consume, la posición real (como el GET del hardware): D3D_BlockOnTime decide
-     * con ella dónde parchear una espera, y un GET atrasado le haría parchear lo ya pasado. */
+    /* While consuming, the real position (like the hardware GET): D3D_BlockOnTime decides
+     * with it where to patch a wait, and a stale GET would make it patch what is already past. */
     get = g_q_busy && g_q_running ? g_pb.cur : g_q_get;
     LeaveCriticalSection(&g_q_lock);
     return get;
@@ -1465,7 +1467,7 @@ uint32_t pgraph_fifo_get(uint32_t fallback) {
 void pgraph_fifo_set_get(uint32_t get) {
     if (!g_gl)
         return;
-    for (;;) { /* D3D solo mueve GET con el pusher parado: se espera a que acabe lo que haya */
+    for (;;) { /* D3D only moves GET with the pusher stopped: wait for whatever there is to finish */
         EnterCriticalSection(&g_q_lock);
         if (!g_q_busy) {
             g_q_get = get;
@@ -1480,7 +1482,7 @@ void pgraph_fifo_set_get(uint32_t get) {
 uint32_t pgraph_kick(uint32_t dma_instance, uint32_t get, uint32_t put) {
     kick_args_t k;
     LONGLONG t_kick = qpc();
-    if (g_gl) { /* asíncrono: se apunta el nuevo PUT y el hilo de render lo consume */
+    if (g_gl) { /* asynchronous: the new PUT is noted and the render thread consumes it */
         int post = 0;
         EnterCriticalSection(&g_q_lock);
         if (!g_q_started) {
@@ -1507,12 +1509,12 @@ uint32_t pgraph_kick(uint32_t dma_instance, uint32_t get, uint32_t put) {
     {
         LONGLONG t_call = qpc();
         g_perf.lockwait += t_call - t_kick;
-        kick_body(&k); /* rasterizador por software: síncrono */
+        kick_body(&k); /* software rasterizer: synchronous */
         g_perf.call += qpc() - t_call;
     }
     g_perf.kick += qpc() - t_kick;
     LeaveCriticalSection(&g_pg_lock);
-    return put; /* D3D espera GET == PUT: todo lo enviado cuenta como consumido */
+    return put; /* D3D waits for GET == PUT: everything sent counts as consumed */
 }
 
 void pgraph_vblank(uint32_t count) {
@@ -1528,7 +1530,7 @@ int pgraph_init(const char *log_path) {
     InitializeCriticalSection(&g_pg_lock);
     InitializeCriticalSection(&g_q_lock);
     if (fopen_s(&g_pg, log_path, "wb") || !g_pg) {
-        ngb_log("nv2a: no se puede crear el log de PGRAPH %s", log_path);
+        ngb_log("nv2a: cannot create the PGRAPH log %s", log_path);
         g_pg = NULL;
         return -1;
     }
@@ -1536,20 +1538,20 @@ int pgraph_init(const char *log_path) {
     dot = strrchr(g_png_base, '.');
     if (dot)
         *dot = 0;
-    pg_printf("ngb-loader H7a: métodos de PGRAPH (f = frame, s = subcanal, método, nombre NV097)\n");
-    ngb_log("nv2a: log de PGRAPH en %s", log_path);
+    pg_printf("ngb-loader H7a: PGRAPH methods (f = frame, s = subchannel, method, NV097 name)\n");
+    ngb_log("nv2a: PGRAPH log at %s", log_path);
     pgl_regs_defaults(&g_r);
     if (g_ngb_opts.window && g_ngb_opts.renderer != NGB_RENDERER_SOFT) {
         char why[400];
         if (!pgl_start((HWND)gfx_hwnd(), why, sizeof why)) {
             g_gl = 1;
             gfx_set_external(1);
-            ngb_log("pgraph: render OpenGL (%s)", why);
+            ngb_log("pgraph: OpenGL render (%s)", why);
         } else {
-            ngb_log("pgraph: sin OpenGL (%s): rasterizador por software", why);
+            ngb_log("pgraph: no OpenGL (%s): software rasterizer", why);
         }
     } else {
-        ngb_log("pgraph: rasterizador por software%s", g_ngb_opts.window ? "" : " (sin --window)");
+        ngb_log("pgraph: software rasterizer%s", g_ngb_opts.window ? "" : " (no --window)");
     }
     return 0;
 }
@@ -1565,7 +1567,7 @@ static void summary_hist(const uint32_t *hist, const char *title) {
         nv097_method_name(i * 4, name, sizeof name);
         ngb_log("  %8u  %04X %s", hist[i], i * 4, name);
     }
-    ngb_log("pgraph: %u métodos distintos", n);
+    ngb_log("pgraph: %u distinct methods", n);
 }
 
 void pgraph_summary(void) {
@@ -1573,40 +1575,40 @@ void pgraph_summary(void) {
     int locked = 0, tries;
     if (!g_pg)
         return;
-    /* Se llama desde ngb_stop con los hilos aún vivos: otro hilo puede estar a mitad de un
-       kick con el lock tomado. Se intenta ~0.5 s y, si no se consigue, se omite el resumen
-       (escribirlo sin lock correría contra el hilo que sigue ejecutando). */
+    /* Called from ngb_stop with the threads still alive: another thread may be in the middle
+       of a kick holding the lock. It tries for ~0.5 s and, if it fails, skips the summary
+       (writing it without the lock would race with the thread that keeps running). */
     for (tries = 0; !(locked = TryEnterCriticalSection(&g_pg_lock)); tries++) {
         if (tries >= 50) {
-            ngb_log("pgraph: resumen omitido (lock ocupado)%s%s",
-                    g_perf.last[0] ? "; última medida: " : "", g_perf.last);
-            pgl_summary(); /* solo contadores: no necesita el lock */
+            ngb_log("pgraph: summary skipped (lock busy)%s%s",
+                    g_perf.last[0] ? "; last measurement: " : "", g_perf.last);
+            pgl_summary(); /* counters only: does not need the lock */
             return;
         }
         Sleep(10);
     }
     flush_run();
     if (g_perf.last[0])
-        ngb_log("pgraph: última medida: %s", g_perf.last);
-    ngb_log("pgraph: %u kicks, %u palabras de datos, %u frames (FLIP_STALL), %u BEGIN_END, "
-            "%u DRAW_ARRAYS, %u clears (%u de color), %u semáforos, %u errores del pb, "
-            "%u fixups de push buffer (%u encadenados tarde), %u esperas de D3D_BlockOnTime despertadas",
+        ngb_log("pgraph: last measurement: %s", g_perf.last);
+    ngb_log("pgraph: %u kicks, %u data words, %u frames (FLIP_STALL), %u BEGIN_END, "
+            "%u DRAW_ARRAYS, %u clears (%u color), %u semaphores, %u pb errors, "
+            "%u push buffer fixups (%u chained late), %u D3D_BlockOnTime waits woken up",
             g_kicks, g_words, g_flips, g_begin_end, g_draw_arrays, g_clears, g_color_clears,
             g_sem_releases, g_pb.errors, g_pb_fixups, g_pb_fixups_late, g_block_wakes);
-    ngb_log("pgraph: rasterizador: %u triángulos, %u píxeles escritos; %u primitivas sin dibujar "
-            "(%u con posición no XYZRHW, %u sin superficie, %u puntos/líneas); %u DRAW_ARRAYS y "
-            "ARRAY_ELEMENT sin dibujar",
+    ngb_log("pgraph: rasterizer: %u triangles, %u pixels written; %u primitives not drawn "
+            "(%u with non-XYZRHW position, %u without surface, %u points/lines); %u DRAW_ARRAYS and "
+            "ARRAY_ELEMENT not drawn",
             g_drawn_tris, g_drawn_pixels, g_skipped_draws, g_skip_pos, g_skip_target, g_skip_prim,
             g_draw_arrays + g_hist[0x1800 / 4] + g_hist[0x1808 / 4]);
-    ngb_log("pgraph: texturas: %u SET_TEXTURE_OFFSET, %u offsets distintos; primer frame con "
-            "primitivas: %d; %d PNG", g_tex_sets, g_ntex,
+    ngb_log("pgraph: textures: %u SET_TEXTURE_OFFSET, %u distinct offsets; first frame with "
+            "primitives: %d; %d PNG", g_tex_sets, g_ntex,
             g_first_draw_frame == 0xFFFFFFFFu ? -1 : (int)g_first_draw_frame, g_png_count);
     pgl_summary();
     for (i = 1; i < 16; i++)
         if (g_prims[i])
-            ngb_log("  primitivas %-14s %u", prim_name(i), g_prims[i]);
-    summary_hist(g_hist_frame0, "primer frame (hasta el primer FLIP_STALL), por método:");
-    summary_hist(g_hist, "total por método:");
+            ngb_log("  primitives %-14s %u", prim_name(i), g_prims[i]);
+    summary_hist(g_hist_frame0, "first frame (up to the first FLIP_STALL), by method:");
+    summary_hist(g_hist, "total by method:");
     fflush(g_pg);
     if (locked)
         LeaveCriticalSection(&g_pg_lock);

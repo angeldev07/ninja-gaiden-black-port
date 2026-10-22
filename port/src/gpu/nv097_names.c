@@ -1,9 +1,10 @@
 /*
- * nv097_names.c: nombres de los métodos de la clase 3D del NV2A (Kelvin, 0x97).
+ * nv097_names.c: names of the NV2A 3D class methods (Kelvin, 0x97).
  *
- * Nombres y offsets de xemu hw/xbox/nv2a/nv2a_regs.h (que los toma de envytools/nouveau);
- * son la interfaz del hardware. Los grupos repetidos (texturas cada 0x40, luces cada 0x80,
- * matrices y programas de transformación) se nombran por su primera entrada más un índice.
+ * Names and offsets from xemu hw/xbox/nv2a/nv2a_regs.h (which takes them from
+ * envytools/nouveau); they are the hardware interface. Repeated groups (textures every
+ * 0x40, lights every 0x80, matrices and transform programs) are named by their first entry
+ * plus an index.
  */
 #include <stdio.h>
 #include <string.h>
@@ -237,7 +238,7 @@ static const method_name_t k_names[] = {
 const char *nv097_method_name(uint32_t method, char *buf, size_t buflen) {
     uint32_t m = method & 0x1FFCu, base = m, index = 0;
     size_t lo = 0, hi = NNAMES;
-    /* Grupos con zancada: 4 etapas de textura (0x40) y 8 luces (0x80). */
+    /* Strided groups: 4 texture stages (0x40) and 8 lights (0x80). */
     if (m >= 0x1B00 && m < 0x1C00) {
         index = (m - 0x1B00) / 0x40;
         base = 0x1B00 + (m - 0x1B00) % 0x40;
@@ -245,7 +246,7 @@ const char *nv097_method_name(uint32_t method, char *buf, size_t buflen) {
         index = (m - 0x1000) / 0x80;
         base = 0x1000 + (m - 0x1000) % 0x80;
     }
-    /* La última entrada con offset <= base. */
+    /* The last entry with offset <= base. */
     while (lo < hi) {
         size_t mid = (lo + hi) / 2;
         if (k_names[mid].offset <= base)

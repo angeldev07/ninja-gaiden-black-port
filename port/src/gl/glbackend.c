@@ -1,14 +1,14 @@
 /*
- * glbackend.c: contexto WGL 4.x, FBO offscreen, compilación de GLSL y dibujo (glbackend.h).
+ * glbackend.c: WGL 4.x context, offscreen FBO, GLSL compilation and drawing (glbackend.h).
  *
- * Arranque de WGL en dos pasos, porque `wglCreateContextAttribsARB` solo se puede pedir con
- * un contexto actual: (1) formato de píxel en el DC, contexto 1.1 temporal y carga de esa
- * función; (2) contexto core 4.x (se prueba de 4.6 a 4.0, el GLSL generado es #version 400),
- * se borra el temporal y se cargan las demás funciones (glload.c).
+ * WGL startup takes two steps, because `wglCreateContextAttribsARB` can only be requested
+ * with a current context: (1) pixel format on the DC, temporary 1.1 context and loading of
+ * that function; (2) core 4.x context (tried from 4.6 down to 4.0, the generated GLSL is
+ * #version 400), the temporary one is deleted and the other functions are loaded (glload.c).
  *
- * Se dibuja siempre en un FBO (color RGBA8 y depth24/stencil8 en renderbuffers), nunca en
- * la ventana: así el resultado no depende de que la ventana esté visible y glb_read_rgba
- * es exacto. glb_present lo copia a la ventana con glBlitFramebuffer.
+ * It always draws into an FBO (RGBA8 color and depth24/stencil8 in renderbuffers), never to
+ * the window: this way the result does not depend on the window being visible and
+ * glb_read_rgba is exact. glb_present copies it to the window with glBlitFramebuffer.
  */
 #include "glbackend.h"
 
@@ -40,14 +40,14 @@ static struct {
 
 const char *glb_error_text(int code) {
     switch (code) {
-    case GLB_ERR_ARGS: return "argumentos inválidos o backend sin iniciar";
-    case GLB_ERR_WINDOW: return "no se pudo crear la ventana o elegir el formato de píxel";
-    case GLB_ERR_CONTEXT: return "no hay contexto OpenGL 4.x";
-    case GLB_ERR_FUNCTIONS: return "faltan funciones de OpenGL 4.x";
-    case GLB_ERR_FBO: return "el framebuffer no está completo";
-    case GLB_ERR_COMPILE: return "el driver rechazó el shader";
-    case GLB_ERR_GL: return "error de OpenGL";
-    default: return code >= 0 ? "ok" : "error desconocido";
+    case GLB_ERR_ARGS: return "invalid arguments or backend not initialized";
+    case GLB_ERR_WINDOW: return "could not create the window or choose the pixel format";
+    case GLB_ERR_CONTEXT: return "no OpenGL 4.x context";
+    case GLB_ERR_FUNCTIONS: return "OpenGL 4.x functions are missing";
+    case GLB_ERR_FBO: return "the framebuffer is not complete";
+    case GLB_ERR_COMPILE: return "the driver rejected the shader";
+    case GLB_ERR_GL: return "OpenGL error";
+    default: return code >= 0 ? "ok" : "unknown error";
     }
 }
 
@@ -55,7 +55,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcA(hwnd, msg, wp, lp);
 }
 
-/* Icono del recurso 1 de este módulo (ngb-core.dll, res\ngb.rc); NULL si no lo tiene. */
+/* Icon of resource 1 of this module (ngb-core.dll, res\ngb.rc); NULL if it has none. */
 static HICON load_icon(void) {
     HMODULE mod = NULL;
     if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
@@ -89,7 +89,7 @@ static int create_window(int width, int height) {
     rect.right = width;
     rect.bottom = height;
     AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
-    /* Centrada en el área de trabajo del monitor donde está el cursor. */
+    /* Centered in the work area of the monitor where the cursor is. */
     x = CW_USEDEFAULT;
     y = CW_USEDEFAULT;
     if (GetCursorPos(&cursor)) {
@@ -122,7 +122,7 @@ static int set_pixel_format(HDC dc) {
     PIXELFORMATDESCRIPTOR pfd;
     int format;
     if (GetPixelFormat(dc) != 0) {
-        return 0; /* la ventana del llamante ya tiene uno: se respeta */
+        return 0; /* the caller's window already has one: it is respected */
     }
     memset(&pfd, 0, sizeof pfd);
     pfd.nSize = sizeof pfd;
@@ -253,7 +253,7 @@ int glb_init(HWND hwnd, int width, int height) {
         err = create_targets();
     }
     if (err) {
-        g.ready = 1; /* para que glb_shutdown libere lo creado */
+        g.ready = 1; /* so that glb_shutdown releases what was created */
         glb_shutdown();
         return err;
     }
@@ -360,7 +360,7 @@ void glb_delete_program(unsigned program) {
     }
 }
 
-/* El objeto de textura de la unidad para `target`; uno nuevo si tenía otro tipo. */
+/* The unit's texture object for `target`; a new one if it had another type. */
 static GLuint texture_for(int unit, GLenum target) {
     if (g.textures[unit] && g.targets[unit] != target) {
         glDeleteTextures(1, &g.textures[unit]);
@@ -381,7 +381,7 @@ int glb_set_texture(int unit, int width, int height, const uint8_t *rgba, int li
     ngl_glActiveTexture(GL_TEXTURE0 + (GLenum)unit);
     glBindTexture(GL_TEXTURE_2D, texture_for(unit, GL_TEXTURE_2D));
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    /* La primera fila subida es t = 0: con las UV de D3D (v = 0 arriba) no hay que voltear. */
+    /* The first uploaded row is t = 0: with D3D UVs (v = 0 at the top) there is no need to flip. */
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
@@ -413,7 +413,7 @@ static void set_uniform(GLuint program, const glb_uniform *u) {
     }
     loc = ngl_glGetUniformLocation(program, u->name);
     if (loc < 0) {
-        return; /* el shader no lo usa (o el driver lo eliminó) */
+        return; /* the shader does not use it (or the driver optimized it out) */
     }
     switch (u->kind) {
     case GLB_U_FLOAT: ngl_glUniform1fv(loc, u->count, u->values); break;
@@ -434,12 +434,12 @@ static GLenum prim_mode(glb_prim prim) {
     case GLB_QUAD_STRIP: return GL_TRIANGLE_STRIP;
     case GLB_TRIANGLE_FAN:
     case GLB_POLYGON: return GL_TRIANGLE_FAN;
-    default: return GL_TRIANGLES; /* TRIANGLES y QUADS (ya partidos) */
+    default: return GL_TRIANGLES; /* TRIANGLES and QUADS (already split) */
     }
 }
 
 int glb_prim_from_nv2a(uint32_t op, glb_prim *out) {
-    /* NV097_SET_BEGIN_END_OP_*: 1 POINTS ... 10 POLYGON (0 es END). */
+    /* NV097_SET_BEGIN_END_OP_*: 1 POINTS ... 10 POLYGON (0 is END). */
     static const glb_prim map[11] = {
         GLB_POINTS, GLB_POINTS, GLB_LINES, GLB_LINE_LOOP, GLB_LINE_STRIP, GLB_TRIANGLES,
         GLB_TRIANGLE_STRIP, GLB_TRIANGLE_FAN, GLB_QUADS, GLB_QUAD_STRIP, GLB_POLYGON,
@@ -452,7 +452,7 @@ int glb_prim_from_nv2a(uint32_t op, glb_prim *out) {
 }
 
 void glb_decode_cmp(uint32_t packed, float out[3]) {
-    /* x: bits 0-10, y: 11-21 (11 bits con signo), z: 22-31 (10 bits con signo). */
+    /* x: bits 0-10, y: 11-21 (11 signed bits), z: 22-31 (10 signed bits). */
     int32_t x = (int32_t)(packed << 21) >> 21;
     int32_t y = (int32_t)(packed << 10) >> 21;
     int32_t z = (int32_t)packed >> 22;
@@ -468,7 +468,7 @@ int glb_attrib_from_nv2a(int input, uint32_t array_format, uint32_t offset, glb_
     }
     memset(out, 0, sizeof *out);
     if (size == 0) {
-        return 1; /* atributo desactivado */
+        return 1; /* disabled attribute */
     }
     out->input = input;
     out->components = (int)size;
@@ -504,7 +504,7 @@ static int attrib_stride(const glb_format *fmt, const glb_attrib *a) {
     return a->stride > 0 ? a->stride : fmt->stride;
 }
 
-/* Comprueba el formato y que `n_vertices` vértices de cada atributo quepan en el buffer. */
+/* Checks the format and that `n_vertices` vertices of each attribute fit in the buffer. */
 static int valid_format(const glb_format *fmt, size_t vertex_bytes, size_t n_vertices) {
     int k;
     if (!fmt || fmt->stride <= 0 || fmt->n_attribs < 0 || fmt->n_attribs > GLB_MAX_INPUTS) {
@@ -556,7 +556,7 @@ static uint32_t index_at(const glb_draw_call *c, int i) {
     return ((const uint32_t *)c->indices)[i];
 }
 
-/* QUADS -> triángulos (0 1 2, 0 2 3) como lista de índices u32 (por los índices si los hay). */
+/* QUADS -> triangles (0 1 2, 0 2 3) as a u32 index list (through the indices if there are any). */
 static uint32_t *split_quads(const glb_draw_call *c, int *n_out) {
     int quads = c->count / 4, q;
     uint32_t *out = (uint32_t *)malloc(sizeof(uint32_t) * 6 * (size_t)(quads ? quads : 1));
@@ -575,7 +575,7 @@ static uint32_t *split_quads(const glb_draw_call *c, int *n_out) {
     return out;
 }
 
-/* El buffer que se sube: los vértices y, detrás, los CMP ya pasados a float. */
+/* The buffer that gets uploaded: the vertices and, after them, the CMPs already converted to float. */
 static uint8_t *build_vertex_buffer(const glb_draw_call *c, size_t n_vertices, size_t *total,
                                     size_t cmp_offset[GLB_MAX_INPUTS]) {
     const glb_format *fmt = c->format;
@@ -762,7 +762,7 @@ int glb_read_rgba(uint8_t *buf, size_t buflen) {
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glFinish();
     glReadPixels(0, 0, g.width, g.height, GL_RGBA, GL_UNSIGNED_BYTE, buf);
-    /* OpenGL da la fila de abajo primero: se voltea para tener la imagen de arriba abajo. */
+    /* OpenGL gives the bottom row first: it is flipped to get the image top to bottom. */
     for (y = 0; y < g.height / 2; y++) {
         uint8_t *a = buf + row * (size_t)y;
         uint8_t *b = buf + row * (size_t)(g.height - 1 - y);

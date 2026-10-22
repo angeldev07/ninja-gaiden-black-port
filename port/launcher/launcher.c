@@ -1135,10 +1135,10 @@ static rgb_t log_line_color(const wchar_t *line) {
     for (i = 0; i < 159 && line[i]; i++)
         low[i] = (wchar_t)towlower(line[i]);
     low[i] = 0;
-    if (wcsstr(low, L"crash") || wcsstr(low, L"excepci") || wcsstr(low, L"fallo") ||
-        wcsstr(low, L"unimplemented") || wcsstr(low, L"sin implementar:"))
+    if (wcsstr(low, L"crash") || wcsstr(low, L"exception") || wcsstr(low, L"failed") ||
+        wcsstr(low, L"unimplemented") || wcsstr(low, L"not implemented"))
         return C_BAD;
-    if (wcsstr(low, L"----") || wcsstr(low, L"====") || wcsstr(low, L"no se pudo"))
+    if (wcsstr(low, L"----") || wcsstr(low, L"====") || wcsstr(low, L"could not"))
         return C_WARN;
     return 0xbdc0ca;
 }

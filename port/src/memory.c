@@ -1,12 +1,12 @@
 /*
- * memory.c: espacio de direcciones Xbox dentro del proceso Win32.
+ * memory.c: Xbox address space inside the Win32 process.
  *
- * - Imagen del XBE: el exe (loader_stub.c) se enlaza en 0x10000 con /FIXED y una sección
- *   BSS gigante, así que el cargador de Windows ya reservó [0x10000, NGB_RESERVE_END)
- *   al crear el proceso, antes de que heaps, pilas o mapeos de NLS ocupen la zona baja.
- *   Aquí solo se cambia la protección a RWX y se copian cabeceras y secciones.
- * - Memoria contigua: arena de 64 MB en 0x80000000 (el exe es LARGEADDRESSAWARE), como
- *   la ventana física de la Xbox; MmGetPhysicalAddress = va - 0x80000000.
+ * - XBE image: the exe (loader_stub.c) is linked at 0x10000 with /FIXED and a giant BSS
+ *   section, so the Windows loader has already reserved [0x10000, NGB_RESERVE_END)
+ *   when creating the process, before heaps, stacks or NLS mappings take the low area.
+ *   Here we only change the protection to RWX and copy headers and sections.
+ * - Contiguous memory: 64 MB arena at 0x80000000 (the exe is LARGEADDRESSAWARE), like
+ *   the physical window of the Xbox; MmGetPhysicalAddress = va - 0x80000000.
  */
 #include "ngb.h"
 
@@ -23,16 +23,16 @@ typedef struct contig_block {
 } contig_block_t;
 
 static uint8_t *g_contig;
-static uint32_t g_contig_top; /* offset del siguiente bloque libre */
+static uint32_t g_contig_top; /* offset of the next free block */
 static contig_block_t g_blocks[MAX_CONTIG_BLOCKS];
 static int g_nblocks;
 static CRITICAL_SECTION g_contig_lock;
 
 /*
- * Imagen del kernel falsa en 0x80010000. XAPI lee la cabecera PE de xboxkrnl.exe (que en
- * Xbox está en 0x80010000) para buscar su sección INIT. Se deja una cabecera PE mínima
- * con una sola sección ".text": no hay INIT y XAPI se salta ese paso. El primer MB de la
- * arena contigua queda reservado para esto (como la RAM baja que ocupa el kernel real).
+ * Fake kernel image at 0x80010000. XAPI reads the PE header of xboxkrnl.exe (which on Xbox
+ * is at 0x80010000) to look for its INIT section. A minimal PE header is left with a single
+ * ".text" section: there is no INIT and XAPI skips that step. The first MB of the
+ * contiguous arena is reserved for this (like the low RAM that the real kernel occupies).
  */
 #define NGB_KERNEL_IMAGE 0x80010000u
 #define NGB_CONTIG_FIRST 0x00100000u
@@ -56,18 +56,18 @@ static void fake_kernel_image(void) {
     *(uint32_t *)(k + 0x80 + 0x18 + 0x1C) = NGB_KERNEL_IMAGE; /* ImageBase */
     memcpy(k + 0x80 + 0x18 + 0xE0, ".text", 5);
     g_contig_top = NGB_CONTIG_FIRST;
-    ngb_log("memoria: cabecera PE falsa de xboxkrnl en 0x%08X (sin sección INIT)", NGB_KERNEL_IMAGE);
+    ngb_log("memory: fake xboxkrnl PE header at 0x%08X (no INIT section)", NGB_KERNEL_IMAGE);
 }
 
-/* Toda la zona [0x10000, sombra + 4 KB) tiene que ser la imagen del exe stub. */
+/* The whole area [0x10000, shadow + 4 KB) has to be the stub exe's image. */
 static int check_reserve(void) {
     uint32_t a = NGB_RESERVE_BASE;
     while (a < NGB_PE_SHADOW + 0x1000u) {
         MEMORY_BASIC_INFORMATION m;
         if (!VirtualQuery((void *)(uintptr_t)a, &m, sizeof m) || m.Type != MEM_IMAGE ||
             (uint32_t)(uintptr_t)m.AllocationBase != NGB_RESERVE_BASE) {
-            ngb_log("memoria: 0x%08X no pertenece a la imagen del exe en 0x%08X: ¿se lanzó "
-                    "ngb-loader.exe enlazado con /BASE:0x10000 /FIXED?", a, NGB_RESERVE_BASE);
+            ngb_log("memory: 0x%08X does not belong to the exe image at 0x%08X: was "
+                    "ngb-loader.exe launched linked with /BASE:0x10000 /FIXED?", a, NGB_RESERVE_BASE);
             return -1;
         }
         a = (uint32_t)(uintptr_t)m.BaseAddress + (uint32_t)m.RegionSize;
@@ -82,37 +82,37 @@ int ngb_memory_init(void) {
         return -1;
     if (!VirtualProtect((void *)(uintptr_t)NGB_RESERVE_BASE,
                         NGB_PE_SHADOW + 0x1000u - NGB_RESERVE_BASE, PAGE_EXECUTE_READWRITE, &old)) {
-        ngb_log("memoria: VirtualProtect de la reserva [0x%08X, 0x%08X) falló (%lu)",
+        ngb_log("memory: VirtualProtect of the reservation [0x%08X, 0x%08X) failed (%lu)",
                 NGB_RESERVE_BASE, NGB_RESERVE_END, GetLastError());
         return -1;
     }
-    /* El último MB queda libre: es la RAM de instancias, que gpu/nv2a.c mapea dos veces. */
+    /* The last MB stays free: it is the instance RAM, which gpu/nv2a.c maps twice. */
     g_contig = (uint8_t *)VirtualAlloc((void *)(uintptr_t)NGB_CONTIG_BASE,
                                        NGB_CONTIG_SIZE - 0x100000u,
                                        MEM_RESERVE | MEM_WRITE_WATCH, PAGE_EXECUTE_READWRITE);
     if (!g_contig) {
         g_contig = (uint8_t *)VirtualAlloc(NULL, NGB_CONTIG_SIZE, MEM_RESERVE | MEM_WRITE_WATCH,
                                            PAGE_EXECUTE_READWRITE);
-        ngb_log("memoria: 0x%08X ocupado; arena contigua en %p", NGB_CONTIG_BASE, g_contig);
+        ngb_log("memory: 0x%08X is taken; contiguous arena at %p", NGB_CONTIG_BASE, g_contig);
     }
     if (!g_contig)
         return -1;
     fake_kernel_image();
-    ngb_log("memoria: imagen [0x%08X, 0x%08X) RWX; arena contigua [%p, +0x%X)", NGB_RESERVE_BASE,
+    ngb_log("memory: image [0x%08X, 0x%08X) RWX; contiguous arena [%p, +0x%X)", NGB_RESERVE_BASE,
             NGB_RESERVE_END, g_contig, NGB_CONTIG_SIZE);
     return 0;
 }
 
 /*
- * Cabecera PE "sombra". La cabecera del XBE pisa la del exe en 0x10000, pero Windows la
- * sigue leyendo directamente de la base de la imagen: sin ella CreateThread falla con
- * ERROR_BAD_EXE_FORMAT y los hilos nuevos mueren al inicializarse en ntdll. Solución:
- *   - las NT headers originales se copian a NGB_PE_SHADOW (cola de la BSS del exe, fuera
- *     del rango del XBE);
- *   - en 0x10000 se escribe "MZ" (pisa "XB" del magic XBEH) y en 0x1003C (e_lfanew, que
- *     cae dentro de la firma RSA del XBE, sin uso en ejecución) el offset a la sombra.
- * El código Xbox no relee el magic ni la firma (solo el kernel al cargar), así que el
- * cambio es invisible para el juego; ver port/README.md.
+ * "Shadow" PE header. The XBE header overwrites the exe's at 0x10000, but Windows keeps
+ * reading it directly from the image base: without it CreateThread fails with
+ * ERROR_BAD_EXE_FORMAT and new threads die while initializing in ntdll. Solution:
+ *   - the original NT headers are copied to NGB_PE_SHADOW (tail of the exe's BSS, outside
+ *     the XBE range);
+ *   - at 0x10000 "MZ" is written (overwriting "XB" of the XBEH magic) and at 0x1003C (e_lfanew,
+ *     which falls inside the XBE RSA signature, unused at run time) the offset to the shadow.
+ * Xbox code does not re-read the magic or the signature (only the kernel does, when loading),
+ * so the change is invisible to the game; see port/README.md.
  */
 static uint8_t g_pe_header[0x1000];
 
@@ -130,26 +130,26 @@ static void install_pe_shadow(void) {
     base[0] = 'M';
     base[1] = 'Z';
     *(uint32_t *)(base + 0x3C) = NGB_PE_SHADOW - NGB_RESERVE_BASE;
-    ngb_log("memoria: cabecera PE sombra en 0x%08X (%u B); e_lfanew en 0x1003C", NGB_PE_SHADOW,
+    ngb_log("memory: shadow PE header at 0x%08X (%u B); e_lfanew at 0x1003C", NGB_PE_SHADOW,
             size);
 }
 
 int ngb_memory_map_xbe(const xbe_t *xbe) {
     uint32_t i, end = xbe->base + xbe->size_of_image;
     if (xbe->base != NGB_RESERVE_BASE || end > NGB_RESERVE_END || end < xbe->base) {
-        ngb_log("memoria: imagen [0x%08X, 0x%08X) fuera de la reserva [0x%08X, 0x%08X)",
+        ngb_log("memory: image [0x%08X, 0x%08X) outside the reservation [0x%08X, 0x%08X)",
                 xbe->base, end, NGB_RESERVE_BASE, NGB_RESERVE_END);
         return -1;
     }
     save_pe_header();
-    /* Pisa la cabecera PE y el código del exe stub: ya no se ejecutan (ver loader_stub.c). */
+    /* Overwrites the PE header and the stub exe's code: they no longer run (see loader_stub.c). */
     memset((void *)(uintptr_t)xbe->base, 0, NGB_RESERVE_END - NGB_RESERVE_BASE);
     memcpy((void *)(uintptr_t)xbe->base, xbe->data, xbe->size_of_headers);
     for (i = 0; i < xbe->section_count; i++) {
         const xbe_section_t *s = &xbe->sections[i];
         uint32_t backed = s->rsize < s->vsize ? s->rsize : s->vsize;
         memcpy((void *)(uintptr_t)s->va, xbe->data + s->raw, backed);
-        ngb_log("memoria: sección %-10s [0x%08X, 0x%08X) %6u KB del archivo, flags 0x%02X",
+        ngb_log("memory: section %-10s [0x%08X, 0x%08X) %6u KB from the file, flags 0x%02X",
                 s->name, s->va, s->va + s->vsize, backed / 1024, s->flags);
     }
     install_pe_shadow();
@@ -164,7 +164,7 @@ int ngb_memory_patch_thunk(const xbe_t *xbe) {
         uint32_t entry = *slot, ordinal = entry & 0x7FFFFFFFu;
         const ngb_kexport_t *e = (entry & 0x80000000u) ? ngb_kexport(ordinal) : NULL;
         if (!e) {
-            ngb_log("thunk: slot 0x%08X = 0x%08X sin export conocido", (uint32_t)(uintptr_t)slot,
+            ngb_log("thunk: slot 0x%08X = 0x%08X with no known export", (uint32_t)(uintptr_t)slot,
                     entry);
             nbad++;
             continue;
@@ -177,15 +177,15 @@ int ngb_memory_patch_thunk(const xbe_t *xbe) {
             ndata++;
         }
     }
-    ngb_log("thunk: 0x%08X, %d funciones + %d variables enlazadas, %d desconocidas", xbe->thunk,
+    ngb_log("thunk: 0x%08X, %d functions + %d variables linked, %d unknown", xbe->thunk,
             nfunc, ndata, nbad);
     return nbad ? -1 : 0;
 }
 
 /*
- * Lecturas del IRQL por fs:[0x24]: `64 0F B6 /r 24 00 00 00` (movzx r32, byte ptr fs:[24h]).
- * Como fs:[0x24] sigue siendo el TID de Windows (ver thread.c), se cambian por
- * `mov r32, 0` (B8+r imm32) y 3 NOP: el código Xbox ve PASSIVE_LEVEL y los flags no cambian.
+ * IRQL reads through fs:[0x24]: `64 0F B6 /r 24 00 00 00` (movzx r32, byte ptr fs:[24h]).
+ * Since fs:[0x24] is still the Windows TID (see thread.c), they are replaced with
+ * `mov r32, 0` (B8+r imm32) and 3 NOPs: Xbox code sees PASSIVE_LEVEL and the flags do not change.
  */
 int ngb_memory_patch_irql(const xbe_t *xbe) {
     uint32_t i, n = 0;
@@ -203,7 +203,7 @@ int ngb_memory_patch_irql(const xbe_t *xbe) {
             p[k] = (uint8_t)(0xB8 + ((modrm >> 3) & 7));
             p[k + 1] = p[k + 2] = p[k + 3] = p[k + 4] = 0;
             p[k + 5] = p[k + 6] = p[k + 7] = 0x90;
-            ngb_log("memoria: IRQL fs:[0x24] en 0x%08X -> mov r32, 0", s->va + k);
+            ngb_log("memory: IRQL fs:[0x24] at 0x%08X -> mov r32, 0", s->va + k);
             n++;
             k += 7;
         }
@@ -222,7 +222,7 @@ void *ngb_contig_alloc(uint32_t size, uint32_t align, uint32_t lowest, uint32_t 
         align = 0x1000;
     size = (size + 0xFFFu) & ~0xFFFu;
     EnterCriticalSection(&g_contig_lock);
-    /* Primero, un hueco liberado del mismo tamaño o mayor que cumpla la alineación. */
+    /* First, a freed hole of the same size or larger that meets the alignment. */
     for (i = 0; i < (uint32_t)g_nblocks; i++) {
         contig_block_t *b = &g_blocks[i];
         if (!b->used && b->size >= size && (b->base % align) == 0) {
@@ -282,10 +282,10 @@ uint32_t ngb_contig_size(const void *p) {
     return size;
 }
 
-/* Páginas de la arena escritas desde la última llamada (write watch, H7c): sus offsets
- * físicos van a `phys` (hasta `cap`) y el contador se reinicia. Devuelve cuántas hay, o
- * (size_t)-1 si Windows no da el write watch. El render las usa para no volver a hashear
- * texturas y vértices que la CPU no ha tocado. */
+/* Arena pages written since the last call (write watch, H7c): their physical offsets
+ * go to `phys` (up to `cap`) and the counter is reset. Returns how many there are, or
+ * (size_t)-1 if Windows does not provide write watch. The render uses them to avoid
+ * re-hashing textures and vertices that the CPU has not touched. */
 size_t ngb_contig_written(uint32_t *phys, size_t cap) {
     static PVOID addrs[4096];
     size_t total = 0;

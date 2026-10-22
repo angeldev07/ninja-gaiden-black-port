@@ -1,9 +1,9 @@
 /*
- * symbols.c: nombres de funciones del XBE para el log (--symbols CSV).
+ * symbols.c: XBE function names for the log (--symbols CSV).
  *
- * El CSV sale del análisis con Ghidra (H5): `address,name,library,kind,section`, con la
- * dirección en hex. Vive en NGB_DATA (nunca en el repo). Solo se usan las filas de tipo
- * "function"; una dirección se nombra como la función más cercana por debajo (+offset).
+ * The CSV comes from the Ghidra analysis (H5): `address,name,library,kind,section`, with the
+ * address in hex. It lives in NGB_DATA (never in the repo). Only rows of kind
+ * "function" are used; an address is named after the closest function below it (+offset).
  */
 #include "ngb.h"
 
@@ -12,7 +12,7 @@
 #include <string.h>
 
 #define MAX_SYMBOLS 8192
-#define MAX_SYMBOL_DISTANCE 0x4000u /* más lejos que esto no se atribuye a la función */
+#define MAX_SYMBOL_DISTANCE 0x4000u /* further than this it is not attributed to the function */
 
 typedef struct symbol {
     uint32_t addr;
@@ -49,7 +49,7 @@ int ngb_symbols_load(const char *path) {
     }
     fclose(f);
     qsort(g_syms, g_nsyms, sizeof *g_syms, cmp_sym);
-    ngb_log("símbolos: %u funciones de %s", (unsigned)g_nsyms, path);
+    ngb_log("symbols: %u functions from %s", (unsigned)g_nsyms, path);
     return 0;
 }
 
@@ -58,7 +58,7 @@ const char *ngb_symbol(uint32_t addr, char *buf, size_t buflen) {
     buf[0] = 0;
     if (!g_nsyms)
         return buf;
-    while (lo < hi) { /* última entrada con addr <= dirección */
+    while (lo < hi) { /* last entry with addr <= address */
         size_t mid = (lo + hi) / 2;
         if (g_syms[mid].addr <= addr)
             lo = mid + 1;

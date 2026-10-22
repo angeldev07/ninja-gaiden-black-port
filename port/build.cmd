@@ -1,7 +1,7 @@
 @echo off
-rem Compila el loader nativo (x86, MSVC) en build\port\ del repo.
-rem   port\build.cmd           compilación normal (/O2 /Zi)
-rem Requiere Visual Studio 2022 (C++ x86). VCVARSALL puede apuntar a otro vcvarsall.bat.
+rem Builds the native loader (x86, MSVC) into build\port\ of the repo.
+rem   port\build.cmd           normal build (/O2 /Zi)
+rem Requires Visual Studio 2022 (C++ x86). VCVARSALL can point to another vcvarsall.bat.
 setlocal
 set "PORT=%~dp0"
 set "SRC=%PORT%src"
@@ -9,16 +9,16 @@ set "OUT=%PORT%..\build\port"
 if not defined VCVARSALL set "VCVARSALL=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat"
 if not exist "%OUT%\obj" mkdir "%OUT%\obj"
 call "%VCVARSALL%" x86 >nul 2>nul
-where cl >nul 2>nul || (echo build: no se encuentra cl.exe; revisa VCVARSALL & exit /b 1)
+where cl >nul 2>nul || (echo build: cl.exe not found; check VCVARSALL & exit /b 1)
 
 set "CFLAGS=/nologo /W4 /WX /O2 /Zi /MT /GS /utf-8 /D_CRT_SECURE_NO_WARNINGS /I"%SRC%""
 
-rem 0) Recursos (icono y versión) de ngb-core.dll y ngb-loader.exe: res\ngb.rc, ver res\make_icon.py.
-where rc >nul 2>nul || (echo build: no se encuentra rc.exe; revisa VCVARSALL & exit /b 1)
+rem 0) Resources (icon and version) of ngb-core.dll and ngb-loader.exe: res\ngb.rc, see res\make_icon.py.
+where rc >nul 2>nul || (echo build: rc.exe not found; check VCVARSALL & exit /b 1)
 rc /nologo /DNGB_RC_CORE /I"%PORT%res" /fo"%OUT%\obj\core.res" "%PORT%res\ngb.rc" || exit /b 1
 rc /nologo /DNGB_RC_LOADER /I"%PORT%res" /fo"%OUT%\obj\loader.res" "%PORT%res\ngb.rc" || exit /b 1
 
-rem 1) ngb-core.dll: el loader, el kernel emulado y los stubs generados.
+rem 1) ngb-core.dll: the loader, the emulated kernel and the generated stubs.
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\core.pdb" /c ^
   "%SRC%\main.c" "%SRC%\symbols.c" "%SRC%\xbe.c" "%SRC%\memory.c" "%SRC%\log.c" "%SRC%\watch.c" "%SRC%\thread.c" "%SRC%\crash.c" ^
   "%SRC%\kernel\stubs.c" "%SRC%\kernel\dispatch.c" "%SRC%\kernel\data.c" ^
@@ -43,7 +43,7 @@ link /nologo /DLL /DEBUG /OUT:"%OUT%\ngb-core.dll" /PDB:"%OUT%\ngb-core.pdb" ^
   "%OUT%\obj\input.obj" "%OUT%\obj\xapi_hle.obj" ^
   "%OUT%\obj\present.obj" "%OUT%\obj\core.res" kernel32.lib shell32.lib user32.lib gdi32.lib winmm.lib opengl32.lib || exit /b 1
 
-rem 2) ngb-loader.exe: base fija 0x10000 + BSS que reserva la imagen del XBE. Sin CRT.
+rem 2) ngb-loader.exe: fixed base 0x10000 + BSS that reserves the XBE image. No CRT.
 cl /nologo /W4 /WX /O1 /GS- /Zi /utf-8 /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\stub.pdb" /c "%SRC%\loader_stub.c" || exit /b 1
 link /nologo /DEBUG /OUT:"%OUT%\ngb-loader.exe" /PDB:"%OUT%\ngb-loader.pdb" ^
   /NODEFAULTLIB /ENTRY:ngb_stub_entry /SUBSYSTEM:CONSOLE ^
@@ -51,45 +51,45 @@ link /nologo /DEBUG /OUT:"%OUT%\ngb-loader.exe" /PDB:"%OUT%\ngb-loader.pdb" ^
   /SECTION:.xbox,RWE ^
   "%OUT%\obj\loader_stub.obj" "%OUT%\obj\loader.res" kernel32.lib || exit /b 1
 
-rem 3a) Prueba del confinamiento de rutas (hostpath.c), sin datos del juego.
+rem 3a) Path confinement test (hostpath.c), no game data.
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\hostpath_test.pdb" /Fe"%OUT%\hostpath_test.exe" "%PORT%tests\hostpath_test.c" "%SRC%\kernel\hostpath.c" || exit /b 1
 "%OUT%\hostpath_test.exe" || exit /b 1
-rem 3b) Prueba del decodificador del push buffer (buffers hechos a mano).
+rem 3b) Push buffer decoder test (hand-made buffers).
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\pushbuf_test.pdb" /Fe"%OUT%\pushbuf_test.exe" "%PORT%tests\pushbuf_test.c" "%SRC%\gpu\pushbuf.c" || exit /b 1
 "%OUT%\pushbuf_test.exe" || exit /b 1
-rem 3c) Prueba del mapeo de la entrada (mando de PC y teclado -> XINPUT_STATE, guion).
+rem 3c) Input mapping test (PC gamepad and keyboard -> XINPUT_STATE, script).
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\input_test.pdb" /Fe"%OUT%\input_test.exe" "%PORT%tests\input_test.c" "%SRC%\input\input.c" || exit /b 1
 "%OUT%\input_test.exe" || exit /b 1
-rem 3d) SHA-1 y HMAC de XcSHA*/XcHMAC (vectores de FIPS 180 y RFC 2202).
+rem 3d) SHA-1 and HMAC of XcSHA*/XcHMAC (FIPS 180 and RFC 2202 vectors).
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\sha1_test.pdb" /Fe"%OUT%\sha1_test.exe" "%PORT%tests\sha1_test.c" "%SRC%\kernel\sha1.c" || exit /b 1
 "%OUT%\sha1_test.exe" || exit /b 1
-rem 3d2) Imagen determinista de la EEPROM (ExQueryNonVolatileSetting XC_MAX_*).
+rem 3d2) Deterministic EEPROM image (ExQueryNonVolatileSetting XC_MAX_*).
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\eeprom_test.pdb" /Fe"%OUT%\eeprom_test.exe" "%PORT%tests\eeprom_test.c" "%SRC%\kernel\eeprom.c" || exit /b 1
 "%OUT%\eeprom_test.exe" || exit /b 1
-rem 3e) Procesador de voces de la APU (tabla de voces sintética).
+rem 3e) APU voice processor (synthetic voice table).
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\vp_test.pdb" /Fe"%OUT%\vp_test.exe" "%PORT%tests\vp_test.c" "%SRC%\apu\vp.c" "%SRC%\apu\mix.c" || exit /b 1
 "%OUT%\vp_test.exe" || exit /b 1
 
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\shaders_test.pdb" /Fe"%OUT%\shaders_test.exe" "%PORT%tests\shaders_test.c" "%SRC%\shaders\vsh.c" "%SRC%\shaders\psh.c" "%SRC%\shaders\emit.c" && "%OUT%\shaders_test.exe" || exit /b 1
-rem 3c) Prueba del rasterizador por software (triángulo y textura 2x2 a mano).
+rem 3c) Software rasterizer test (hand-made triangle and 2x2 texture).
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\raster_test.pdb" /Fe"%OUT%\raster_test.exe" "%PORT%tests\raster_test.c" "%SRC%\gpu\raster.c" || exit /b 1
 "%OUT%\raster_test.exe" || exit /b 1
-rem 3e) Cachés de superficies y texturas del render GL (rcache.c, sin GL).
+rem 3e) GL render surface and texture caches (rcache.c, no GL).
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\rcache_test.pdb" /Fe"%OUT%\rcache_test.exe" "%PORT%tests\rcache_test.c" "%SRC%\gpu\rcache.c" || exit /b 1
 "%OUT%\rcache_test.exe" || exit /b 1
 
-rem 4) Prueba del presentador de frames (gfx\present.c). Abre una ventana: no se ejecuta
-rem    aquí (tests\port\test_gfx.py la lanza oculta con --frames 3 --hidden).
+rem 4) Frame presenter test (gfx\present.c). It opens a window: it is not run
+rem    here (tests\port\test_gfx.py launches it hidden with --frames 3 --hidden).
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\gfx_test.pdb" /Fe"%OUT%\gfx_test.exe" "%PORT%tests\gfx_test.c" "%SRC%\gfx\present.c" user32.lib gdi32.lib || exit /b 1
 
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\gl_test.pdb" /Fe"%OUT%\gl_test.exe" "%PORT%tests\gl_test.c" "%SRC%\gl\glbackend.c" "%SRC%\gl\glload.c" "%SRC%\gl\glpng.c" "%SRC%\gl\texconv.c" "%SRC%\gl\glstate.c" "%SRC%\shaders\vsh.c" "%SRC%\shaders\psh.c" "%SRC%\shaders\emit.c" opengl32.lib user32.lib gdi32.lib || exit /b 1
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\texconv_test.pdb" /Fe"%OUT%\texconv_test.exe" "%PORT%tests\texconv_test.c" "%SRC%\gl\texconv.c" "%SRC%\gl\glstate.c" "%SRC%\gl\glbackend.c" "%SRC%\gl\glload.c" opengl32.lib user32.lib gdi32.lib && "%OUT%\texconv_test.exe" || exit /b 1
 
-rem 5a) Prueba del lector XDVDFS del launcher (imágenes sintéticas, sin datos del juego).
+rem 5a) Launcher XDVDFS reader test (synthetic images, no game data).
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\xdvdfs_test.pdb" /Fe"%OUT%\xdvdfs_test.exe" "%PORT%tests\xdvdfs_test.c" "%PORT%launcher\xdvdfs.c" || exit /b 1
 "%OUT%\xdvdfs_test.exe" || exit /b 1
 
-rem 5) ngb-launcher.exe: el launcher gráfico (Win32 + GDI, sin dependencias). Ver launcher\launcher.c.
+rem 5) ngb-launcher.exe: the graphical launcher (Win32 + GDI, no dependencies). See launcher\launcher.c.
 rc /nologo /I"%PORT%res" /I"%PORT%launcher" /fo"%OUT%\obj\launcher.res" "%PORT%launcher\launcher.rc" || exit /b 1
 cl %CFLAGS% /I"%PORT%res" /I"%PORT%launcher" /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\launcher.pdb" /Fe"%OUT%\ngb-launcher.exe" ^
   "%PORT%launcher\launcher.c" "%PORT%launcher\ui.c" "%PORT%launcher\art.c" "%PORT%launcher\import.c" "%PORT%launcher\xdvdfs.c" "%OUT%\obj\launcher.res" ^

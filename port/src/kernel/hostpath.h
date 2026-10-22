@@ -1,11 +1,11 @@
 /*
- * hostpath.h: traducción segura de una ruta Xbox (lo que queda tras el prefijo del
- * dispositivo) a una ruta del PC dentro de una carpeta raíz.
+ * hostpath.h: safe translation of an Xbox path (what is left after the device
+ * prefix) to a PC path inside a root folder.
  *
- * El juego controla las rutas que pide (NtCreateFile, enlaces simbólicos), así que el
- * resultado nunca puede salir de `root`: se rechazan los componentes "..", los que llevan
- * ':' (unidades, flujos alternativos de NTFS) o caracteres no válidos, y al final la ruta
- * completa (GetFullPathNameA) tiene que empezar por `root\`. Lo usa impl_io.c y lo prueba
+ * The game controls the paths it asks for (NtCreateFile, symbolic links), so the
+ * result can never leave `root`: ".." components are rejected, as are those with
+ * ':' (drives, NTFS alternate streams) or invalid characters, and in the end the full path
+ * (GetFullPathNameA) has to start with `root\`. Used by impl_io.c and tested by
  * port/tests/hostpath_test.c.
  */
 #pragma once
@@ -13,11 +13,11 @@
 #include <stddef.h>
 
 /*
- * `rel` es "" o empieza por '\' (por ejemplo "\media\stage01.afs"). Escribe en `out` la
- * ruta completa `root` + `rel` normalizada. Devuelve 0 si es segura y cabe; -1 si no
- * (y `out` queda vacío).
+ * `rel` is "" or starts with '\' (for example "\media\stage01.afs"). Writes to `out` the
+ * full normalized path `root` + `rel`. Returns 0 if it is safe and fits; -1 if not
+ * (and `out` is left empty).
  */
 int hostpath_join(const char *root, const char *rel, char *out, size_t outlen);
 
-/* 1 si `rel` (formato de arriba) solo tiene componentes válidos; no toca el disco. */
+/* 1 if `rel` (format above) only has valid components; does not touch the disk. */
 int hostpath_rel_ok(const char *rel);

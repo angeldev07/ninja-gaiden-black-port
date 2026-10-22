@@ -1,5 +1,5 @@
 /*
- * eeprom.c: imagen de la EEPROM de la Xbox. Ver eeprom.h.
+ * eeprom.c: Xbox EEPROM image. See eeprom.h.
  */
 #include "eeprom.h"
 
@@ -14,13 +14,13 @@ static void put32(uint8_t *p, uint32_t v) {
 
 void eeprom_image(uint8_t out[EEPROM_SIZE]) {
     memset(out, 0, EEPROM_SIZE);
-    /* Sección cifrada: hash, confusor y clave del disco a cero; región del XBE en 0x2C. */
+    /* Encrypted section: hash, confounder and disk key at zero; XBE region at 0x2C. */
     put32(out + 0x2C, EEPROM_GAME_REGION);
-    /* Fábrica: número de serie (0x34, 12 bytes), MAC (0x40, a cero) y estándar de vídeo. */
+    /* Factory: serial number (0x34, 12 bytes), MAC (0x40, zero) and video standard. */
     memcpy(out + 0x34, EEPROM_SERIAL, 12);
     put32(out + 0x58, EEPROM_AV_REGION);
-    /* Usuario: zona horaria a cero, idioma, banderas de vídeo y audio, control parental,
-     * red y región del DVD. */
+    /* User: time zone at zero, language, video and audio flags, parental control,
+     * network and DVD region. */
     put32(out + 0x90, EEPROM_LANGUAGE);
     put32(out + 0xBC, EEPROM_DVD_REGION);
 }

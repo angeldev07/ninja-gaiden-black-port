@@ -1,22 +1,22 @@
 /*
- * texconv.c: conversión de texturas del NV2A para OpenGL (ver texconv.h).
+ * texconv.c: NV2A texture conversion for OpenGL (see texconv.h).
  *
- * Es una traducción a C de ngb_tools.xpr, que es la referencia: la tabla de formatos
- * (formats.py: códigos, bits por píxel y campos de cada canal), el orden Morton
- * (swizzle.py: máscaras de bits de x e y repartidas alternando desde el bit bajo), la
- * ampliación de canales (pixels.py: replicar bits por debajo de 8, quedarse con el byte alto
- * por encima), la paleta D3DCOLOR (pixels.py) y S3TC (dxt.py: divisiones que truncan, DXT1
- * de 3 colores si c0 <= c1, DXT3/5 siempre de 4).
+ * It is a C translation of ngb_tools.xpr, which is the reference: the format table
+ * (formats.py: codes, bits per pixel and fields of each channel), the Morton order
+ * (swizzle.py: bit masks of x and y interleaved alternately from the low bit), channel
+ * widening (pixels.py: replicate bits below 8, keep the high byte above), the D3DCOLOR
+ * palette (pixels.py) and S3TC (dxt.py: truncating divisions, 3-color DXT1 if c0 <= c1,
+ * DXT3/5 always 4-color).
  *
- * Fuentes del formato: xemu (hw/xbox/nv2a/nv2a_regs.h: campos de SET_TEXTURE_FORMAT,
- * CONTROL1, IMAGE_RECT y PALETTE; pgraph/texture.c: tamaño de los niveles y cube maps con
- * caras alineadas a 128 bytes; pgraph/swizzle.c; pgraph/s3tc.c). Sin código copiado.
+ * Format sources: xemu (hw/xbox/nv2a/nv2a_regs.h: fields of SET_TEXTURE_FORMAT,
+ * CONTROL1, IMAGE_RECT and PALETTE; pgraph/texture.c: level sizes and cube maps with
+ * faces aligned to 128 bytes; pgraph/swizzle.c; pgraph/s3tc.c). No code copied.
  */
 #include "texconv.h"
 
 #include <string.h>
 
-/* Un canal: campo de `bits` bits desde `shift`, o la constante `value` si bits = 0. */
+/* A channel: field of `bits` bits from `shift`, or the constant `value` if bits = 0. */
 typedef struct chan {
     uint8_t shift, bits, value;
 } chan;
@@ -79,12 +79,12 @@ static const fmt_info k_formats[] = {
 
 const char *texconv_error_text(int code) {
     switch (code) {
-    case TEXCONV_ERR_ARGS: return "argumentos inválidos";
-    case TEXCONV_ERR_FORMAT: return "formato sin conversión";
-    case TEXCONV_ERR_DIMENSIONS: return "dimensiones no admitidas";
-    case TEXCONV_ERR_SHORT: return "datos más cortos de lo que pide la textura";
-    case TEXCONV_ERR_PALETTE: return "P8 sin paleta";
-    default: return code >= 0 ? "ok" : "error desconocido";
+    case TEXCONV_ERR_ARGS: return "invalid arguments";
+    case TEXCONV_ERR_FORMAT: return "format without conversion";
+    case TEXCONV_ERR_DIMENSIONS: return "unsupported dimensions";
+    case TEXCONV_ERR_SHORT: return "data shorter than the texture requires";
+    case TEXCONV_ERR_PALETTE: return "P8 without a palette";
+    default: return code >= 0 ? "ok" : "unknown error";
     }
 }
 
@@ -121,7 +121,7 @@ static void morton_masks(int width, int height, uint32_t *mask_x, uint32_t *mask
     *mask_y = my;
 }
 
-/* Deposita los bits bajos de `value` en las posiciones a 1 de `mask` (pdep). */
+/* Deposits the low bits of `value` at the positions set in `mask` (pdep). */
 static uint32_t deposit(uint32_t value, uint32_t mask) {
     uint32_t out = 0, bit;
     for (bit = 1; mask; bit <<= 1) {
@@ -140,7 +140,7 @@ uint32_t texconv_morton(int x, int y, int width, int height) {
     return deposit((uint32_t)x, mx) | deposit((uint32_t)y, my);
 }
 
-/* ---- descripción ---------------------------------------------------------------------- */
+/* ---- description ---------------------------------------------------------------------- */
 
 static int is_dxt(texconv_kind kind) {
     return kind == TEXCONV_DXT1 || kind == TEXCONV_DXT3 || kind == TEXCONV_DXT5;
@@ -212,7 +212,7 @@ int texconv_describe(uint32_t format, uint32_t control1, uint32_t image_rect, in
     cube = (int)((format >> 2) & 1u);
     dims = (int)((format >> 4) & 0xFu);
     if (dims != 2) {
-        return TEXCONV_ERR_DIMENSIONS; /* 3 = volumen: sin soporte */
+        return TEXCONV_ERR_DIMENSIONS; /* 3 = volume: unsupported */
     }
     out->nv_format = info->code;
     out->name = info->name;
@@ -273,7 +273,7 @@ int texconv_describe(uint32_t format, uint32_t control1, uint32_t image_rect, in
     return 0;
 }
 
-/* ---- conversión ----------------------------------------------------------------------- */
+/* ---- conversion ----------------------------------------------------------------------- */
 
 static uint8_t expand(uint32_t value, int bits) {
     uint32_t widened = 0;
@@ -305,7 +305,7 @@ static uint32_t read_element(const uint8_t *p, int size) {
     }
 }
 
-/* round(|value| * num / den) con el signo de value (redondeo hacia arriba en el .5). */
+/* round(|value| * num / den) with the sign of value (rounds up at .5). */
 static int8_t scale_signed(int value, int num, int den) {
     int magnitude = value < 0 ? -value : value;
     int scaled = (2 * num * magnitude + den) / (2 * den);
@@ -321,7 +321,7 @@ static void convert_texel(const fmt_info *f, const texconv_desc *d, uint32_t wor
     switch (d->kind) {
     case TEXCONV_PALETTE:
         if (palette && (size_t)word * 4 + 4 <= palette_len) {
-            const uint8_t *e = palette + 4 * word; /* D3DCOLOR: B, G, R, A en memoria */
+            const uint8_t *e = palette + 4 * word; /* D3DCOLOR: B, G, R, A in memory */
             out[0] = e[2];
             out[1] = e[1];
             out[2] = e[0];

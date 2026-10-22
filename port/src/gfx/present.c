@@ -1,20 +1,20 @@
 /*
- * present.c: presentador de frames (H7). Ver present.h para la API.
+ * present.c: frame presenter (H7). See present.h for the API.
  *
- * Hilos:
- *   - El del llamante (el juego o el HLE de D3D) convierte el frame a BGRA en el back
- *     buffer, con la sección crítica, e invalida la ventana. No espera a la pantalla.
- *   - El de la ventana: message loop, WM_PAINT (StretchDIBits del back buffer), F12
- *     (captura PNG) y el título con los FPS.
+ * Threads:
+ *   - The caller's (the game or the D3D HLE) converts the frame to BGRA in the back
+ *     buffer, under the critical section, and invalidates the window. It does not wait for the screen.
+ *   - The window's: message loop, WM_PAINT (StretchDIBits of the back buffer), F12
+ *     (PNG capture) and the title with the FPS.
  *
- * Escalado: el frame se pinta con un alto entero (1x, 2x...) y el ancho que pida el
- * aspecto (4:3 o 16:9), centrado y con bandas negras. Los 720x480 de la Xbox no son
- * píxeles cuadrados: con 4:3 se ven a 640x480 por cada 1x de alto. Si la ventana es más
- * pequeña que 1x, se encoge para que quepa.
+ * Scaling: the frame is painted with an integer height (1x, 2x...) and the width that the
+ * aspect asks for (4:3 or 16:9), centered and with black bars. The Xbox 720x480 is not
+ * square pixels: at 4:3 they show as 640x480 for each 1x of height. If the window is smaller
+ * than 1x, it shrinks to fit.
  *
- * PNG: firma, IHDR (RGB de 8 bits), IDAT con zlib en bloques "stored" (sin compresión,
- * con Adler-32) e IEND, cada chunk con su CRC-32. Se escribe en `<ruta>.part` y se
- * renombra, así que una captura a medias nunca tiene el nombre final.
+ * PNG: signature, IHDR (8-bit RGB), IDAT with zlib in "stored" blocks (no compression,
+ * with Adler-32) and IEND, each chunk with its CRC-32. It is written to `<path>.part` and
+ * renamed, so a half-written capture never has the final name.
  */
 #define WIN32_LEAN_AND_MEAN
 #include "present.h"
@@ -43,9 +43,9 @@ static struct {
     wchar_t title[128];
     uint32_t *frame; /* BGRA, frame_w x frame_h */
     int frame_w, frame_h;
-    size_t frame_cap; /* píxeles reservados */
+    size_t frame_cap; /* reserved pixels */
     volatile LONG should_close;
-    volatile LONG external; /* 1: otro hilo dibuja con OpenGL (H7c); GDI no pinta */
+    volatile LONG external; /* 1: another thread draws with OpenGL (H7c); GDI does not paint */
     int init_ok;
     DWORD fps_tick;
     unsigned fps_frames;
@@ -74,7 +74,7 @@ static void swizzle_masks(unsigned width, unsigned height, uint32_t *mask_x, uin
     *mask_y = my;
 }
 
-/* Los valores 0..count-1 con sus bits depositados en `mask` (truco de xemu). */
+/* The values 0..count-1 with their bits deposited in `mask` (xemu trick). */
 static void spread(uint32_t *out, unsigned count, uint32_t mask) {
     unsigned i;
     out[0] = 0;
@@ -94,7 +94,7 @@ size_t gfx_swizzle_offset(unsigned x, unsigned y, unsigned width, unsigned heigh
     return (size_t)(ox | oy);
 }
 
-/* ---------------------------------------------------------------- conversión ---- */
+/* ---------------------------------------------------------------- conversion ---- */
 
 static uint32_t rgb565_to_bgra(uint16_t v) {
     uint32_t r = (v >> 11) & 31u, gg = (v >> 5) & 63u, b = v & 31u;
@@ -116,7 +116,7 @@ static int format_bpp(unsigned format) {
     }
 }
 
-/* Convierte a `dst` (BGRA, w*h). Devuelve -1 si faltan recursos. */
+/* Converts to `dst` (BGRA, w*h). Returns -1 if resources are missing. */
 static int convert(uint32_t *dst, const uint8_t *src, int w, int h, int pitch, unsigned format) {
     int x, y, bpp = format_bpp(format);
     unsigned kind = format & GFX_FMT_MASK;
@@ -157,7 +157,7 @@ static int convert(uint32_t *dst, const uint8_t *src, int w, int h, int pitch, u
     return 0;
 }
 
-/* ---------------------------------------------------------------- PNG mínimo ---- */
+/* ---------------------------------------------------------------- minimal PNG ---- */
 
 static uint32_t crc_table[256];
 
@@ -223,15 +223,15 @@ int gfx_write_png(const char *path, const void *bgra, int width, int height) {
     for (y = 0; y < height; y++) {
         uint8_t *out = raw + (size_t)y * row;
         const uint8_t *in = px + (size_t)y * (size_t)width * 4;
-        out[0] = 0; /* filtro None */
+        out[0] = 0; /* filter None */
         for (x = 0; x < width; x++) {
             out[1 + 3 * x] = in[4 * x + 2]; /* R */
             out[2 + 3 * x] = in[4 * x + 1]; /* G */
             out[3 + 3 * x] = in[4 * x];     /* B */
         }
     }
-    z[0] = 0x78; /* zlib: deflate, ventana de 32 KB */
-    z[1] = 0x01; /* sin diccionario, nivel mínimo; (0x78 << 8 | 0x01) % 31 == 0 */
+    z[0] = 0x78; /* zlib: deflate, 32 KB window */
+    z[1] = 0x01; /* no dictionary, lowest level; (0x78 << 8 | 0x01) % 31 == 0 */
     pos = 2;
     for (i = 0; i < raw_len; i += ZLIB_STORED_MAX) {
         size_t n = raw_len - i < ZLIB_STORED_MAX ? raw_len - i : ZLIB_STORED_MAX;
@@ -243,7 +243,7 @@ int gfx_write_png(const char *path, const void *bgra, int width, int height) {
         memcpy(z + pos, raw + i, n);
         pos += n;
     }
-    for (i = 0; i < raw_len; i++) { /* Adler-32 de los datos sin comprimir */
+    for (i = 0; i < raw_len; i++) { /* Adler-32 of the uncompressed data */
         a = (a + raw[i]) % 65521u;
         b = (b + a) % 65521u;
     }
@@ -251,11 +251,11 @@ int gfx_write_png(const char *path, const void *bgra, int width, int height) {
     pos += 4;
     put_be32(ihdr, (uint32_t)width);
     put_be32(ihdr + 4, (uint32_t)height);
-    ihdr[8] = 8;  /* bits por canal */
+    ihdr[8] = 8;  /* bits per channel */
     ihdr[9] = 2;  /* RGB */
     ihdr[10] = 0; /* deflate */
-    ihdr[11] = 0; /* filtro estándar */
-    ihdr[12] = 0; /* sin entrelazado */
+    ihdr[11] = 0; /* standard filter */
+    ihdr[12] = 0; /* no interlacing */
     crc_init();
     snprintf(part, sizeof part, "%s.part", path);
     f = fopen(part, "wb");
@@ -274,7 +274,7 @@ int gfx_write_png(const char *path, const void *bgra, int width, int height) {
     return failed ? -1 : 0;
 }
 
-/* ---------------------------------------------------------------- capturas ---- */
+/* ---------------------------------------------------------------- captures ---- */
 
 static int default_shot_path(char *out, size_t len) {
     char dir[MAX_PATH];
@@ -334,11 +334,11 @@ int gfx_screenshot(const char *path, char *out_path, size_t out_len) {
     return result ? -1 : 0;
 }
 
-/* ---------------------------------------------------------------- ventana ---- */
+/* ---------------------------------------------------------------- window ---- */
 
 static double aspect_ratio(void) { return g.cfg.aspect == GFX_ASPECT_16_9 ? 16.0 / 9.0 : 4.0 / 3.0; }
 
-/* Rectángulo de destino: alto entero (k x alto del frame) y ancho según el aspecto. */
+/* Destination rectangle: integer height (k x frame height) and width according to the aspect. */
 static RECT display_rect(int cw, int ch, int fh) {
     RECT r;
     double a = aspect_ratio();
@@ -349,7 +349,7 @@ static RECT display_rect(int cw, int ch, int fh) {
         scale--;
     dh = fh * scale;
     dw = (int)(dh * a + 0.5);
-    if (dw > cw || dh > ch) { /* ventana menor que 1x: encoger para que quepa */
+    if (dw > cw || dh > ch) { /* window smaller than 1x: shrink to fit */
         dh = ch;
         dw = (int)(dh * a + 0.5);
         if (dw > cw) {
@@ -377,7 +377,7 @@ static void paint(HWND hwnd) {
         memset(&bmi, 0, sizeof bmi);
         bmi.bmiHeader.biSize = sizeof bmi.bmiHeader;
         bmi.bmiHeader.biWidth = g.frame_w;
-        bmi.bmiHeader.biHeight = -g.frame_h; /* de arriba abajo */
+        bmi.bmiHeader.biHeight = -g.frame_h; /* top-down */
         bmi.bmiHeader.biPlanes = 1;
         bmi.bmiHeader.biBitCount = 32;
         bmi.bmiHeader.biCompression = BI_RGB;
@@ -405,7 +405,7 @@ static void update_title(HWND hwnd) {
     EnterCriticalSection(&g.lock);
     fps = g.fps;
     LeaveCriticalSection(&g.lock);
-    swprintf(text, sizeof text / sizeof text[0], L"%ls  ·  %.1f fps  ·  F12: captura", g.title, fps);
+    swprintf(text, sizeof text / sizeof text[0], L"%ls  ·  %.1f fps  ·  F12: screenshot", g.title, fps);
     SetWindowTextW(hwnd, text);
 }
 
@@ -414,22 +414,22 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
     switch (msg) {
     case WM_PAINT:
         if (g.external) {
-            ValidateRect(hwnd, NULL); /* el render GL repinta en el siguiente frame */
+            ValidateRect(hwnd, NULL); /* the GL render repaints on the next frame */
             return 0;
         }
         paint(hwnd);
         return 0;
     case WM_ERASEBKGND:
-        return 1; /* paint() rellena las bandas: sin parpadeo */
+        return 1; /* paint() fills the bars: no flicker */
     case WM_SIZE:
         InvalidateRect(hwnd, NULL, FALSE);
         return 0;
     case WM_KEYDOWN:
         if (wparam == VK_F12) {
             if (!gfx_screenshot(NULL, shot, sizeof shot))
-                fprintf(stderr, "gfx: captura en %s\n", shot);
+                fprintf(stderr, "gfx: screenshot at %s\n", shot);
             else
-                fprintf(stderr, "gfx: no se pudo guardar la captura\n");
+                fprintf(stderr, "gfx: could not save the screenshot\n");
             return 0;
         }
         break;
@@ -452,11 +452,11 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
     return DefWindowProcW(hwnd, msg, wparam, lparam);
 }
 
-/* Icono de la ventana: el recurso 1 de ngb-core.dll (res\ngb.rc), en el tamaño que pide el
- * sistema (grande para la barra de tareas y Alt+Tab, pequeño para el título). La DLL, y no
- * el exe: cuando el XBE ocupa 0x10000 el exe pierde su cabecera PE. Sin recurso (el
- * presentador enlazado a mano en los tests) devuelve NULL y la ventana usa el icono por
- * defecto. */
+/* Window icon: resource 1 of ngb-core.dll (res\ngb.rc), at the size the system asks for
+ * (large for the taskbar and Alt+Tab, small for the title bar). The DLL, not the exe:
+ * when the XBE occupies 0x10000 the exe loses its PE header. Without a resource (the
+ * presenter linked by hand in the tests) it returns NULL and the window uses the default
+ * icon. */
 static HICON load_app_icon(int big) {
     HMODULE mod = NULL;
     int cx = GetSystemMetrics(big ? SM_CXICON : SM_CXSMICON);
@@ -469,9 +469,9 @@ static HICON load_app_icon(int big) {
     return (HICON)LoadImageW(mod, MAKEINTRESOURCEW(1), IMAGE_ICON, cx, cy, LR_DEFAULTCOLOR);
 }
 
-/* Esquina superior izquierda para que una ventana de `w` x `h` (borde incluido) quede
- * centrada en el área de trabajo del monitor donde está el cursor (el del usuario que acaba
- * de lanzar el juego). Si no se puede saber, deja que Windows elija (CW_USEDEFAULT). */
+/* Top-left corner so that a window of `w` x `h` (border included) ends up centered in the
+ * work area of the monitor where the cursor is (the user who just launched the game).
+ * If that cannot be known, let Windows choose (CW_USEDEFAULT). */
 static void centered_origin(int w, int h, int *x, int *y) {
     POINT cursor;
     MONITORINFO mi;
@@ -487,7 +487,7 @@ static void centered_origin(int w, int h, int *x, int *y) {
         return;
     *x = mi.rcWork.left + (mi.rcWork.right - mi.rcWork.left - w) / 2;
     *y = mi.rcWork.top + (mi.rcWork.bottom - mi.rcWork.top - h) / 2;
-    if (*x < mi.rcWork.left) /* ventana mayor que el monitor: que se vea al menos la esquina */
+    if (*x < mi.rcWork.left) /* window bigger than the monitor: at least the corner stays visible */
         *x = mi.rcWork.left;
     if (*y < mi.rcWork.top)
         *y = mi.rcWork.top;
@@ -503,14 +503,14 @@ static DWORD WINAPI window_thread(LPVOID param) {
     (void)param;
     memset(&wc, 0, sizeof wc);
     wc.cbSize = sizeof wc;
-    wc.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC; /* OWNDC: un DC estable para OpenGL */
+    wc.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC; /* OWNDC: a stable DC for OpenGL */
     wc.lpfnWndProc = window_proc;
     wc.hInstance = inst;
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     wc.hIcon = load_app_icon(1);
     wc.hIconSm = load_app_icon(0);
     wc.lpszClassName = GFX_CLASS;
-    RegisterClassExW(&wc); /* si ya existía (segunda ventana tras un shutdown), sirve igual */
+    RegisterClassExW(&wc); /* if it already existed (second window after a shutdown), it works too */
     SetRect(&r, 0, 0, cw, ch);
     AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
     centered_origin(r.right - r.left, r.bottom - r.top, &ox, &oy);
@@ -561,7 +561,7 @@ int gfx_init_ex(const gfx_config_t *config) {
         g.lock_ready = 1;
     }
     pixels = (size_t)config->width * (size_t)config->height;
-    g.frame = (uint32_t *)calloc(pixels, 4); /* negro hasta el primer gfx_present */
+    g.frame = (uint32_t *)calloc(pixels, 4); /* black until the first gfx_present */
     if (!g.frame)
         return -1;
     g.frame_cap = pixels;

@@ -1,16 +1,16 @@
 /*
- * impl_ke.c: funciones Ke, Kf y Hal del planificador: tiempo, IRQL, eventos, esperas, timers, DPC
- * e interrupciones.
+ * impl_ke.c: Ke, Kf and Hal scheduler functions: time, IRQL, events, waits, timers, DPCs
+ * and interrupts.
  *
- * - IRQL: se lleva por hilo. Subir a DISPATCH_LEVEL (2) o más toma un lock global
- *   recursivo ("el procesador"): en Xbox, un hilo a DPC level no puede ser expulsado, y
- *   el código confía en ello para exclusión mutua. Bajar de 2 lo suelta.
- * - Objetos dispatcher (KEVENT, KTIMER...) que viven en memoria del juego: cada dirección
- *   se asocia a un objeto de Windows creado al primer uso según DISPATCHER_HEADER.Type.
- * - Timers y DPC: un hilo Xbox propio ("DPC") ejecuta las rutinas diferidas a DPC level.
- * - Interrupciones: se aceptan todas (KeConnectInterrupt devuelve TRUE). El hilo de DPC
- *   dispara dos: la del NV2A (nivel 3, vblank sintético) y la de la APU (nivel 5, avisos
- *   de voz libre); las demás nunca se disparan.
+ * - IRQL: kept per thread. Raising to DISPATCH_LEVEL (2) or above takes a global
+ *   recursive lock ("the processor"): on Xbox, a thread at DPC level cannot be preempted, and
+ *   the code relies on that for mutual exclusion. Lowering below 2 releases it.
+ * - Dispatcher objects (KEVENT, KTIMER...) that live in game memory: each address
+ *   is associated with a Windows object created on first use according to DISPATCHER_HEADER.Type.
+ * - Timers and DPCs: a dedicated Xbox thread ("DPC") runs the routines deferred to DPC level.
+ * - Interrupts: all are accepted (KeConnectInterrupt returns TRUE). The DPC thread
+ *   fires two: the NV2A one (level 3, synthetic vblank) and the APU one (level 5, free voice
+ *   notices); the others never fire.
  */
 #include "../ngb.h"
 
@@ -40,8 +40,8 @@ static uint32_t raise_irql(uint32_t new_irql) {
     ke_init_once();
     if (t) {
         if (new_irql >= 2 && old < 2) {
-            /* A DISPATCH_LEVEL un hilo Xbox no se suspende (la APC de suspensión llega al
-             * bajar el IRQL): mientras tenga el lock, NtSuspendThread se aplaza. */
+            /* At DISPATCH_LEVEL an Xbox thread is not suspended (the suspension APC arrives
+             * when the IRQL is lowered): while it holds the lock, NtSuspendThread is deferred. */
             ngb_kernel_enter(t);
             EnterCriticalSection(&g_dispatch_lock);
         }
@@ -93,9 +93,9 @@ static uint64_t KeGetCurrentIrql(uint32_t *args) {
     return t ? RET32(t->irql) : 0;
 }
 
-/* ------------------------------------------------------------------ tiempo */
+/* ------------------------------------------------------------------ time */
 
-#define XBOX_PERF_FREQUENCY 733333333ull /* KeQueryPerformanceFrequency de Xbox: el TSC */
+#define XBOX_PERF_FREQUENCY 733333333ull /* Xbox KeQueryPerformanceFrequency: the TSC */
 
 /* 126 ULONGLONG KeQueryPerformanceCounter(void) */
 static uint64_t KeQueryPerformanceCounter(uint32_t *args) {
@@ -129,10 +129,10 @@ static uint64_t KeQueryInterruptTime(uint32_t *args) {
 static uint64_t NtSetSystemTime(uint32_t *args) {
     if (PTR(1))
         GetSystemTimeAsFileTime((FILETIME *)PTR(1));
-    return STATUS_SUCCESS; /* no se toca el reloj del PC */
+    return STATUS_SUCCESS; /* the PC clock is not touched */
 }
 
-/* Timeout NT (100 ns; negativo = relativo, positivo = absoluto) a milisegundos. */
+/* NT timeout (100 ns; negative = relative, positive = absolute) to milliseconds. */
 static DWORD timeout_ms(const int64_t *timeout) {
     int64_t v;
     if (!timeout)
@@ -177,7 +177,7 @@ static uint64_t NtYieldExecution(uint32_t *args) {
     return STATUS_SUCCESS;
 }
 
-/* ------------------------------------------------------------------ objetos */
+/* ------------------------------------------------------------------ objects */
 
 typedef struct obj_slot {
     uint32_t key;
@@ -187,7 +187,7 @@ typedef struct obj_slot {
 static obj_slot_t g_objs[OBJ_SLOTS];
 static SRWLOCK g_obj_lock = SRWLOCK_INIT;
 
-/* Objeto Windows para un objeto dispatcher Xbox en `addr` (lo crea si hace falta). */
+/* Windows object for an Xbox dispatcher object at `addr` (created if needed). */
 static HANDLE obj_handle(uint32_t addr) {
     uint32_t h = (addr >> 2) * 2654435761u, i;
     HANDLE found = NULL;
@@ -212,7 +212,7 @@ static HANDLE obj_handle(uint32_t addr) {
             case 2: /* MutantObject */
                 found = CreateMutexA(NULL, FALSE, NULL);
                 break;
-            case 5: /* SemaphoreObject: Limit en 0x10 */
+            case 5: /* SemaphoreObject: Limit at 0x10 */
                 found = CreateSemaphoreA(NULL, signal, *(const int32_t *)(hdr + 0x10), NULL);
                 break;
             case 6: /* ThreadObject */
@@ -239,7 +239,7 @@ static HANDLE obj_handle(uint32_t addr) {
     }
     ReleaseSRWLockExclusive(&g_obj_lock);
     if (!found)
-        ngb_log("    · objeto dispatcher 0x%08X de tipo %u no soportado", addr, hdr[0]);
+        ngb_log("    · dispatcher object 0x%08X of type %u not supported", addr, hdr[0]);
     return found;
 }
 
@@ -249,7 +249,7 @@ static void obj_forget(uint32_t addr) {
     for (i = 0; i < OBJ_SLOTS; i++) {
         obj_slot_t *s = &g_objs[(h + i) % OBJ_SLOTS];
         if (s->key == addr) {
-            /* Se deja la clave (borrar rompería el sondeo lineal); se reinicia el objeto. */
+            /* The key is kept (deleting it would break linear probing); the object is reset. */
             ResetEvent(s->h);
             break;
         }
@@ -259,16 +259,16 @@ static void obj_forget(uint32_t addr) {
     ReleaseSRWLockExclusive(&g_obj_lock);
 }
 
-/* El juego también limpia eventos escribiendo SignalState = 0 en memoria (D3D con su evento
- * de vblank), sin llamar al kernel: antes de esperar, el objeto de Windows se alinea con la
- * cabecera para no despertar con una señal ya consumida. */
+/* The game also clears events by writing SignalState = 0 in memory (D3D with its vblank
+ * event), without calling the kernel: before waiting, the Windows object is aligned with the
+ * header so it does not wake up with an already-consumed signal. */
 static void sync_event(uint32_t addr, HANDLE h) {
     const uint8_t *hdr = (const uint8_t *)(uintptr_t)addr;
     const volatile LONG *signal = (const volatile LONG *)(hdr + 4);
     if ((hdr[0] <= 1 || hdr[0] == 8 || hdr[0] == 9) && *signal == 0) {
         ResetEvent(h);
-        /* Si KeSetEvent (o el timer) escribió 1 y llamó a SetEvent entre la lectura y el
-         * ResetEvent, la señal se habría borrado: se relee la cabecera y se restaura. */
+        /* If KeSetEvent (or the timer) wrote 1 and called SetEvent between the read and the
+         * ResetEvent, the signal would have been erased: the header is re-read and restored. */
         MemoryBarrier();
         if (*signal != 0)
             SetEvent(h);
@@ -278,7 +278,7 @@ static void sync_event(uint32_t addr, HANDLE h) {
 static void after_wait(uint32_t addr) {
     uint8_t *hdr = (uint8_t *)(uintptr_t)addr;
     if (hdr[0] == 1 || hdr[0] == 9)
-        *(int32_t *)(hdr + 4) = 0; /* sincronización: se consume la señal */
+        *(int32_t *)(hdr + 4) = 0; /* synchronization: the signal is consumed */
 }
 
 static uint32_t wait_status(DWORD r, DWORD base) {
@@ -300,7 +300,7 @@ static uint64_t KeInitializeEvent(uint32_t *args) {
     e[0] = (uint8_t)ARG(1);
     e[2] = 4;
     *(int32_t *)(e + 4) = (int32_t)(ARG(2) & 0xFF);
-    *(uint32_t *)(e + 8) = ARG(0) + 8; /* WaitListHead vacía */
+    *(uint32_t *)(e + 8) = ARG(0) + 8; /* empty WaitListHead */
     *(uint32_t *)(e + 12) = ARG(0) + 8;
     obj_forget(ARG(0));
     if (ARG(2) & 0xFF)
@@ -319,7 +319,7 @@ static uint64_t KeSetEvent(uint32_t *args) {
     return RET32(old);
 }
 
-/* KeSetEvent desde el emulador (p. ej. el pusher, que no es un hilo Xbox). */
+/* KeSetEvent from the emulator (e.g. the pusher, which is not an Xbox thread). */
 void ngb_ke_set_event(uint32_t event) {
     HANDLE h = obj_handle(event);
     *(volatile int32_t *)(uintptr_t)(event + 4) = 1;
@@ -369,7 +369,7 @@ static uint64_t KeWaitForMultipleObjects(uint32_t *args) {
     r = WaitForMultipleObjectsEx(n, hs, ARG(2) == 0 /* WaitAll */,
                                  timeout_ms((const int64_t *)PTR(6)), (ARG(5) & 0xFF) != 0);
     if (r < WAIT_OBJECT_0 + n) {
-        if (ARG(2) == 0) { /* WaitAll: Windows consumió la señal de todos */
+        if (ARG(2) == 0) { /* WaitAll: Windows consumed the signal of all of them */
             for (i = 0; i < n; i++)
                 after_wait(objs[i]);
         } else {
@@ -424,7 +424,7 @@ static uint64_t NtClose(uint32_t *args) {
     return CloseHandle((HANDLE)PTR(0)) ? STATUS_SUCCESS : RET32(STATUS_INVALID_HANDLE);
 }
 
-/* ------------------------------------------------------------------ timers y DPC */
+/* ------------------------------------------------------------------ timers and DPCs */
 
 typedef struct ktimer_slot {
     uint32_t timer;
@@ -443,14 +443,14 @@ static INIT_ONCE g_dpc_once = INIT_ONCE_STATIC_INIT;
 
 typedef void(__stdcall *dpc_routine_fn)(uint32_t dpc, uint32_t ctx, uint32_t a1, uint32_t a2);
 
-static uint8_t *g_gpu_interrupt; /* KINTERRUPT conectado al nivel 3 (NV2A) */
-static uint8_t *g_apu_interrupt; /* KINTERRUPT conectado al nivel 5 (APU, DirectSound) */
-static ULONGLONG g_next_vblank; /* en microsegundos de dpc_now_us */
+static uint8_t *g_gpu_interrupt; /* KINTERRUPT connected at level 3 (NV2A) */
+static uint8_t *g_apu_interrupt; /* KINTERRUPT connected at level 5 (APU, DirectSound) */
+static ULONGLONG g_next_vblank; /* in microseconds of dpc_now_us */
 #define VBLANK_US 16667ull      /* 60 Hz */
 
-/* Reloj del hilo de DPC en microsegundos (QPC). GetTickCount64 avanza a saltos de ~15,6 ms:
- * con él, un vblank "cada 16 ms" caía cada 31 ms (26-37 por segundo) y los KTIMER periódicos
- * se retrasaban igual. */
+/* DPC thread clock in microseconds (QPC). GetTickCount64 advances in steps of ~15.6 ms:
+ * with it, a vblank "every 16 ms" fell every 31 ms (26-37 per second) and periodic KTIMERs
+ * were delayed the same way. */
 static ULONGLONG dpc_now_us(void) {
     static LARGE_INTEGER f;
     LARGE_INTEGER t;
@@ -467,14 +467,14 @@ static ULONGLONG dpc_now_ms(void) {
 
 typedef uint8_t(__stdcall *isr_fn)(uint32_t interrupt, uint32_t context);
 
-/* Vblank sintético a ~60 Hz: marca la interrupción en el modelo y llama a la ISR de D3D. */
+/* Synthetic vblank at ~60 Hz: marks the interrupt in the model and calls the D3D ISR. */
 static void vblank_tick(ULONGLONG *next) {
     ULONGLONG us = dpc_now_us(), due_ms;
     if (!g_gpu_interrupt || !nv2a_vblank_enabled())
         return;
     if (us >= g_next_vblank) {
-        /* Sin deriva: el siguiente se cuenta desde el previsto, no desde ahora. Tras una parada
-           larga (depurador) se vuelve a sincronizar en vez de soltar una ráfaga. */
+        /* No drift: the next one is counted from the scheduled one, not from now. After a long
+           stop (debugger) it resyncs instead of releasing a burst. */
         g_next_vblank = us - g_next_vblank > 50000ull ? us + VBLANK_US : g_next_vblank + VBLANK_US;
         if (nv2a_vblank() && g_gpu_interrupt[0x10]) {
             uint32_t old = raise_irql(*(uint32_t *)(g_gpu_interrupt + 0xC) & 0xFF);
@@ -488,7 +488,7 @@ static void vblank_tick(ULONGLONG *next) {
         *next = due_ms;
 }
 
-/* Llama a la ISR de un KINTERRUPT conectado, a su IRQL. */
+/* Calls the ISR of a connected KINTERRUPT, at its IRQL. */
 static void call_isr(void *k) {
     uint8_t *ki = (uint8_t *)k;
     uint32_t old;
@@ -511,7 +511,7 @@ static void run_dpc(uint32_t dpc) {
     lower_irql(0);
 }
 
-/* Rutina del hilo Xbox "DPC" (stdcall, corre sobre una pila Xbox con su KPCR falso). */
+/* Routine of the Xbox "DPC" thread (stdcall, runs on an Xbox stack with its fake KPCR). */
 static void __stdcall dpc_thread(uint32_t unused) {
     (void)unused;
     for (;;) {
@@ -537,7 +537,7 @@ static void __stdcall dpc_thread(uint32_t unused) {
             SetEvent(obj_handle(s->timer));
             if (*(uint32_t *)(tm + 0x20))
                 fire[nfire++] = *(uint32_t *)(tm + 0x20);
-            if (s->period_ms) { /* periódico sin deriva; si va muy atrás, desde ahora */
+            if (s->period_ms) { /* periodic without drift; if it falls far behind, from now */
                 s->due_ms += s->period_ms;
                 if (s->due_ms <= now)
                     s->due_ms = now + s->period_ms;
@@ -569,17 +569,17 @@ static BOOL CALLBACK dpc_init(PINIT_ONCE once, PVOID param, PVOID *ctx) {
     t = ngb_thread_spawn((uint32_t)(uintptr_t)dpc_thread, 0, 0, 0x10000,
                          ngb_tls_total_size(&g_ngb_xbe), 1, 0);
     if (!t)
-        ngb_stop(NGB_EXIT_CRASH, "no se pudo crear el hilo de DPC");
+        ngb_stop(NGB_EXIT_CRASH, "could not create the DPC thread");
     t->internal = 1;
-    /* Las interrupciones y las DPC se adelantan a cualquier hilo, también a los que el juego
-       pone en TIME_CRITICAL. */
+    /* Interrupts and DPCs preempt any thread, including the ones the game
+       puts at TIME_CRITICAL. */
     SetThreadPriority(t->handle, THREAD_PRIORITY_TIME_CRITICAL);
     InterlockedExchange(&g_dpc_started, 1);
     ResumeThread(t->handle);
     return TRUE;
 }
 
-/* Arranca el hilo de DPC una sola vez; los demás hilos esperan a que esté listo. */
+/* Starts the DPC thread only once; the other threads wait until it is ready. */
 static void dpc_init_once(void) {
     InitOnceExecuteOnce(&g_dpc_once, dpc_init, NULL, NULL);
 }
@@ -696,7 +696,7 @@ static uint64_t KeRemoveQueueDpc(uint32_t *args) {
     return RET32(was);
 }
 
-/* ------------------------------------------------------------------ interrupciones */
+/* ------------------------------------------------------------------ interrupts */
 
 /* 109 VOID KeInitializeInterrupt(PKINTERRUPT, PKSERVICE_ROUTINE, PVOID ServiceContext,
  *                                ULONG Vector, KIRQL Irql, KINTERRUPT_MODE, BOOLEAN Share) */
@@ -716,14 +716,14 @@ static uint64_t KeInitializeInterrupt(uint32_t *args) {
 static uint64_t KeConnectInterrupt(uint32_t *args) {
     uint8_t *k = (uint8_t *)PTR(0);
     uint32_t level = *(uint32_t *)(k + 8);
-    ngb_log("    · interrupción conectada: nivel %u, ISR 0x%08X%s", level, *(uint32_t *)k,
-            level == 3 || level == 5 ? "" : " (nunca se disparará)");
+    ngb_log("    · interrupt connected: level %u, ISR 0x%08X%s", level, *(uint32_t *)k,
+            level == 3 || level == 5 ? "" : " (will never fire)");
     k[0x10] = 1;
-    if (level == 5) { /* la APU: avisos de voz libre (crash.c, ngb_apu_interrupt) */
+    if (level == 5) { /* the APU: free-voice notices (crash.c, ngb_apu_interrupt) */
         g_apu_interrupt = k;
         dpc_init_once();
     }
-    if (*(uint32_t *)(k + 8) == 3) { /* el NV2A: el vblank sintético llama a esta ISR */
+    if (*(uint32_t *)(k + 8) == 3) { /* the NV2A: the synthetic vblank calls this ISR */
         g_gpu_interrupt = k;
         dpc_init_once();
     }
@@ -752,15 +752,15 @@ static uint64_t KeSynchronizeExecution(uint32_t *args) {
     return RET32(r);
 }
 
-/* ------------------------------------------------------------------ prioridades y FPU */
+/* ------------------------------------------------------------------ priorities and FPU */
 
 /*
- * Prioridades. XAPI SetThreadPriority llama a KeSetBasePriorityThread con el incremento sobre la
- * prioridad base: -2..2 y ±16 para TIME_CRITICAL / IDLE. Se aplican al hilo del host con los
- * mismos valores (THREAD_PRIORITY_*). Importan porque los hilos Xbox comparten un núcleo, como
- * en la consola: sin ellas, el hilo vsync de CRI (que pide prioridad alta para correr nada más llegar
- * el vblank) esperaba un cuanto entero tras el hilo principal, se saltaba vblanks y la música
- * se quedaba sin datos.
+ * Priorities. XAPI SetThreadPriority calls KeSetBasePriorityThread with the increment over the
+ * base priority: -2..2 and +/-16 for TIME_CRITICAL / IDLE. They are applied to the host thread with
+ * the same values (THREAD_PRIORITY_*). They matter because Xbox threads share one core, as
+ * on the console: without them, the CRI vsync thread (which asks for high priority to run right
+ * when the vblank arrives) waited a whole quantum behind the main thread, skipped vblanks and the
+ * music ran out of data.
  */
 static int host_priority(int32_t increment) {
     if (increment >= 15)
@@ -805,7 +805,7 @@ static uint64_t KeFloatingPointState(uint32_t *args) {
     return STATUS_SUCCESS;
 }
 
-/* ------------------------------------------------------------------ apagado */
+/* ------------------------------------------------------------------ shutdown */
 
 /* 95 VOID KeBugCheck(ULONG BugCheckCode) */
 static uint64_t KeBugCheck(uint32_t *args) {

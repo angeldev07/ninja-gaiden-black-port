@@ -1,10 +1,10 @@
 /*
- * dispatch.c: ngb_kcall(), el punto común de todos los stubs del kernel.
+ * dispatch.c: ngb_kcall(), the common point of all the kernel stubs.
  *
- * Registra cada llamada en una línea: `[n] T<hilo> @<llamador> <ordinal> <nombre>(args) -> ret`
- * (la línea se escribe al volver, así que los detalles que añade la implementación
- * aparecen justo encima). Si el ordinal no tiene implementación, para la ejecución
- * (o devuelve STATUS_SUCCESS con --lenient).
+ * Logs each call on one line: `[n] T<thread> @<caller> <ordinal> <name>(args) -> ret`
+ * (the line is written on return, so the details the implementation adds
+ * appear right above it). If the ordinal has no implementation, it stops the run
+ * (or returns STATUS_SUCCESS with --lenient).
  */
 #include "../ngb.h"
 
@@ -98,14 +98,14 @@ static uint64_t kcall(uint32_t ordinal, uint32_t *args, uint32_t caller) {
     if (ordinal <= NGB_MAX_ORDINAL)
         InterlockedIncrement(&g_counts[ordinal]);
     if (!e)
-        ngb_stop(NGB_EXIT_UNIMPLEMENTED, "ordinal %u desconocido (desde 0x%08X)", ordinal, caller);
+        ngb_stop(NGB_EXIT_UNIMPLEMENTED, "unknown ordinal %u (from 0x%08X)", ordinal, caller);
     format_args(argtext, sizeof argtext, e, args);
     if (!fn) {
-        ngb_log("[%ld] T%d @%08X %u %s(%s) -> NO IMPLEMENTADA", n, t ? t->index : 0, caller,
+        ngb_log("[%ld] T%d @%08X %u %s(%s) -> NOT IMPLEMENTED", n, t ? t->index : 0, caller,
                 ordinal, e->name, argtext);
         InterlockedCompareExchange(&g_unimpl_first, (LONG)ordinal, 0);
         if (!g_ngb_opts.lenient)
-            ngb_stop(NGB_EXIT_UNIMPLEMENTED, "primera llamada sin implementar: %u %s(%s) desde 0x%08X",
+            ngb_stop(NGB_EXIT_UNIMPLEMENTED, "first unimplemented call: %u %s(%s) from 0x%08X",
                      ordinal, e->name, argtext, caller);
         return STATUS_SUCCESS;
     }
@@ -122,9 +122,9 @@ static uint64_t kcall(uint32_t ordinal, uint32_t *args, uint32_t caller) {
     }
     if (g_ngb_opts.log_cap && ordinal <= NGB_MAX_ORDINAL &&
         (unsigned long)g_counts[ordinal] > g_ngb_opts.log_cap &&
-        g_counts[ordinal] % 100000 != 0) { /* tras el tope, una muestra cada 100000 */
+        g_counts[ordinal] % 100000 != 0) { /* after the cap, one sample every 100000 */
         if ((unsigned long)g_counts[ordinal] == g_ngb_opts.log_cap + 1)
-            ngb_log("    · %s: más de %lu llamadas; a partir de aquí solo se cuentan", e->name,
+            ngb_log("    · %s: more than %lu calls; from here on they are only counted", e->name,
                     g_ngb_opts.log_cap);
     } else if (ret >> 32)
         ngb_log("[%ld] T%d @%08X %u %s(%s) -> 0x%08X%08X%s", n, t ? t->index : 0, caller, ordinal,
@@ -134,14 +134,14 @@ static uint64_t kcall(uint32_t ordinal, uint32_t *args, uint32_t caller) {
         ngb_log("[%ld] T%d @%08X %u %s(%s) -> 0x%08X%s", n, t ? t->index : 0, caller, ordinal,
                 e->name, argtext, (uint32_t)ret, ngb_symbol(caller, sym, sizeof sym));
     if (g_ngb_opts.max_calls && (unsigned long)n >= g_ngb_opts.max_calls)
-        ngb_stop(NGB_EXIT_MAX_CALLS, "--max-calls %lu alcanzado", g_ngb_opts.max_calls);
+        ngb_stop(NGB_EXIT_MAX_CALLS, "--max-calls %lu reached", g_ngb_opts.max_calls);
     return ret;
 }
 
 void ngb_kernel_summary(void) {
     uint32_t i;
     int distinct = 0, distinct_impl = 0;
-    ngb_log("resumen: %ld llamadas al kernel; %u exports implementados en total",
+    ngb_log("summary: %ld kernel calls; %u exports implemented in total",
             (long)g_seq, (unsigned)ngb_kernel_impl_count());
     for (i = 0; i <= NGB_MAX_ORDINAL; i++) {
         if (!g_counts[i])
@@ -149,11 +149,11 @@ void ngb_kernel_summary(void) {
         distinct++;
         distinct_impl += g_impls[i] != NULL;
         ngb_log("  %8ld  %3u %-36s %s", (long)g_counts[i], i, g_exports[i] ? g_exports[i]->name : "?",
-                g_impls[i] ? "" : "NO IMPLEMENTADA");
+                g_impls[i] ? "" : "NOT IMPLEMENTED");
     }
-    ngb_log("resumen: %d funciones distintas llamadas (%d implementadas)", distinct, distinct_impl);
+    ngb_log("summary: %d distinct functions called (%d implemented)", distinct, distinct_impl);
     if (g_unimpl_first) {
         const ngb_kexport_t *e = ngb_kexport((uint32_t)g_unimpl_first);
-        ngb_log("resumen: primera sin implementar: %ld %s", (long)g_unimpl_first, e ? e->name : "?");
+        ngb_log("summary: first unimplemented: %ld %s", (long)g_unimpl_first, e ? e->name : "?");
     }
 }

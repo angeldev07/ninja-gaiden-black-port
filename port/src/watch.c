@@ -1,11 +1,11 @@
 /*
- * watch.c: vigilancia de variables del juego (--watch), para ingeniería inversa.
+ * watch.c: watching game variables (--watch), for reverse engineering.
  *
  *   --watch 0xD7DCF9:1,0xC316B8,0xC316F8:4
  *
- * El hilo de DPC lee cada dirección unas 60 veces por segundo y escribe en el log cada
- * cambio con el tiempo y el número de llamada al kernel. Sirve para ver en qué momento
- * cambia un flag o un estado que se ha encontrado en Ghidra, sin parar el juego.
+ * The DPC thread reads each address about 60 times per second and writes every change to the
+ * log with the time and the kernel call number. It is useful to see when a flag or a state
+ * found in Ghidra changes, without stopping the game.
  */
 #include "ngb.h"
 
@@ -63,7 +63,7 @@ void ngb_watch_tick(void) {
             continue;
         memcpy(&v, (const void *)(uintptr_t)g_watch[i].addr, g_watch[i].size);
         if (!g_watch[i].seen || v != g_watch[i].last) {
-            ngb_log("    · watch 0x%08X: 0x%X -> 0x%X (%.3f s, llamada %lu)", g_watch[i].addr,
+            ngb_log("    · watch 0x%08X: 0x%X -> 0x%X (%.3f s, call %lu)", g_watch[i].addr,
                     g_watch[i].last, v, ngb_elapsed(), ngb_kernel_call_seq());
             g_watch[i].last = v;
             g_watch[i].seen = 1;

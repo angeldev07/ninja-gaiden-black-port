@@ -1,14 +1,14 @@
 /*
- * glbackend.h: backend de OpenGL 4.x para el render del port (H7b, ADR-06).
+ * glbackend.h: OpenGL 4.x backend for the port's render (H7b, ADR-06).
  *
- * Crea un contexto core 4.x con WGL, sobre una ventana oculta propia o sobre un HWND que
- * pase el llamante (el presentador), y dibuja siempre en un FBO propio (por defecto
- * 720x480, el modo de la Xbox) del que se pueden leer los píxeles. Los shaders son los
- * GLSL de port/src/shaders (vsh.h y psh.h), que nombran sus entradas `v0`-`v15` con
- * `layout(location = i)`: el formato de vértice dice qué atributo alimenta cada `v<i>`.
+ * Creates a core 4.x context with WGL, on its own hidden window or on an HWND passed by the
+ * caller (the presenter), and always draws into its own FBO (720x480 by default, the Xbox
+ * mode) from which the pixels can be read. The shaders are the GLSL ones from
+ * port/src/shaders (vsh.h and psh.h), which name their inputs `v0`-`v15` with
+ * `layout(location = i)`: the vertex format says which attribute feeds each `v<i>`.
  *
- * Todo es de un solo hilo: el del contexto. Las funciones devuelven 0 si van bien o un
- * `glb_error` negativo.
+ * Everything is single-threaded: the context's thread. Functions return 0 on success or a
+ * negative `glb_error`.
  */
 #pragma once
 
@@ -26,16 +26,16 @@
 #define GLB_MAX_TEXTURES 4
 
 enum glb_error {
-    GLB_ERR_ARGS = -1,      /* argumentos inválidos o backend sin iniciar */
-    GLB_ERR_WINDOW = -2,    /* no se pudo crear la ventana o el formato de píxel */
-    GLB_ERR_CONTEXT = -3,   /* no hay contexto 4.x (driver sin WGL_ARB_create_context) */
-    GLB_ERR_FUNCTIONS = -4, /* falta alguna función de GL 4.x */
-    GLB_ERR_FBO = -5,       /* el framebuffer no está completo */
-    GLB_ERR_COMPILE = -6,   /* el driver rechazó un shader o el enlace del program */
-    GLB_ERR_GL = -7,        /* glGetError tras una operación */
+    GLB_ERR_ARGS = -1,      /* invalid arguments or backend not initialized */
+    GLB_ERR_WINDOW = -2,    /* could not create the window or the pixel format */
+    GLB_ERR_CONTEXT = -3,   /* no 4.x context (driver without WGL_ARB_create_context) */
+    GLB_ERR_FUNCTIONS = -4, /* a GL 4.x function is missing */
+    GLB_ERR_FBO = -5,       /* the framebuffer is not complete */
+    GLB_ERR_COMPILE = -6,   /* the driver rejected a shader or the program link */
+    GLB_ERR_GL = -7,        /* glGetError after an operation */
 };
 
-/* Lo que dice el driver. */
+/* What the driver reports. */
 typedef struct glb_info {
     char vendor[128];
     char renderer[128];
@@ -45,33 +45,33 @@ typedef struct glb_info {
 } glb_info;
 
 /*
- * Tipo de un atributo: los de SET_VERTEX_DATA_ARRAY_FORMAT (bits 0-3) del NV2A.
- * Fuente: xemu, nv2a_regs.h (NV097_SET_VERTEX_DATA_ARRAY_FORMAT_TYPE_*) y pgraph/gl/vertex.c.
+ * Attribute type: those of the NV2A SET_VERTEX_DATA_ARRAY_FORMAT (bits 0-3).
+ * Source: xemu, nv2a_regs.h (NV097_SET_VERTEX_DATA_ARRAY_FORMAT_TYPE_*) and pgraph/gl/vertex.c.
  */
 typedef enum glb_attr_type {
     GLB_ATTR_FLOAT = 0, /* F (2): float */
-    GLB_ATTR_UB_D3D,    /* UB_D3D (0): D3DCOLOR, B G R A en memoria, normalizado (siempre 4) */
-    GLB_ATTR_UB_OGL,    /* UB_OGL (4): bytes R G B A normalizados */
-    GLB_ATTR_S1,        /* S1 (1): short con signo normalizado a [-1, 1] */
-    GLB_ATTR_S32K,      /* S32K (5): short sin normalizar */
-    GLB_ATTR_CMP,       /* CMP (6): normal 11:11:10 con signo en un u32 (se convierte en CPU) */
+    GLB_ATTR_UB_D3D,    /* UB_D3D (0): D3DCOLOR, B G R A in memory, normalized (always 4) */
+    GLB_ATTR_UB_OGL,    /* UB_OGL (4): normalized R G B A bytes */
+    GLB_ATTR_S1,        /* S1 (1): signed short normalized to [-1, 1] */
+    GLB_ATTR_S32K,      /* S32K (5): unnormalized short */
+    GLB_ATTR_CMP,       /* CMP (6): signed 11:11:10 normal in a u32 (converted on the CPU) */
 } glb_attr_type;
 
 /*
- * Un atributo de `components` componentes (1-4; CMP siempre 3) en `offset` bytes; alimenta
- * v<input>. `stride` 0 = el del formato. `type` 0 = float, así que los inicializadores de
- * tres campos siguen valiendo.
+ * An attribute of `components` components (1-4; CMP always 3) at `offset` bytes; feeds
+ * v<input>. `stride` 0 = the format's. `type` 0 = float, so the three-field initializers
+ * remain valid.
  */
 typedef struct glb_attrib {
     int input;
     int components;
     int offset;
     int type;   /* glb_attr_type */
-    int stride; /* bytes entre vértices de este atributo; 0 = glb_format.stride */
+    int stride; /* bytes between vertices of this attribute; 0 = glb_format.stride */
 } glb_attrib;
 
 typedef struct glb_format {
-    int stride; /* bytes por vértice */
+    int stride; /* bytes per vertex */
     int n_attribs;
     glb_attrib attribs[GLB_MAX_INPUTS];
 } glb_format;
@@ -84,21 +84,21 @@ typedef enum glb_prim {
     GLB_TRIANGLE_STRIP,
     GLB_TRIANGLE_FAN,
     GLB_LINE_LOOP,
-    GLB_QUADS,      /* se parten en triángulos (0 1 2, 0 2 3): el core profile no tiene quads */
-    GLB_QUAD_STRIP, /* mismo orden de vértices que una tira de triángulos */
-    GLB_POLYGON,    /* convexo: abanico de triángulos */
+    GLB_QUADS,      /* split into triangles (0 1 2, 0 2 3): the core profile has no quads */
+    GLB_QUAD_STRIP, /* same vertex order as a triangle strip */
+    GLB_POLYGON,    /* convex: triangle fan */
 } glb_prim;
 
 typedef enum glb_uniform_kind {
     GLB_U_FLOAT, /* `count` floats */
     GLB_U_VEC2,  /* `count` vec2 */
     GLB_U_VEC4,  /* `count` vec4 */
-    GLB_U_MAT2,  /* `count` mat2 (por columnas) */
-    GLB_U_INT,   /* un int (samplers: la unidad de textura) */
+    GLB_U_MAT2,  /* `count` mat2 (column-major) */
+    GLB_U_INT,   /* one int (samplers: the texture unit) */
 } glb_uniform_kind;
 
 typedef struct glb_uniform {
-    const char *name;  /* "c", "surfaceSize", "tex0"...; si no existe se ignora */
+    const char *name;  /* "c", "surfaceSize", "tex0"...; ignored if it does not exist */
     glb_uniform_kind kind;
     int count;
     const float *values;
@@ -106,88 +106,88 @@ typedef struct glb_uniform {
 } glb_uniform;
 
 /*
- * Crea el contexto y el FBO de `width` x `height` (0 = 720x480). Con `hwnd` NULL usa una
- * ventana oculta propia; con un HWND, le pone un formato de píxel y dibuja sobre su DC
- * (glb_present copia el FBO a esa ventana).
+ * Creates the context and the FBO of `width` x `height` (0 = 720x480). With `hwnd` NULL it uses
+ * its own hidden window; with an HWND, it sets a pixel format on it and draws on its DC
+ * (glb_present copies the FBO to that window).
  */
 int glb_init(HWND hwnd, int width, int height);
 
-/* DC de la ventana del contexto (para SwapBuffers desde quien dibuja). */
+/* DC of the context's window (for SwapBuffers from whoever draws). */
 HDC glb_get_dc(void);
 
-/* Información del driver; NULL si no se ha iniciado. */
+/* Driver information; NULL if not initialized. */
 const glb_info *glb_get_info(void);
 
 /*
- * Compila y enlaza un program. Si falla, devuelve GLB_ERR_COMPILE y deja en `log` lo que
- * dijo el driver (siempre terminado en NUL). `fs` puede ser NULL para compilar solo el VS.
+ * Compiles and links a program. On failure, returns GLB_ERR_COMPILE and leaves in `log` what
+ * the driver said (always NUL-terminated). `fs` may be NULL to compile only the VS.
  */
 int glb_compile(const char *vs, const char *fs, unsigned *program, char *log, size_t loglen);
 
-/* Compila una sola etapa (1 = fragment, 0 = vertex), sin enlazar: valida un shader suelto. */
+/* Compiles a single stage (1 = fragment, 0 = vertex), without linking: validates a standalone shader. */
 int glb_compile_stage(int fragment, const char *source, char *log, size_t loglen);
 
 void glb_delete_program(unsigned program);
 
-/* Sube una textura RGBA8 (filas de arriba abajo) a la unidad `unit` (0-3). */
+/* Uploads an RGBA8 texture (rows top to bottom) to unit `unit` (0-3). */
 int glb_set_texture(int unit, int width, int height, const uint8_t *rgba, int linear);
 
-/* Limpia el FBO entero: quita el scissor y abre las máscaras de color, depth y stencil. */
+/* Clears the whole FBO: removes the scissor and opens the color, depth and stencil masks. */
 int glb_clear(float r, float g, float b, float a);
 
 /*
- * Dibuja `count` vértices de `vertices` (formato `fmt`) con el program y los uniforms dados.
- * Las entradas v<i> que el formato no da quedan a (0, 0, 0, 1).
+ * Draws `count` vertices from `vertices` (format `fmt`) with the given program and uniforms.
+ * The v<i> inputs the format does not provide are left at (0, 0, 0, 1).
  */
 int glb_draw(unsigned program, const void *vertices, const glb_format *fmt, glb_prim prim,
              int count, const glb_uniform *uniforms, int n_uniforms);
 
-/* Una llamada de dibujo completa (glb_draw es el caso sin índices). */
+/* A complete draw call (glb_draw is the case without indices). */
 typedef struct glb_draw_call {
     unsigned program;
     const void *vertices;
-    size_t vertex_bytes;     /* todo el buffer de vértices */
+    size_t vertex_bytes;     /* the whole vertex buffer */
     const glb_format *format;
     glb_prim prim;
-    int count;               /* vértices, o índices si `indices` no es NULL */
-    const void *indices;     /* NULL = sin índices */
-    int index_size;          /* 2 (u16, ARRAY_ELEMENT16) o 4 (u32, ARRAY_ELEMENT32) */
+    int count;               /* vertices, or indices if `indices` is not NULL */
+    const void *indices;     /* NULL = no indices */
+    int index_size;          /* 2 (u16, ARRAY_ELEMENT16) or 4 (u32, ARRAY_ELEMENT32) */
     const glb_uniform *uniforms;
     int n_uniforms;
 } glb_draw_call;
 
-/* Dibuja con índices opcionales, atributos de cualquier glb_attr_type y quads. */
+/* Draws with optional indices, attributes of any glb_attr_type and quads. */
 int glb_draw_ex(const glb_draw_call *call);
 
 /*
- * Atributo `input` a partir de SET_VERTEX_DATA_ARRAY_FORMAT (tipo en los bits 0-3, número de
- * componentes en 4-7, stride en 8-31) y del offset de sus datos dentro del buffer.
- * Devuelve 0, 1 si el atributo está desactivado (0 componentes) o GLB_ERR_ARGS.
+ * Attribute `input` from SET_VERTEX_DATA_ARRAY_FORMAT (type in bits 0-3, component count
+ * in 4-7, stride in 8-31) and the offset of its data inside the buffer.
+ * Returns 0, 1 if the attribute is disabled (0 components) or GLB_ERR_ARGS.
  */
 int glb_attrib_from_nv2a(int input, uint32_t array_format, uint32_t offset, glb_attrib *out);
 
-/* Primitiva de SET_BEGIN_END (1 POINTS ... 10 POLYGON). 0 si va bien, GLB_ERR_ARGS si no. */
+/* SET_BEGIN_END primitive (1 POINTS ... 10 POLYGON). 0 on success, GLB_ERR_ARGS otherwise. */
 int glb_prim_from_nv2a(uint32_t op, glb_prim *out);
 
-/* Normal CMP 11:11:10 con signo a tres floats en [-1, 1]. */
+/* Signed CMP 11:11:10 normal to three floats in [-1, 1]. */
 void glb_decode_cmp(uint32_t packed, float out[3]);
 
-/* 1 si el driver tiene GL_EXT_texture_compression_s3tc (para texconv_describe). */
+/* 1 if the driver has GL_EXT_texture_compression_s3tc (for texconv_describe). */
 int glb_has_s3tc(void);
 
 /*
- * Sube a la unidad `unit` una textura convertida con texconv (todas las caras y niveles):
- * 2D o cube map, comprimida o no. `linear` elige el filtro (con mipmaps si hay niveles).
+ * Uploads to unit `unit` a texture converted with texconv (all faces and levels):
+ * 2D or cube map, compressed or not. `linear` picks the filter (with mipmaps if there are levels).
  */
 int glb_upload_texture(int unit, const texconv_desc *desc, const uint8_t *data, int linear);
 
-/* Lee el FBO: width * height * 4 bytes RGBA, filas de arriba abajo. */
+/* Reads the FBO: width * height * 4 bytes RGBA, rows top to bottom. */
 int glb_read_rgba(uint8_t *buf, size_t buflen);
 
-/* Copia el FBO a la ventana (la propia, si se muestra, o la del llamante) y hace swap. */
+/* Copies the FBO to the window (its own, if shown, or the caller's) and swaps. */
 int glb_present(void);
 
-/* Muestra u oculta la ventana propia (no hace nada con un HWND externo). */
+/* Shows or hides the own window (does nothing with an external HWND). */
 void glb_show_window(int show);
 
 void glb_shutdown(void);

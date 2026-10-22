@@ -45,10 +45,10 @@ class InputHleTest(unittest.TestCase):
             "t=0ms:START+A+LT@60s",
         )
         self.assertEqual(code, EXIT_OK, log)
-        self.assertIn("input: 8 de 8 funciones de XAPI parcheadas", log)
-        self.assertIn("teclado: desactivado; guion: 1 pulsaciones", log)
+        self.assertIn("input: 8 of 8 XAPI functions patched", log)
+        self.assertIn("keyboard: disabled; script: 1 presses", log)
         for name, (va, _, ret_va, ret_n) in SIGNATURES.items():
-            self.assertIn(f"input: {name} 0x{va:08X} (ret {ret_n} en 0x{ret_va:08X};", log)
+            self.assertIn(f"input: {name} 0x{va:08X} (ret {ret_n} at 0x{ret_va:08X};", log)
         # La primera consulta de cambios notifica la inserción; XGetDevices ve el puerto 0.
         self.assertIn("DbgPrint: changes=1 ins=1 rem=0", log)
         self.assertIn("DbgPrint: devices=1", log)
@@ -72,9 +72,9 @@ class InputHleTest(unittest.TestCase):
         )
         # Sin parche, la llamada cae en los int3 de la sección: el loader lo para.
         self.assertNotEqual(code, EXIT_OK, log)
-        self.assertIn("input: 7 de 8 funciones de XAPI parcheadas", log)
+        self.assertIn("input: 7 of 8 XAPI functions patched", log)
         self.assertIn(
-            f"input: XInputSetState (0x{va:08X}) no se parchea: no hay ret 8 en 0x{ret_va:08X}",
+            f"input: XInputSetState (0x{va:08X}) not patched: no ret 8 at 0x{ret_va:08X}",
             log,
         )
         self.assertIn("DbgPrint: devices=1", log)
@@ -82,13 +82,13 @@ class InputHleTest(unittest.TestCase):
     def test_other_xbe_is_left_alone(self) -> None:
         code, log = self.run_xbe(build_loader_xbe(boot_code()))
         self.assertEqual(code, EXIT_OK, log)
-        self.assertIn("input: XAPI de Ninja Gaiden Black no reconocida en este XBE", log)
-        self.assertNotIn("parcheadas", log)
+        self.assertIn("input: Ninja Gaiden Black XAPI not recognized in this XBE", log)
+        self.assertNotIn("patched", log)
 
     def test_invalid_script_is_a_usage_error(self) -> None:
         code, log = self.run_xbe(build_input_xbe(input_code()), "--input-script", "t=1s:JUMP")
         self.assertEqual(code, 1, log)
-        self.assertIn("--input-script inválido: entrada 't=1s:JUMP': botón desconocido", log)
+        self.assertIn("invalid --input-script: entry 't=1s:JUMP': unknown button", log)
 
 
 if __name__ == "__main__":

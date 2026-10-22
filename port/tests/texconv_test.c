@@ -1,9 +1,9 @@
 /*
- * texconv_test.c: pruebas sin GPU de texconv.c (contra vectores de ngb_tools.xpr), de la
- * traducción de estado de glstate.c y de los formatos de vértice de glbackend.c.
+ * texconv_test.c: GPU-less tests of texconv.c (against ngb_tools.xpr vectors), of the
+ * state translation in glstate.c and of the vertex formats in glbackend.c.
  *
- * Lo compila y ejecuta port\build.cmd; imprime "texconv_test: OK" o termina con código 1.
- * Los vectores (texconv_vectors.h) son sintéticos: los genera tests/port/texconv_vectors.py.
+ * Built and run by port\build.cmd; prints "texconv_test: OK" or exits with code 1.
+ * The vectors (texconv_vectors.h) are synthetic: tests/port/texconv_vectors.py generates them.
  */
 #include <math.h>
 #include <stdio.h>
@@ -21,7 +21,7 @@ static int g_failures, g_checks;
     do {                                                                            \
         g_checks++;                                                                 \
         if (!(cond)) {                                                              \
-            fprintf(stderr, "FALLO %s:%d: %s\n", __FILE__, __LINE__, #cond);        \
+            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);        \
             g_failures++;                                                           \
         }                                                                           \
     } while (0)
@@ -35,7 +35,7 @@ static void test_vectors(void) {
         int r = texconv_describe(v->format, v->control1, v->image_rect, v->s3tc, &d);
         g_checks++;
         if (r != 0 || d.src_size != v->src_len || d.dst_size != v->expected_len) {
-            fprintf(stderr, "FALLO %s: describe %d, src %zu/%zu, dst %zu/%zu\n", v->name, r,
+            fprintf(stderr, "FAIL %s: describe %d, src %zu/%zu, dst %zu/%zu\n", v->name, r,
                     d.src_size, v->src_len, d.dst_size, v->expected_len);
             g_failures++;
             continue;
@@ -45,14 +45,14 @@ static void test_vectors(void) {
                             &d, dst, d.dst_size);
         g_checks++;
         if (r != 0) {
-            fprintf(stderr, "FALLO %s: convert %d\n", v->name, r);
+            fprintf(stderr, "FAIL %s: convert %d\n", v->name, r);
             g_failures++;
         } else if (memcmp(dst, v->expected, d.dst_size) != 0) {
             size_t k = 0;
             while (dst[k] == v->expected[k]) {
                 k++;
             }
-            fprintf(stderr, "FALLO %s: byte %zu vale %u, Python da %u\n", v->name, k, dst[k],
+            fprintf(stderr, "FAIL %s: byte %zu is %u, Python gives %u\n", v->name, k, dst[k],
                     v->expected[k]);
             g_failures++;
         }
@@ -71,27 +71,27 @@ static void test_describe(void) {
     CHECK(d.width == 8 && d.height == 4 && d.swizzled && !d.compressed);
     CHECK(d.gl_internal == TEXCONV_GL_RGBA8 && d.gl_format == TEXCONV_GL_RGBA &&
           d.gl_type == TEXCONV_GL_UNSIGNED_BYTE && !strcmp(d.name, "A8R8G8B8"));
-    /* mipmaps recortados a 1x1: 8x8 con 15 niveles pedidos -> 4 */
+    /* mipmaps trimmed to 1x1: 8x8 with 15 levels requested -> 4 */
     CHECK(texconv_describe(fmt_word(0x05, 3, 3, 15, 0), 0, 0, 0, &d) == 0 && d.levels == 4);
     CHECK(d.level[3].width == 1 && d.level[3].src_offset == 128 + 32 + 8);
-    /* DXT5 con S3TC: bloques tal cual */
+    /* DXT5 with S3TC: blocks as they are */
     CHECK(texconv_describe(fmt_word(0x0F, 4, 4, 1, 0), 0, 0, 1, &d) == 0);
     CHECK(d.upload_compressed && d.gl_internal == TEXCONV_GL_COMPRESSED_DXT5 &&
           d.gl_format == 0 && d.dst_size == 16 * 16);
     CHECK(texconv_describe(fmt_word(0x0F, 4, 4, 1, 0), 0, 0, 0, &d) == 0);
     CHECK(!d.upload_compressed && d.gl_internal == TEXCONV_GL_RGBA8 && d.dst_size == 16 * 16 * 4);
-    /* relieve con signo */
+    /* signed bump */
     CHECK(texconv_describe(fmt_word(0x28, 2, 2, 1, 0), 0, 0, 0, &d) == 0);
     CHECK(d.gl_internal == TEXCONV_GL_RG8_SNORM && d.gl_type == TEXCONV_GL_BYTE && d.dst_size == 32);
     CHECK(texconv_describe(fmt_word(0x27, 2, 2, 1, 0), 0, 0, 0, &d) == 0);
     CHECK(d.gl_internal == TEXCONV_GL_RGBA8_SNORM && d.dst_size == 64);
-    /* cube map: 6 caras alineadas a 128 bytes */
+    /* cube map: 6 faces aligned to 128 bytes */
     CHECK(texconv_describe(fmt_word(0x06, 2, 2, 1, 1), 0, 0, 0, &d) == 0);
     CHECK(d.faces == 6 && d.face_src_stride == 128 && d.src_size == 768);
-    /* lineal: tamaño de IMAGE_RECT y pitch de CONTROL1 */
+    /* linear: IMAGE_RECT size and CONTROL1 pitch */
     CHECK(texconv_describe(fmt_word(0x12, 0, 0, 1, 0), 64u << 16, (5u << 16) | 3u, 0, &d) == 0);
     CHECK(d.linear && d.width == 5 && d.height == 3 && d.pitch == 64 && d.src_size == 192);
-    /* errores */
+    /* errors */
     CHECK(texconv_describe(fmt_word(0x2A, 2, 2, 1, 0), 0, 0, 0, &d) == TEXCONV_ERR_FORMAT);
     CHECK(texconv_describe(fmt_word(0x24, 2, 2, 1, 0), 0, 0, 0, &d) == TEXCONV_ERR_FORMAT);
     CHECK(texconv_describe((fmt_word(0x06, 2, 2, 1, 0) & ~0xF0u) | 0x30u, 0, 0, 0, &d) ==
@@ -99,7 +99,7 @@ static void test_describe(void) {
     CHECK(texconv_describe(fmt_word(0x06, 13, 2, 1, 0), 0, 0, 0, &d) == TEXCONV_ERR_DIMENSIONS);
     CHECK(texconv_describe(fmt_word(0x06, 3, 2, 1, 1), 0, 0, 0, &d) == TEXCONV_ERR_DIMENSIONS);
     CHECK(texconv_describe(fmt_word(0x12, 0, 0, 1, 0), 16u << 16, (5u << 16) | 3u, 0, &d) ==
-          TEXCONV_ERR_DIMENSIONS); /* pitch menor que una fila */
+          TEXCONV_ERR_DIMENSIONS); /* pitch smaller than a row */
     CHECK(texconv_describe(fmt_word(0x0B, 2, 2, 1, 0), 0, 0, 0, &d) == 0);
     {
         uint8_t src[16] = {0}, dst[64];
@@ -132,8 +132,8 @@ static void test_glstate(void) {
     s.blend_dfactor = 0x0303;  /* ONE_MINUS_SRC_ALPHA */
     s.blend_equation = 0xF006; /* FUNC_ADD_SIGNED */
     s.blend_color = 0x80FF4000u;
-    s.depth_func = 0x0003;     /* LEQUAL, solo los 4 bits bajos */
-    s.front_face = 0x0900;     /* CW en la Xbox */
+    s.depth_func = 0x0003;     /* LEQUAL, only the low 4 bits */
+    s.front_face = 0x0900;     /* CW on the Xbox */
     s.cull_face_enable = 1;
     s.cull_face = 0x0404;
     s.stencil_test_enable = 1;
@@ -143,7 +143,7 @@ static void test_glstate(void) {
     s.alpha_test_enable = 1;
     s.alpha_func = 0x0206;
     s.alpha_ref = 0x80;
-    s.color_mask = 0x00010001u; /* solo rojo y azul */
+    s.color_mask = 0x00010001u; /* red and blue only */
     s.surface_clip_h = (100u << 16) | 10u;
     s.surface_clip_v = (50u << 16) | 20u;
     s.fog_enable = 1;
@@ -184,7 +184,7 @@ static void test_vertex_formats(void) {
     glb_attrib a;
     glb_prim prim;
     float xyz[3];
-    /* SET_VERTEX_DATA_ARRAY_FORMAT: tipo | tamaño << 4 | stride << 8 */
+    /* SET_VERTEX_DATA_ARRAY_FORMAT: type | size << 4 | stride << 8 */
     CHECK(glb_attrib_from_nv2a(3, 0x0 | (4u << 4) | (24u << 8), 12, &a) == 0);
     CHECK(a.type == GLB_ATTR_UB_D3D && a.components == 4 && a.stride == 24 && a.offset == 12);
     CHECK(glb_attrib_from_nv2a(0, 0x2 | (3u << 4) | (24u << 8), 0, &a) == 0 &&
@@ -194,9 +194,9 @@ static void test_vertex_formats(void) {
     CHECK(glb_attrib_from_nv2a(9, 0x4 | (4u << 4) | (8u << 8), 4, &a) == 0 && a.type == GLB_ATTR_UB_OGL);
     CHECK(glb_attrib_from_nv2a(2, 0x6 | (1u << 4) | (16u << 8), 8, &a) == 0 &&
           a.type == GLB_ATTR_CMP && a.components == 3);
-    CHECK(glb_attrib_from_nv2a(1, 0x2 | (16u << 8), 0, &a) == 1);            /* desactivado */
-    CHECK(glb_attrib_from_nv2a(1, 0x3 | (2u << 4), 0, &a) == GLB_ERR_ARGS);   /* tipo 3 */
-    CHECK(glb_attrib_from_nv2a(1, 0x0 | (3u << 4), 0, &a) == GLB_ERR_ARGS);   /* D3DCOLOR de 3 */
+    CHECK(glb_attrib_from_nv2a(1, 0x2 | (16u << 8), 0, &a) == 1);            /* disabled */
+    CHECK(glb_attrib_from_nv2a(1, 0x3 | (2u << 4), 0, &a) == GLB_ERR_ARGS);   /* type 3 */
+    CHECK(glb_attrib_from_nv2a(1, 0x0 | (3u << 4), 0, &a) == GLB_ERR_ARGS);   /* D3DCOLOR of 3 */
     /* CMP: x = 1023 (bits 0-10), y = -1023 (bits 11-21), z = -512 (bits 22-31) */
     glb_decode_cmp(0x3FFu | (0x401u << 11) | (0x200u << 22), xyz);
     CHECK(xyz[0] == 1.0f && xyz[1] == -1.0f && fabsf(xyz[2] - (-512.0f / 511.0f)) < 1e-6f);
@@ -215,10 +215,10 @@ int main(void) {
     test_glstate();
     test_vertex_formats();
     if (g_failures) {
-        fprintf(stderr, "texconv_test: %d de %d comprobaciones fallan\n", g_failures, g_checks);
+        fprintf(stderr, "texconv_test: %d of %d checks fail\n", g_failures, g_checks);
         return 1;
     }
-    printf("texconv_test: OK (%d comprobaciones, %d vectores de ngb_tools.xpr)\n", g_checks,
+    printf("texconv_test: OK (%d checks, %d vectors from ngb_tools.xpr)\n", g_checks,
            (int)(sizeof k_vectors / sizeof k_vectors[0]));
     return 0;
 }

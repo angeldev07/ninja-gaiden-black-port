@@ -1,6 +1,6 @@
 /*
- * impl_misc.c: depuración (Dbg*), ajustes no volátiles (ExQueryNonVolatileSetting),
- * secciones del XBE (Xe*), vídeo (Av*), red (Phy*), PCI y criptografía mínima (Xc*).
+ * impl_misc.c: debugging (Dbg*), non-volatile settings (ExQueryNonVolatileSetting),
+ * XBE sections (Xe*), video (Av*), network (Phy*), PCI and minimal cryptography (Xc*).
  */
 #include "../ngb.h"
 
@@ -11,7 +11,7 @@
 #include "kernel.h"
 #include "sha1.h"
 
-/* 8 ULONG __cdecl DbgPrint(PCSZ Format, ...): args apunta a los argumentos en pila. */
+/* 8 ULONG __cdecl DbgPrint(PCSZ Format, ...): args points to the arguments on the stack. */
 static uint64_t DbgPrint(uint32_t *args) {
     char buf[1024];
     size_t n;
@@ -29,11 +29,11 @@ static uint64_t DbgPrint(uint32_t *args) {
 /* 5 VOID DbgBreakPoint(void) / 6 DbgBreakPointWithStatus(ULONG) */
 static uint64_t DbgBreakPoint(uint32_t *args) {
     (void)args;
-    ngb_log("    · DbgBreakPoint: ignorado");
+    ngb_log("    · DbgBreakPoint: ignored");
     return 0;
 }
 
-/* Valores de ExQueryNonVolatileSetting (índices XC_* de xboxdevwiki/Cxbx-Reloaded). */
+/* Values of ExQueryNonVolatileSetting (XC_* indices from xboxdevwiki/Cxbx-Reloaded). */
 #define REG_DWORD_ 4u
 #define REG_BINARY_ 3u
 
@@ -45,8 +45,8 @@ static uint64_t ExQueryNonVolatileSetting(uint32_t *args) {
     const char *name = "?";
     memset(blob, 0, sizeof blob);
     if (!eeprom_section(index, &sec_off, &sec_len)) {
-        /* XC_MAX_OS/FACTORY/ALL: un bloque de la EEPROM. Debe ser determinista entero: XAPI
-         * firma los archivos del disco con 16 bytes de aquí cuando XboxHDKey es cero. */
+        /* XC_MAX_OS/FACTORY/ALL: a block of the EEPROM. It must be fully deterministic: XAPI
+         * signs the disk files with 16 bytes from here when XboxHDKey is zero. */
         uint8_t image[EEPROM_SIZE];
         eeprom_image(image);
         memcpy(blob, image + sec_off, sec_len);
@@ -56,22 +56,22 @@ static uint64_t ExQueryNonVolatileSetting(uint32_t *args) {
     } else {
         switch (index) {
         case 0x0: name = "TIMEZONE_BIAS"; value = 0; break;
-        case 0x7: name = "LANGUAGE"; value = EEPROM_LANGUAGE; break;            /* inglés */
+        case 0x7: name = "LANGUAGE"; value = EEPROM_LANGUAGE; break;            /* English */
         case 0x8: name = "VIDEO_FLAGS"; value = 0; break;
-        case 0x9: name = "AUDIO_FLAGS"; value = 0; break;         /* estéreo */
+        case 0x9: name = "AUDIO_FLAGS"; value = 0; break;         /* stereo */
         case 0xA: name = "PARENTAL_CONTROL_GAMES"; value = 0; break;
         case 0xB: name = "PARENTAL_CONTROL_PASSWORD"; value = 0; break;
         case 0xC: name = "PARENTAL_CONTROL_MOVIES"; value = 0; break;
         case 0x11: name = "MISC_FLAGS"; value = 0; break;
         case 0x12: name = "DVD_REGION"; value = EEPROM_DVD_REGION; break;
         case 0x103: name = "FACTORY_AV_REGION"; value = EEPROM_AV_REGION; break; /* PAL-I */
-        case 0x104: name = "FACTORY_GAME_REGION"; value = EEPROM_GAME_REGION; break; /* resto del mundo */
+        case 0x104: name = "FACTORY_GAME_REGION"; value = EEPROM_GAME_REGION; break; /* rest of the world */
         case 0x101: name = "FACTORY_ETHERNET_ADDR"; type = REG_BINARY_; len = 6; break;
         case 0x100: name = "FACTORY_SERIAL_NUMBER"; type = REG_BINARY_; len = 12;
             memcpy(blob, EEPROM_SERIAL, 12); break;
         default:
             if (index >= 1 && index <= 6) { name = "TIMEZONE_*"; type = REG_BINARY_; len = 16; }
-            else { ngb_log("    · ExQueryNonVolatileSetting: índice 0x%X desconocido", index); }
+            else { ngb_log("    · ExQueryNonVolatileSetting: unknown index 0x%X", index); }
             break;
         }
     }
@@ -89,8 +89,8 @@ static uint64_t ExQueryNonVolatileSetting(uint32_t *args) {
     return STATUS_SUCCESS;
 }
 
-/* 327 NTSTATUS XeLoadSection(PXBEIMAGE_SECTION Section): todas las secciones se cargaron al
- * arrancar, así que solo se cuenta la referencia (SectionReferenceCount, offset 0x18). */
+/* 327 NTSTATUS XeLoadSection(PXBEIMAGE_SECTION Section): all sections were loaded at
+ * startup, so only the reference is counted (SectionReferenceCount, offset 0x18). */
 static uint64_t XeLoadSection(uint32_t *args) {
     uint32_t *refs = (uint32_t *)((uint8_t *)PTR(0) + 0x18);
     (*refs)++;
@@ -124,7 +124,7 @@ static uint64_t AvNop(uint32_t *args) {
     return 0;
 }
 
-/* 252 ULONG PhyGetLinkState(BOOLEAN Update): sin cable de red */
+/* 252 ULONG PhyGetLinkState(BOOLEAN Update): no network cable */
 static uint64_t PhyGetLinkState(uint32_t *args) {
     (void)args;
     return 0;
@@ -139,14 +139,14 @@ static uint64_t PhyInitialize(uint32_t *args) {
 /* 46 VOID HalReadWritePCISpace(ULONG Bus, ULONG Slot, ULONG Register, PVOID Buffer,
  *                              ULONG Length, BOOLEAN WritePCISpace) */
 static uint64_t HalReadWritePCISpace(uint32_t *args) {
-    ngb_log("    · PCI %s bus %u slot %u reg 0x%X len %u", (ARG(5) & 0xFF) ? "escritura" : "lectura",
+    ngb_log("    · PCI %s bus %u slot %u reg 0x%X len %u", (ARG(5) & 0xFF) ? "write" : "read",
             ARG(0), ARG(1), ARG(2), ARG(4));
     if (!(ARG(5) & 0xFF) && PTR(3))
         memset(PTR(3), 0, ARG(4));
     return 0;
 }
 
-/* 335 VOID XcSHAInit(PUCHAR pbSHAContext): el contexto (116 B) es memoria del juego. */
+/* 335 VOID XcSHAInit(PUCHAR pbSHAContext): the context (116 B) is game memory. */
 static uint64_t XcSHAInit(uint32_t *args) {
     ngb_sha1_init((ngb_sha1_t *)PTR(0));
     return 0;
@@ -166,8 +166,8 @@ static uint64_t XcSHAFinal(uint32_t *args) {
 
 /* 340 VOID XcHMAC(PBYTE pbKeyMaterial, ULONG cbKeyMaterial, PBYTE pbData, ULONG cbData,
  *                 PBYTE pbData2, ULONG cbData2, PBYTE HmacData)
- * Con las claves del kernel a cero (data.c), las firmas de las partidas son coherentes
- * dentro del port, que es lo único que el juego comprueba. */
+ * With the kernel keys at zero (data.c), the save signatures are consistent
+ * within the port, which is the only thing the game checks. */
 static uint64_t XcHMAC(uint32_t *args) {
     ngb_hmac_sha1(PTR(0), ARG(1), PTR(2), ARG(3), PTR(4), ARG(5), (uint8_t *)PTR(6));
     return 0;

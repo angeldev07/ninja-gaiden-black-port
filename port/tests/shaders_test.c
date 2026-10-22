@@ -1,16 +1,16 @@
 /*
- * shaders_test.c: vertex programs y register combiners del NV2A -> GLSL (port/src/shaders).
+ * shaders_test.c: NV2A vertex programs and register combiners -> GLSL (port/src/shaders).
  *
- * Lo compila y ejecuta port\build.cmd; termina con código 1 si algo falla e imprime
- * "shaders_test: OK" si no. Las instrucciones de prueba están codificadas a mano (ver los
- * comentarios con el desglose de cada palabra); no hay datos del juego.
+ * Built and run by port\build.cmd; exits with code 1 if anything fails and prints
+ * "shaders_test: OK" otherwise. The test instructions are hand-encoded (see the
+ * comments with the breakdown of each word); there is no game data.
  *
- * Modos extra (los usa tests/port y el spike sobre datos reales):
- *   shaders_test --dump DIR              escribe los GLSL de las pruebas en DIR (*.vert, *.frag)
- *   shaders_test --vsh-file IN OUT       IN: binario de D3D (cabecera 0x2078 | n << 16) o
- *                                        instrucciones sueltas; OUT: el vertex shader GLSL
- *   shaders_test --psh-file IN OUT       IN: los 240 bytes de la definición de pixel shader
- *                                        de D3D (ver psh_file); OUT: el fragment shader GLSL
+ * Extra modes (used by tests/port and the spike on real data):
+ *   shaders_test --dump DIR              writes the test GLSL to DIR (*.vert, *.frag)
+ *   shaders_test --vsh-file IN OUT       IN: D3D binary (header 0x2078 | n << 16) or
+ *                                        loose instructions; OUT: the GLSL vertex shader
+ *   shaders_test --psh-file IN OUT       IN: the 240 bytes of the D3D pixel shader
+ *                                        definition (see psh_file); OUT: the GLSL fragment shader
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,7 +25,7 @@ static int g_failures, g_checks;
     do {                                                                            \
         g_checks++;                                                                 \
         if (!(cond)) {                                                              \
-            fprintf(stderr, "FALLO %s:%d: %s\n", __FILE__, __LINE__, #cond);        \
+            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);        \
             g_failures++;                                                           \
         }                                                                           \
     } while (0)
@@ -34,14 +34,14 @@ static int g_failures, g_checks;
     do {                                                                            \
         g_checks++;                                                                 \
         if (!strstr((text), (needle))) {                                            \
-            fprintf(stderr, "FALLO %s:%d: falta \"%s\"\n", __FILE__, __LINE__, needle);\
+            fprintf(stderr, "FAIL %s:%d: missing \"%s\"\n", __FILE__, __LINE__, needle);\
             g_failures++;                                                           \
         }                                                                           \
     } while (0)
 
 static char g_glsl[65536];
 
-/* El GLSL #version 400 solo admite ASCII (también en los comentarios). */
+/* GLSL #version 400 only supports ASCII (also in comments). */
 static int is_ascii(const char *text) {
     for (; *text; text++) {
         if ((unsigned char)*text > 0x7F) {
@@ -73,15 +73,15 @@ static void dump(const char *name, const char *text) {
  *   w1 = MAC 7 << 21 (0x00E00000) | A.swz xyzw (0x1B)                     = 0x00E0001B
  *   w2 = A.mux 2 << 26 (0x08000000) | B.swz xyzw (0x00360000) | B.mux 3 << 11 (0x1800)
  *        | C.swz xyzw (0x6C)                                               = 0x0836186C
- *   w3 = máscara de salida x 0x8 << 12 (0x8000) | ORB o[] (0x800), dirección 0 (oPos)
+ *   w3 = output mask x 0x8 << 12 (0x8000) | ORB o[] (0x800), address 0 (oPos)
  *                                                                          = 0x00008800
  * MAD R2.xyz, v3, c[5], -R0.wwww  +  RCP R1.w, -R0.w  ->  oT0.xy = ILU, FINAL
  *   w1 = ILU 2 << 25 (0x04000000) | MAC 4 << 21 (0x00800000) | CONST 5 << 13 (0xA000)
  *        | V 3 << 9 (0x600) | A.swz 0x1B                                  = 0x0480A61B
  *   w2 = A.mux 2 (0x08000000) | B.swz 0x00360000 | B.mux 3 (0x1800) | C.neg (0x400)
- *        | C.swz wwww (0x3FC) | C.R alto 0                                 = 0x08361FFC
- *   w3 = C.R bajo 0 | C.mux 1 << 28 | máscara MAC xyz 0xE << 24 | OUT_R 2 << 20
- *        | máscara ILU w 1 << 16 | salida xy 0xC << 12 | ORB 0x800 | dirección 9 << 3
+ *        | C.swz wwww (0x3FC) | C.R high 0                                 = 0x08361FFC
+ *   w3 = C.R low 0 | C.mux 1 << 28 | MAC mask xyz 0xE << 24 | OUT_R 2 << 20
+ *        | ILU mask w 1 << 16 | output xy 0xC << 12 | ORB 0x800 | address 9 << 3
  *        | OUT_MUX ILU 0x4 | FINAL 1                                      = 0x1E21C84D
  */
 static const uint32_t k_prog_basic[] = {
@@ -89,9 +89,9 @@ static const uint32_t k_prog_basic[] = {
     0x00000000u, 0x0480A61Bu, 0x08361FFCu, 0x1E21C84Du,
 };
 
-/* Codificador de apoyo para los casos que no necesitan el desglose a mano. */
+/* Helper encoder for the cases that do not need the by-hand breakdown. */
 typedef struct enc_operand {
-    unsigned mux, index, neg, swz; /* swz: 8 bits, x en los dos altos (0x1B = xyzw) */
+    unsigned mux, index, neg, swz; /* swz: 8 bits, x in the two high ones (0x1B = xyzw) */
 } enc_operand;
 
 static void put(uint32_t *w, int word, int shift, unsigned bits, unsigned value) {
@@ -174,7 +174,7 @@ static void test_vsh_hand_encoded(void) {
     CHECK(b->c.swizzle[0] == 3 && b->c.swizzle[1] == 3 && b->c.swizzle[2] == 3 &&
           b->c.swizzle[3] == 3);
     CHECK(b->mac_mask == (VSH_MASK_X | VSH_MASK_Y | VSH_MASK_Z) && b->temp == 2);
-    CHECK(b->ilu_mask == VSH_MASK_W && b->ilu_temp == 1); /* emparejado: el ILU va a R1 */
+    CHECK(b->ilu_mask == VSH_MASK_W && b->ilu_temp == 1); /* paired: the ILU goes to R1 */
     CHECK(b->out_is_output && b->out_address == VSH_OUT_T0 &&
           b->out_mask == (VSH_MASK_X | VSH_MASK_Y) && b->out_from_ilu && b->final);
     CHECK(p.inputs_read == ((1u << 0) | (1u << 3)));
@@ -214,13 +214,13 @@ static void test_vsh_a0_ilu_and_constant_writes(void) {
     /* MOV oD0, c[A0 + 10] */
     encode(prog + 4, VSH_MAC_MOV, 0, op(VSH_MUX_CONST, 10, 0x1B), NONE, NONE, 0, 0, 0, 0xF, 1,
            VSH_OUT_D0, 0, 1, 0);
-    /* RSQ R4.w, c[7].x (MAC NOP: el ILU escribe en OUT_R) */
+    /* RSQ R4.w, c[7].x (MAC NOP: the ILU writes to OUT_R) */
     encode(prog + 8, 0, VSH_ILU_RSQ, NONE, NONE, op(VSH_MUX_CONST, 7, 0x00), 0, 4, VSH_MASK_W, 0,
            0, 0, 0, 0, 0);
-    /* MOV c[12], R4  (ORB = 0: escribe una constante) */
+    /* MOV c[12], R4  (ORB = 0: writes a constant) */
     encode(prog + 12, VSH_MAC_MOV, 0, op(VSH_MUX_TEMP, 4, 0x1B), NONE, NONE, 0, 0, 0, 0xF, 0, 12,
            0, 0, 0);
-    /* MOV sin destino leyendo R12 (alias de oPos) + LIT c = R4 -> oT1, FINAL */
+    /* MOV without destination reading R12 (alias of oPos) + LIT c = R4 -> oT1, FINAL */
     encode(prog + 16, VSH_MAC_MOV, VSH_ILU_LIT, op(VSH_MUX_TEMP, 12, 0x1B), NONE,
            op(VSH_MUX_TEMP, 4, 0x1B), 0, 0, 0, 0xF, 1, VSH_OUT_T1, 1, 0, 1);
     n = nv2a_vsh_decode(prog, 5, &p);
@@ -234,7 +234,7 @@ static void test_vsh_a0_ilu_and_constant_writes(void) {
     n = nv2a_vsh_to_glsl(&p, g_glsl, sizeof g_glsl);
     CHECK(n > 0 && is_ascii(g_glsl));
     CONTAINS(g_glsl, "A0 = int(floor(a.x));");
-    CONTAINS(g_glsl, "vec4 a = C[clamp(A0 + 10, 0, 191)].xyzw;"); /* lee la copia local */
+    CONTAINS(g_glsl, "vec4 a = C[clamp(A0 + 10, 0, 191)].xyzw;"); /* reads the local copy */
     CONTAINS(g_glsl, "vec4 C[192];");
     CONTAINS(g_glsl, "oD0 = mac;");
     CONTAINS(g_glsl, "vec4 ilu = vec4(inversesqrt(abs(cc.x)));");
@@ -289,15 +289,15 @@ static void test_vsh_errors(void) {
     encode(prog, 14, 0, r1, r1, r1, 0xF, 0, 0, 0, 0, 0, 0, 0, 1);
     CHECK(nv2a_vsh_decode(prog, 1, &p) == VSH_ERR_OPCODE);
     encode(prog, VSH_MAC_MUL, 0, r1, NONE, NONE, 0xF, 0, 0, 0, 0, 0, 0, 0, 1);
-    CHECK(nv2a_vsh_decode(prog, 1, &p) == VSH_ERR_MUX); /* MUL sin operando B */
+    CHECK(nv2a_vsh_decode(prog, 1, &p) == VSH_ERR_MUX); /* MUL without operand B */
     encode(prog, VSH_MAC_MOV, 0, op(VSH_MUX_TEMP, 13, 0x1B), NONE, NONE, 0xF, 0, 0, 0, 0, 0, 0, 0, 1);
     CHECK(nv2a_vsh_decode(prog, 1, &p) == VSH_ERR_REGISTER);
     encode(prog, VSH_MAC_MOV, 0, op(VSH_MUX_CONST, 200, 0x1B), NONE, NONE, 0xF, 0, 0, 0, 0, 0, 0, 0, 1);
     CHECK(nv2a_vsh_decode(prog, 1, &p) == VSH_ERR_REGISTER);
     encode(prog, VSH_MAC_MOV, 0, r1, NONE, NONE, 0, 0, 0, 0xF, 1, 1, 0, 0, 1);
-    CHECK(nv2a_vsh_decode(prog, 1, &p) == VSH_ERR_OUTPUT); /* o[1] no existe */
+    CHECK(nv2a_vsh_decode(prog, 1, &p) == VSH_ERR_OUTPUT); /* o[1] does not exist */
     encode(prog, VSH_MAC_MOV, 0, r1, NONE, NONE, 0, 0, 0, 0xF, 1, VSH_OUT_D0, 1, 0, 1);
-    CHECK(nv2a_vsh_decode(prog, 1, &p) == VSH_ERR_OUTPUT); /* salida desde un ILU NOP */
+    CHECK(nv2a_vsh_decode(prog, 1, &p) == VSH_ERR_OUTPUT); /* output from a NOP ILU */
     CHECK(nv2a_vsh_decode(k_prog_basic, 2, &p) == 2);
     CHECK(nv2a_vsh_to_glsl(&p, small, sizeof small) == VSH_ERR_SPACE && small[0] == 0);
     CHECK(strcmp(nv2a_vsh_error(VSH_ERR_SPACE), "ok") != 0);
@@ -306,12 +306,12 @@ static void test_vsh_errors(void) {
 /* ---- register combiners ---------------------------------------------------------------- */
 
 /*
- * tex t0; mul r0, t0, v0 (una etapa):
+ * tex t0; mul r0, t0, v0 (one stage):
  *   RGB ICW:   A = T0 (0x08), B = V0 (0x04), C = D = 0           = 0x08040000
  *   RGB OCW:   AB -> R0 (0xC << 4)                               = 0x000000C0
- *   alfa ICW:  A = T0.a (0x18), B = V0.a (0x14)                  = 0x18140000
- *   alfa OCW:  AB -> R0                                          = 0x000000C0
- *   final = 0 (sale r0); etapa 0 de textura PROJECT2D (1).
+ *   alpha ICW: A = T0.a (0x18), B = V0.a (0x14)                  = 0x18140000
+ *   alpha OCW: AB -> R0                                          = 0x000000C0
+ *   final = 0 (r0 comes out); texture stage 0 PROJECT2D (1).
  */
 static void test_psh_modulate(void) {
     psh_registers r;
@@ -348,17 +348,17 @@ static void test_psh_modulate(void) {
 }
 
 /*
- * Dos etapas, mux, dot, escala, blue-to-alpha, C0 por etapa, BUMPENVMAP y combiner final:
- *   control = 2 etapas | mux por el bit alto (0x100) | C0 por etapa (0x1000)  = 0x00001102
- *   etapa 0 RGB: A = T0 expand (0x48), B = C0 expand (0x41)                     = 0x48410000
+ * Two stages, mux, dot, scale, blue-to-alpha, per-stage C0, BUMPENVMAP and final combiner:
+ *   control = 2 stages | mux by the high bit (0x100) | per-stage C0 (0x1000)  = 0x00001102
+ *   stage 0 RGB: A = T0 expand (0x48), B = C0 expand (0x41)                     = 0x48410000
  *                AB -> R0 (0xC0) | AB dot (0x2000) | x2 (2 << 15) | AB b->a (0x80000)
  *                                                                               = 0x000920C0
- *   etapa 1 RGB: A = R0 (0x0C), B = V0, C = T1 (0x09), D = V1 (0x05)           = 0x0C040905
+ *   stage 1 RGB: A = R0 (0x0C), B = V0, C = T1 (0x09), D = V1 (0x05)           = 0x0C040905
  *                SUM -> R1 (0xD << 8) | mux (0x4000) | bias (1 << 15)          = 0x0000CD00
- *   etapa 1 alfa: A = 0 invertido (0x20), B = V0.a (0x14); AB -> R1            = 0x20140000 / 0xD0
+ *   stage 1 alpha: A = inverted 0 (0x20), B = V0.a (0x14); AB -> R1            = 0x20140000 / 0xD0
  *   final ABCD: A = fog.a (0x13), B = R1 (0x0D), C = fog (0x03), D = 0         = 0x130D0300
- *   final EFG:  G = R1.a (0x1D), clamp de V1R0_SUM (0x80)                      = 0x00001D80
- *   texturas: etapa 0 PROJECT2D (1), etapa 1 BUMPENVMAP (6 << 5)               = 0x000000C1
+ *   final EFG:  G = R1.a (0x1D), V1R0_SUM clamp (0x80)                         = 0x00001D80
+ *   textures: stage 0 PROJECT2D (1), stage 1 BUMPENVMAP (6 << 5)               = 0x000000C1
  */
 static void test_psh_two_stages_and_final(void) {
     psh_registers r;
@@ -418,41 +418,41 @@ static void test_psh_errors_and_unsupported(void) {
     r.combiner_control = 9;
     CHECK(nv2a_psh_decode(&r, &p) == PSH_ERR_STAGES);
     r.combiner_control = 1;
-    r.rgb_outputs[0] = 0x10; /* AB -> C0: no se puede escribir */
+    r.rgb_outputs[0] = 0x10; /* AB -> C0: cannot be written */
     CHECK(nv2a_psh_decode(&r, &p) == PSH_ERR_REGISTER);
     r.rgb_outputs[0] = 0;
-    r.rgb_inputs[0] = 0x0E000000u; /* V1R0_SUM fuera del final */
+    r.rgb_inputs[0] = 0x0E000000u; /* V1R0_SUM outside the final */
     CHECK(nv2a_psh_decode(&r, &p) == PSH_ERR_REGISTER);
     r.rgb_inputs[0] = 0;
-    r.alpha_outputs[0] = 0x2000; /* dot en la parte de alfa */
+    r.alpha_outputs[0] = 0x2000; /* dot in the alpha part */
     CHECK(nv2a_psh_decode(&r, &p) == PSH_ERR_FLAGS);
-    r.alpha_outputs[0] = 5u << 15; /* escala reservada */
+    r.alpha_outputs[0] = 5u << 15; /* reserved scale */
     CHECK(nv2a_psh_decode(&r, &p) == PSH_ERR_FLAGS);
     r.alpha_outputs[0] = 0;
-    r.final_inputs_abcd = 0x4C000000u; /* final: R0 con EXPAND */
+    r.final_inputs_abcd = 0x4C000000u; /* final: R0 with EXPAND */
     CHECK(nv2a_psh_decode(&r, &p) == PSH_ERR_FINAL);
     r.final_inputs_abcd = 0;
-    r.texture_modes = PSH_TEX_BUMPENVMAP; /* dependiente en la etapa 0 */
+    r.texture_modes = PSH_TEX_BUMPENVMAP; /* dependent on stage 0 */
     CHECK(nv2a_psh_decode(&r, &p) == PSH_ERR_TEXMODE);
     r.texture_modes = 25;
     CHECK(nv2a_psh_decode(&r, &p) == PSH_ERR_TEXMODE);
     r.texture_modes = (uint32_t)PSH_TEX_BUMPENVMAP << 10;
-    r.other_stage_input = 2u << 16; /* la etapa 2 no puede leer de sí misma */
+    r.other_stage_input = 2u << 16; /* stage 2 cannot read from itself */
     CHECK(nv2a_psh_decode(&r, &p) == PSH_ERR_TEXMODE);
     r.other_stage_input = 1u << 16;
     r.texture_modes = (uint32_t)PSH_TEX_PROJECT2D | ((uint32_t)PSH_TEX_PROJECT2D << 5) |
                       ((uint32_t)PSH_TEX_BUMPENVMAP_LUM << 10) | ((uint32_t)PSH_TEX_DOT_ST << 15);
-    r.compare_mode = 0x5u << 12; /* etapa 3: s y r con >= */
+    r.compare_mode = 0x5u << 12; /* stage 3: s and r with >= */
     CHECK(nv2a_psh_decode(&r, &p) == 1);
     CHECK(p.tex_source[2] == 1 && p.unsupported_tex == (1u << 3) && p.compare[3] == 5);
     CHECK(nv2a_psh_to_glsl(&p, g_glsl, sizeof g_glsl) > 0);
     CONTAINS(g_glsl, "vec4 t2 = texture(tex2, (oT2.xy + bumpMat[2] * t1.rg) * texScale[2]);");
     CONTAINS(g_glsl, "t2.rgb *= clamp(t1.b * bumpScale[2] + bumpOffset[2], 0.0, 1.0);");
-    CONTAINS(g_glsl, "vec4 t3 = vec4(0.0); /* modo DOT_ST sin emular */");
+    CONTAINS(g_glsl, "vec4 t3 = vec4(0.0); /* mode DOT_ST not emulated */");
     CHECK(!strstr(g_glsl, "uniform sampler2D tex3;"));
     r.texture_modes = (uint32_t)PSH_TEX_CLIPPLANE;
     CHECK(nv2a_psh_decode(&r, &p) == 1);
-    r.compare_mode = 0x1u; /* s >= 0 descarta; t, r, q < 0 descartan */
+    r.compare_mode = 0x1u; /* s >= 0 discards; t, r, q < 0 discard */
     CHECK(nv2a_psh_decode(&r, &p) == 1);
     CHECK(nv2a_psh_to_glsl(&p, g_glsl, sizeof g_glsl) > 0);
     CONTAINS(g_glsl, "if (oT0.x >= 0.0) discard;");
@@ -461,7 +461,7 @@ static void test_psh_errors_and_unsupported(void) {
     CHECK(strcmp(nv2a_psh_error(PSH_ERR_TEXMODE), "ok") != 0);
 }
 
-/* ---- modo --vsh-file ------------------------------------------------------------------- */
+/* ---- --vsh-file mode ------------------------------------------------------------------- */
 
 static int vsh_file(const char *in_path, const char *out_path) {
     static uint32_t words[1 + VSH_MAX_INSN * VSH_WORDS_PER_INSN];
@@ -471,7 +471,7 @@ static int vsh_file(const char *in_path, const char *out_path) {
     int n_insn, result;
     FILE *f = fopen(in_path, "rb");
     if (!f) {
-        fprintf(stderr, "no se puede abrir %s\n", in_path);
+        fprintf(stderr, "cannot open %s\n", in_path);
         return 2;
     }
     n_words = fread(words, sizeof words[0], sizeof words / sizeof words[0], f);
@@ -498,21 +498,21 @@ static int vsh_file(const char *in_path, const char *out_path) {
     }
     f = fopen(out_path, "wb");
     if (!f) {
-        fprintf(stderr, "no se puede escribir %s\n", out_path);
+        fprintf(stderr, "cannot write %s\n", out_path);
         return 2;
     }
     fputs(g_glsl, f);
     fclose(f);
-    printf("%s: %d instrucciones -> %s\n", in_path, prog.n_insn, out_path);
+    printf("%s: %d instructions -> %s\n", in_path, prog.n_insn, out_path);
     return 0;
 }
 
 /*
- * Definición de pixel shader de D3D de la Xbox: 60 u32 con las mismas palabras que cargan
- * los métodos NV097 (offsets en u32): alfa ICW 0-7, final ABCD 8, final EFG 9, C0 10-17,
- * C1 18-25, alfa OCW 26-33, RGB ICW 34-41, compare 42, constantes del final 43-44, RGB OCW
- * 45-52, combiner control 53, modos de textura 54, dot mapping 55, entrada de las etapas
- * 56 y tres palabras de mapeo de constantes (57-59) que no hacen falta aquí.
+ * D3D pixel shader definition for the Xbox: 60 u32 with the same words that the NV097
+ * methods load (offsets in u32): alpha ICW 0-7, final ABCD 8, final EFG 9, C0 10-17,
+ * C1 18-25, alpha OCW 26-33, RGB ICW 34-41, compare 42, final constants 43-44, RGB OCW
+ * 45-52, combiner control 53, texture modes 54, dot mapping 55, stage input
+ * 56 and three constant-mapping words (57-59) that are not needed here.
  */
 #define PSH_DEF_WORDS 60
 
@@ -523,13 +523,13 @@ static int psh_file(const char *in_path, const char *out_path) {
     int result, k;
     FILE *f = fopen(in_path, "rb");
     if (!f) {
-        fprintf(stderr, "no se puede abrir %s\n", in_path);
+        fprintf(stderr, "cannot open %s\n", in_path);
         return 2;
     }
     result = (int)fread(w, sizeof w[0], PSH_DEF_WORDS, f);
     fclose(f);
     if (result != PSH_DEF_WORDS) {
-        fprintf(stderr, "%s: se esperaban %d u32\n", in_path, PSH_DEF_WORDS);
+        fprintf(stderr, "%s: expected %d u32\n", in_path, PSH_DEF_WORDS);
         return 1;
     }
     memset(&r, 0, sizeof r);
@@ -558,12 +558,12 @@ static int psh_file(const char *in_path, const char *out_path) {
     }
     f = fopen(out_path, "wb");
     if (!f) {
-        fprintf(stderr, "no se puede escribir %s\n", out_path);
+        fprintf(stderr, "cannot write %s\n", out_path);
         return 2;
     }
     fputs(g_glsl, f);
     fclose(f);
-    printf("%s: %d etapas, texturas 0x%05X -> %s\n", in_path, prog.n_stages,
+    printf("%s: %d stages, textures 0x%05X -> %s\n", in_path, prog.n_stages,
            (unsigned)r.texture_modes, out_path);
     return 0;
 }
@@ -586,9 +586,9 @@ int main(int argc, char **argv) {
     test_psh_two_stages_and_final();
     test_psh_errors_and_unsupported();
     if (g_failures) {
-        fprintf(stderr, "shaders_test: %d de %d comprobaciones fallan\n", g_failures, g_checks);
+        fprintf(stderr, "shaders_test: %d of %d checks fail\n", g_failures, g_checks);
         return 1;
     }
-    printf("shaders_test: OK (%d comprobaciones)\n", g_checks);
+    printf("shaders_test: OK (%d checks)\n", g_checks);
     return 0;
 }

@@ -1,25 +1,25 @@
 /*
- * input.h: entrada del mando para el HLE de XAPI (H8).
+ * input.h: gamepad input for the XAPI HLE (H8).
  *
- * Dos capas:
- *   - input.c (pura, sin Windows ni el loader): estructuras de Xbox, mapeo de un mando de PC
- *     (XInput de Windows) y del teclado a XINPUT_GAMEPAD de Xbox, y el guion de pulsaciones
- *     automáticas (--input-script). La prueban port/tests/input_test.c.
- *   - xapi_hle.c (loader): parchea las funciones de XAPI del juego con un JMP a las nuestras
- *     y lee la entrada real (xinput1_4.dll / xinput9_1_0.dll y GetAsyncKeyState).
+ * Two layers:
+ *   - input.c (pure, no Windows or loader): Xbox structures, mapping of a PC gamepad
+ *     (Windows XInput) and the keyboard to Xbox XINPUT_GAMEPAD, and the automatic
+ *     button-press script (--input-script). Tested by port/tests/input_test.c.
+ *   - xapi_hle.c (loader): patches the game's XAPI functions with a JMP to ours
+ *     and reads the real input (xinput1_4.dll / xinput9_1_0.dll and GetAsyncKeyState).
  *
- * Layout de Xbox (XDK público; nxdk lib/usb/libusbohci_xbox/xid_driver.h para el orden de
- * los botones analógicos y los sticks; XboxDevWiki "Xbox Input Devices" para los bits):
+ * Xbox layout (public XDK; nxdk lib/usb/libusbohci_xbox/xid_driver.h for the order of
+ * the analog buttons and the sticks; XboxDevWiki "Xbox Input Devices" for the bits):
  *
  *   XINPUT_GAMEPAD (18 bytes)            XINPUT_STATE (22 bytes)
  *     +0  WORD  wButtons                   +0  DWORD dwPacketNumber
  *     +2  BYTE  bAnalogButtons[8]          +4  XINPUT_GAMEPAD Gamepad
  *           A B X Y BLACK WHITE LT RT
- *     +10 SHORT sThumbLX, sThumbLY, sThumbRX, sThumbRY (con signo; Y positivo = arriba)
+ *     +10 SHORT sThumbLX, sThumbLY, sThumbRX, sThumbRY (signed; positive Y = up)
  *
- *   wButtons: D-pad arriba 0x01, abajo 0x02, izquierda 0x04, derecha 0x08, START 0x10,
- *             BACK 0x20, stick izquierdo pulsado 0x40, derecho 0x80. A, B, X, Y, los
- *             botones negro y blanco y los gatillos son analógicos (0..255).
+ *   wButtons: D-pad up 0x01, down 0x02, left 0x04, right 0x08, START 0x10,
+ *             BACK 0x20, left stick pressed 0x40, right 0x80. A, B, X, Y, the black and
+ *             white buttons and the triggers are analog (0..255).
  */
 #pragma once
 
@@ -60,11 +60,11 @@ typedef struct xbox_input_state {
 } xbox_input_state_t;
 #pragma pack(pop)
 
-/* El juego copia estos bytes tal cual: el tamaño se comprueba al compilar. */
+/* The game copies these bytes as they are: the size is checked at compile time. */
 typedef char xpad_check_gamepad_size[sizeof(xbox_gamepad_t) == 18 ? 1 : -1];
 typedef char xpad_check_state_size[sizeof(xbox_input_state_t) == 22 ? 1 : -1];
 
-/* XINPUT_GAMEPAD de Windows (xinput1_4), con sus bits; aquí, sin incluir <xinput.h>. */
+/* Windows XINPUT_GAMEPAD (xinput1_4), with its bits; here, without including <xinput.h>. */
 typedef struct pc_gamepad {
     uint16_t buttons;
     uint8_t left_trigger, right_trigger;
@@ -86,34 +86,34 @@ typedef struct pc_gamepad {
 #define PC_X 0x4000u
 #define PC_Y 0x8000u
 
-/* Mando de Xbox One/360 -> Xbox: A/B/X/Y digitales a 255, LB -> WHITE, RB -> BLACK. */
+/* Xbox One/360 gamepad -> Xbox: A/B/X/Y digital at 255, LB -> WHITE, RB -> BLACK. */
 void xpad_from_pc(const pc_gamepad_t *pc, xbox_gamepad_t *out);
 
-/* Teclado -> Xbox. `down(vk)` != 0 si la tecla virtual `vk` está pulsada.
- *   Enter = START + A, Esc = BACK + B, flechas = D-pad, WASD = stick izquierdo,
- *   J/K/L/I = A/B/X/Y, Q/E = WHITE/BLACK, U/O = gatillos izquierdo/derecho. */
+/* Keyboard -> Xbox. `down(vk)` != 0 if the virtual key `vk` is pressed.
+ *   Enter = START + A, Esc = BACK + B, arrows = D-pad, WASD = left stick,
+ *   J/K/L/I = A/B/X/Y, Q/E = WHITE/BLACK, U/O = left/right trigger. */
 typedef int (*key_down_fn)(int vk);
 void xpad_from_keys(key_down_fn down, xbox_gamepad_t *out);
 
-/* Combina dos fuentes: OR de botones, máximo de los analógicos y el stick más desviado. */
+/* Merges two sources: OR of the buttons, maximum of the analogs and the most deflected stick. */
 void xpad_merge(xbox_gamepad_t *dst, const xbox_gamepad_t *src);
 int xpad_equal(const xbox_gamepad_t *a, const xbox_gamepad_t *b);
 
-/* Guion de pulsaciones: "t=3s:START,t=5s:A,t=6500ms:UP+A@1s" (hold por defecto 200 ms).
- * Botones: START BACK A B X Y BLACK WHITE LT RT UP DOWN LEFT RIGHT LTHUMB RTHUMB.
+/* Button-press script: "t=3s:START,t=5s:A,t=6500ms:UP+A@1s" (default hold 200 ms).
+ * Buttons: START BACK A B X Y BLACK WHITE LT RT UP DOWN LEFT RIGHT LTHUMB RTHUMB.
  *
- * Con la unidad "p" el tiempo se cuenta en lecturas del mando (XInputGetState del puerto 0)
- * en vez de en milisegundos: "t=2400p:START@10p". El juego lee el mando una vez por frame
- * de su bucle y no lo lee mientras carga, así que un guion en lecturas no depende de cuánto
- * tarden la E/S o el render (con milisegundos, una carga más lenta hacía que la pulsación
- * cayera en otra pantalla). Una entrada usa la misma unidad en el instante y en la duración
- * (hold por defecto: 12 lecturas). */
+ * With the "p" unit the time is counted in gamepad reads (XInputGetState of port 0)
+ * instead of milliseconds: "t=2400p:START@10p". The game reads the gamepad once per frame
+ * of its loop and does not read it while loading, so a script in reads does not depend on how
+ * long I/O or rendering take (with milliseconds, a slower load made the press
+ * land on another screen). An entry uses the same unit for the instant and the duration
+ * (default hold: 12 reads). */
 #define INPUT_SCRIPT_MAX 64
 #define INPUT_SCRIPT_HOLD_MS 200u
 #define INPUT_SCRIPT_HOLD_POLLS 12u
 
 typedef struct input_event {
-    uint32_t at_ms, hold_ms; /* en lecturas si `polls` */
+    uint32_t at_ms, hold_ms; /* in reads if `polls` */
     uint8_t polls;
     uint16_t buttons;
     uint8_t analog_mask; /* bit i -> analog[i] = 255 */
@@ -124,17 +124,17 @@ typedef struct input_script {
     input_event_t events[INPUT_SCRIPT_MAX];
 } input_script_t;
 
-/* 0 si el texto es válido; si no, -1 y el motivo en `err`. */
+/* 0 if the text is valid; otherwise -1 and the reason in `err`. */
 int input_script_parse(const char *text, input_script_t *out, char *err, size_t errlen);
-/* Añade a `out` las pulsaciones activas en `now_ms` o en la lectura número `now_polls`. */
+/* Adds to `out` the presses active at `now_ms` or at read number `now_polls`. */
 void input_script_apply(const input_script_t *script, uint32_t now_ms, uint32_t now_polls,
                         xbox_gamepad_t *out);
 
 /* xapi_hle.c (loader) --------------------------------------------------------------- */
 
-/* Parchea XAPI si los bytes del XBE cargado son los esperados (y cuadran con el CSV de
- * símbolos, si lo hay). `host_input` = 0: ni mando de PC ni teclado, solo el guion (pruebas
- * deterministas). Devuelve las funciones parcheadas; -1 si el guion es inválido. */
+/* Patches XAPI if the bytes of the loaded XBE are the expected ones (and match the symbols
+ * CSV, if there is one). `host_input` = 0: neither PC gamepad nor keyboard, only the script
+ * (deterministic tests). Returns the patched functions; -1 if the script is invalid. */
 int ngb_input_install(const char *symbols_csv, const char *script, int host_input);
-/* Resumen de llamadas al log. */
+/* Summary of calls, to the log. */
 void ngb_input_summary(void);
