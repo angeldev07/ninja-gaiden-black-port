@@ -273,6 +273,23 @@ en el modo fijo.
 - Con el culling desactivado aparecen grandes polígonos oscuros que cubren la vista. Puede ser una cúpula de cielo
   vista por dentro o geometría de volúmenes de sombra (hay stencil con INVERT); hay que aislar qué dibujo es.
 
+## RenderDoc y el culling invertido (el suelo y el escenario que faltaban)
+
+- **Herramienta (`--rdoc-frame N`, `port/src/gpu/rdoc.c`):**
+  - carga la DLL x86 de RenderDoc antes de crear el contexto GL y captura exactamente el frame N; el `.rdc` queda
+    junto al log, en NGB_DATA;
+  - la captura se analiza sin interfaz con `qrenderdoc --python script.py` (módulo `renderdoc`): lista de draws,
+    destino principal y *pixel history* de los píxeles que se pidan. El script está en el scratchpad de la
+    sesión.
+- **Hallazgo:** en un píxel del suelo de la demo, **43 draws marcados como `backfaceCulled`**.
+- **Causa:** `glstate` invertía el sentido de la cara frontal suponiendo que la Y del VS estaba espejada. Pero el
+  NV2A define CW/CCW con la Y hacia arriba y nuestra proyección también espeja la Y, así que las dos inversiones
+  se anulan. xemu invierte porque su proyección no espeja.
+- **Arreglo:** la cara frontal ya no se invierte. Aparecen el edificio, los muros, las columnas, el puente y las
+  pasarelas.
+- **Determinismo:** con `--input-script "t=180p:START,t=600p:START"` (lecturas del mando, no ms) la demo cae casi
+  en el mismo instante en cada ejecución; las capturas son comparables.
+
 ## Siguiente
 
 1. Pasar de la pantalla de título al menú principal, y averiguar qué esperan los avisos y el vídeo (audio).

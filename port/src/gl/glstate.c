@@ -159,7 +159,12 @@ int glstate_translate(const nv2a_state *in, gl_state *out) {
     if (in->front_face != GL_CW_ && in->front_face != GL_CCW_) {
         return GLSTATE_ERR_CULL;
     }
-    out->front_face = in->front_face == GL_CW_ ? GL_CCW_ : GL_CW_; /* Y invertida */
+    /* Sin invertir. El NV2A define CW/CCW con la Y hacia arriba (como OpenGL) y D3D trabaja con
+     * la Y de pantalla hacia abajo; nuestra proyección (y = s.y·2/h - 1) también espeja la Y, así
+     * que las dos inversiones se anulan. (xemu sí invierte porque su proyección no espeja.)
+     * Invertir aquí descartaba por culling el suelo y el escenario: RenderDoc mostró 43 draws
+     * "backfaceCulled" en un píxel del suelo de la demo. */
+    out->front_face = in->front_face == GL_CW_ ? GL_CW_ : GL_CCW_;
 
     out->stencil = in->stencil_test_enable != 0;
     out->stencil_ref = (int)(in->stencil_func_ref & 0xFFu);

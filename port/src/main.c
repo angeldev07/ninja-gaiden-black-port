@@ -50,6 +50,7 @@ static void usage(void) {
             "  --symbols CSV  nombres de funciones (CSV de Ghidra) en el log y los crashes\n"
             "  --mute       sin sonido (la APU emulada sigue avanzando)\n"
             "  --audio-wav  guarda lo que suena en <log>-audio.wav\n"
+            "  --rdoc-frame N  captura el frame N con RenderDoc (render GL; .rdc junto al log)\n"
             "  --watch LISTA  vigila direcciones del juego (0xADDR[:1|2|4],...) y registra los "
             "cambios\n"
             "  --input-script  pulsaciones del mando, p. ej. \"t=3s:START,t=5s:A@500ms\"\n"
@@ -160,6 +161,8 @@ static int parse_args(void) {
             g_ngb_opts.mute = 1;
         else if (!strcmp(a, "--audio-wav"))
             g_ngb_opts.audio_wav = 1;
+        else if (!strcmp(a, "--rdoc-frame") && more)
+            g_ngb_opts.rdoc_frame = (unsigned)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--no-pacing"))
             g_ngb_opts.no_pacing = 1;
         else if (!strcmp(a, "--renderer") && more) {

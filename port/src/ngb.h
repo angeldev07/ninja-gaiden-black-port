@@ -57,6 +57,7 @@ typedef struct ngb_options {
     const char *watch;        /* --watch: direcciones del juego a vigilar (watch.c) */
     int mute;                 /* --mute: sin salida de audio (el VP sigue avanzando) */
     int audio_wav;            /* --audio-wav: guarda la mezcla en <log>-audio.wav */
+    unsigned rdoc_frame;      /* --rdoc-frame N: captura ese frame con RenderDoc (gpu/rdoc.c) */
 } ngb_options_t;
 
 /* --renderer: AUTO = OpenGL si hay ventana y contexto 4.x; si no, el rasterizador. */

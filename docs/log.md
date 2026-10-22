@@ -231,3 +231,10 @@ La mitad de los dibujos del 3D usan el pipeline fijo con iluminación, que el re
 luces, color material, texgen y matrices de textura, y el escenario de la demo aparece iluminado. Los mapas de
 sombra (texturas de profundidad `0x2E`) se enlazan como render-to-texture y se comparan en el shader: los 46
 dibujos que se descartaban ya se ejecutan. Siguen pendientes el cielo y el suelo. Detalle en [[gpu-nv2a]].
+
+## [2026-10-22] ingest | RenderDoc: el suelo faltaba por el culling invertido
+Se integró RenderDoc (`--rdoc-frame N`) y se analizaron las capturas con su API de Python. El *pixel history* de un
+píxel del suelo mostró 43 draws descartados por culling: `glstate` invertía el sentido de la cara frontal, cuando
+nuestra proyección ya lo compensa. Sin la inversión aparece el escenario de la demo. Lección: con estado de GPU,
+un depurador de frames responde en minutos lo que las trazas a ciegas no respondían en horas. Detalle en
+[[gpu-nv2a]].

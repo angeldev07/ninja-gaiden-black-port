@@ -123,7 +123,7 @@ static void test_glstate(void) {
     nv2a_state_defaults(&s, 720, 480);
     CHECK(glstate_translate(&s, &g) == 0);
     CHECK(!g.blend && g.blend_src == 1 && g.blend_dst == 0 && g.blend_equation == 0x8006);
-    CHECK(g.depth_func == 0x0201 && g.depth_write && g.front_face == 0x0900); /* CCW -> CW */
+    CHECK(g.depth_func == 0x0201 && g.depth_write && g.front_face == 0x0901); /* CCW tal cual */
     CHECK(g.scissor[0] == 0 && g.scissor[1] == 0 && g.scissor[2] == 720 && g.scissor[3] == 480);
     CHECK(g.color_mask[0] && g.color_mask[1] && g.color_mask[2] && g.color_mask[3]);
 
@@ -154,7 +154,7 @@ static void test_glstate(void) {
     CHECK(g.blend_equation == 0x8006 && g.blend_signed);
     CHECK(fabsf(g.blend_color[0] - 1.0f) < 1e-6f && fabsf(g.blend_color[1] - 64 / 255.0f) < 1e-6f &&
           g.blend_color[2] == 0.0f && fabsf(g.blend_color[3] - 128 / 255.0f) < 1e-6f);
-    CHECK(g.depth_func == 0x0203 && g.front_face == 0x0901 && g.cull && g.cull_face == 0x0404);
+    CHECK(g.depth_func == 0x0203 && g.front_face == 0x0900 && g.cull && g.cull_face == 0x0404);
     CHECK(g.stencil && g.stencil_func == 0x0202 && g.stencil_ref == 0xA5 &&
           g.stencil_zpass == 0x8507);
     CHECK(g.alpha_test && g.alpha_func == 0x0206 && fabsf(g.alpha_ref - 128 / 255.0f) < 1e-6f);

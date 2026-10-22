@@ -29,6 +29,7 @@
 #include "../ngb.h"
 #include "nv2a.h"
 #include "rcache.h"
+#include "rdoc.h"
 #include "../gfx/present.h"
 #include "../gl/glbackend.h"
 #include "../gl/glload.h"
@@ -213,6 +214,7 @@ int pgl_start(HWND hwnd, char *why, size_t whylen) {
         return GLB_ERR_ARGS;
     }
     R.hwnd = hwnd;
+    rdoc_load(g_ngb_opts.rdoc_frame); /* antes de crear el contexto GL */
     R.req = CreateEventA(NULL, FALSE, FALSE, NULL);
     R.done = CreateEventA(NULL, FALSE, FALSE, NULL);
     R.thread = R.req && R.done ? CreateThread(NULL, 1 << 20, render_main, NULL, 0, NULL) : NULL;
@@ -1672,6 +1674,7 @@ int pgl_flip(const pgl_regs *r, const char *shot_path) {
         }
     }
     SwapBuffers(R.dc);
+    rdoc_after_present(R.frame);
     ngl_glBindFramebuffer(GL_FRAMEBUFFER, R.fbo);
     R.color_addr = 0; /* el FBO se vuelve a preparar en el siguiente dibujo */
     R.target_valid = R.state_valid = 0;
