@@ -486,3 +486,11 @@ Details in [[gpu-nv2a]].
     comparisons pass `--debug-shots 300`.
   - With the default log name, the loader deletes the files of the sessions older than the 10 most recent. It
     keeps the `.rdc` captures, and it never touches `hdd\` (the saves) or `shots\` (F12).
+
+## [2026-10-22] fix | Polygon offset: the dot/moire acne on chapter 1 walls is gone
+- The game sets `SET_POLY_OFFSET_FILL_ENABLE` and the `SET_POLYGON_OFFSET_SCALE_FACTOR`/`BIAS` pair about 4-5 times
+  per frame (shadow-map passes), and we ignored them. The shadow compare then fought the surface itself, which
+  showed up as regular dot and moire patches on the gorge walls.
+- Now `glPolygonOffset(factor, bias · 2^24 / clip range)`, equivalent to xemu's in-shader depth offset for our
+  24-bit depth buffer.
+- The owner confirmed in chapter 1 that the patterns are gone and the lighting looks right.

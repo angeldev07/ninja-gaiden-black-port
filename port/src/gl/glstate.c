@@ -209,6 +209,14 @@ int glstate_translate(const nv2a_state *in, gl_state *out) {
     out->fog_color[2] = byte_at(in->fog_color, 16);
     out->fog_color[3] = byte_at(in->fog_color, 24);
     memcpy(out->fog_params, in->fog_params, sizeof out->fog_params);
+
+    /* Depth offset, as xemu's psh.c: zvalue += bias + factor * slope, in Z units.
+     * Without it, the shadow-map pass shows acne (dot and moire patterns). */
+    out->poly_offset = in->poly_offset_fill != 0;
+    out->poly_factor = in->poly_offset_factor;
+    out->poly_units = in->poly_offset_bias;
+    if (in->zclip_max > in->zclip_min)
+        out->poly_units *= 16777216.0f / (in->zclip_max - in->zclip_min);
     return 0;
 }
 
@@ -240,6 +248,8 @@ int glstate_apply(const nv2a_state *in, gl_state *applied) {
     glStencilFunc(s.stencil_func, s.stencil_ref, s.stencil_read_mask);
     glStencilMask(s.stencil_write_mask);
     glStencilOp(s.stencil_fail, s.stencil_zfail, s.stencil_zpass);
+    enable(GL_POLYGON_OFFSET_FILL, s.poly_offset);
+    glPolygonOffset(s.poly_offset ? s.poly_factor : 0.0f, s.poly_offset ? s.poly_units : 0.0f);
     glColorMask((GLboolean)s.color_mask[0], (GLboolean)s.color_mask[1], (GLboolean)s.color_mask[2],
                 (GLboolean)s.color_mask[3]);
     glEnable(GL_SCISSOR_TEST);

@@ -45,6 +45,10 @@ typedef struct nv2a_state {
     uint32_t fog_gen_mode;        /* 0x02A0 SET_FOG_GEN_MODE */
     uint32_t fog_color;           /* 0x02A8 SET_FOG_COLOR (R in the low byte: ABGR) */
     float fog_params[3];          /* 0x09C0 SET_FOG_PARAMS */
+    uint32_t poly_offset_fill;    /* 0x0338 SET_POLY_OFFSET_FILL_ENABLE */
+    float poly_offset_factor;     /* 0x0384 SET_POLYGON_OFFSET_SCALE_FACTOR */
+    float poly_offset_bias;       /* 0x0388 SET_POLYGON_OFFSET_BIAS (Z units) */
+    float zclip_min, zclip_max;   /* 0x0394/0x0398 SET_CLIP_MIN/MAX (Z units) */
     uint32_t surface_width;       /* render target size (not a method) */
     uint32_t surface_height;
 } nv2a_state;
@@ -75,6 +79,10 @@ typedef struct gl_state {
     unsigned fog_mode;     /* GL_LINEAR/GL_EXP/GL_EXP2 (or the NV2A _ABS value) */
     float fog_color[4];
     float fog_params[3];
+    /* glPolygonOffset: the NV2A bias is in Z units of the clip range; GL units are
+     * the resolution of our 24-bit depth buffer. */
+    int poly_offset;
+    float poly_factor, poly_units;
 } gl_state;
 
 enum glstate_error {

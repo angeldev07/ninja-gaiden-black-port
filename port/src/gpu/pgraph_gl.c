@@ -348,6 +348,11 @@ static void state_from_regs(const pgl_regs *r, nv2a_state *s) {
     s->fog_params[0] = as_float(M(r, 0x09C0));
     s->fog_params[1] = as_float(M(r, 0x09C4));
     s->fog_params[2] = as_float(M(r, 0x09C8));
+    s->poly_offset_fill = M(r, 0x0338);
+    s->poly_offset_factor = as_float(M(r, 0x0384));
+    s->poly_offset_bias = as_float(M(r, 0x0388));
+    s->zclip_min = as_float(M(r, 0x0394));
+    s->zclip_max = as_float(M(r, 0x0398));
 }
 
 /* Applies the fixed state. Returns what was applied (for the alpha test uniforms). */
