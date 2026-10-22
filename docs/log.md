@@ -610,3 +610,17 @@ Details in [[gpu-nv2a]].
 - The updater needs a public repository: anonymous downloads from a private repo's releases fail, and the launcher
   stays silent. It works for players once the repo is public. v0.2.0 users update by hand once.
 - Next: `version.h` goes back to `0.4.0-dev`.
+
+## [2026-10-22] docs | README for the public repo and a getting-started guide
+- `README.md` rewritten for players and contributors:
+  - CI, release and license badges, plus a launcher screenshot;
+  - features, a four-step quick start, status and known gaps, building, layout, contributing, credits, license and
+    the legal notice.
+- New [[getting-started]] for players:
+  - requirements and what the launcher accepts from your own disc. It gives no ripping instructions, tools or
+    download links, says the local law applies, and says it is not legal advice;
+  - install with the SmartScreen note, importing, controls, saves in `runs\hdd`, the graphics settings and updates;
+  - troubleshooting, how to report a bug with *Copy session info*, and an FAQ (Master Collection is Σ, not Black;
+    no donations).
+- The screenshots in `docs/images/` are of the launcher only, from a clean first run with no personal paths. The
+  launcher art is original. PNG is not a game-data extension, so the guard lets them through.

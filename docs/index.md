@@ -16,6 +16,10 @@ in [[CLAUDE]] and the timeline in [[log]].
 - [[log]]: chronological record, append-only.
 - [[wiki-llm]]: the LLM Wiki pattern we follow (our summary of Karpathy's idea file).
 
+## Players (`guide/`)
+
+- [[getting-started]]: from zero to playing: requirements, your own copy, install, import, controls, saves, settings, updates, troubleshooting and FAQ.
+
 ## Observation: reverse engineering (`reverse-engineering/`)
 
 - [[ngb-disc]]: Redump image and XISO, 249 files by type, AFS groups, executables and videos.

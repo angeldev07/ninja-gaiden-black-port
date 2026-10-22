@@ -1,78 +1,116 @@
 # Ninja Gaiden Black: native PC port
 
-An unofficial fan project that runs **Ninja Gaiden Black** (original Xbox, PAL) natively on
-Windows. There is no CPU emulator: the game's own x86 code runs inside a 32-bit Win32 process,
-on top of a reimplemented Xbox kernel, an NV2A → OpenGL renderer and an APU audio engine.
+[![CI](https://github.com/angeldev07/ninja-gaiden-black-port/actions/workflows/ci.yml/badge.svg)](https://github.com/angeldev07/ninja-gaiden-black-port/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/angeldev07/ninja-gaiden-black-port)](https://github.com/angeldev07/ninja-gaiden-black-port/releases/latest)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
 
-> **You need your own copy of the game.** This repository contains no game data, no game
-> assets and nothing from the Microsoft XDK.
+An unofficial fan project that runs **Ninja Gaiden Black** (original Xbox, 2005) natively on Windows, with no CPU
+emulator: the game's own x86 code runs inside a 32-bit Win32 process, on top of a reimplemented Xbox kernel, an NV2A →
+OpenGL renderer and an APU audio engine.
+
+> **You need your own copy of the game.** This repository and its releases contain no game data, no game assets and
+> nothing from the Microsoft XDK. Each player imports the files of their own disc.
+
+![The launcher](docs/images/launcher-play.png)
+
+## Features
+
+- **Plays the game:** from the title screen through chapter 6 so far, with saves, music, voices and effects at 60 fps.
+- **Sharper than the console:** the internal resolution goes up to 4x, with *Match my screen* rendering at your
+  monitor's resolution. Textures get 16x anisotropic filtering.
+- **Native widescreen:** the game's own 16:9 mode (a wider field of view, not a stretch), borderless fullscreen and
+  Alt+Enter.
+- **Gamepad and keyboard:** any XInput gamepad, and the keyboard at the same time.
+- **A launcher that does the rest:**
+  - it imports your disc image (Redump or XISO) or an extracted folder, and checks that it is the right game;
+  - it updates itself;
+  - it has English and Spanish UI.
+
+## Play
+
+1. Download the zip of the [latest release](https://github.com/angeldev07/ninja-gaiden-black-port/releases/latest)
+   and unzip it.
+2. Run `ngb-launcher.exe`. Windows SmartScreen may warn because the binaries are not code-signed: **More info**, then
+   **Run anyway**.
+3. Click **Import game** and pick the image of your disc.
+4. Click **PLAY**.
+
+The **[getting started guide](docs/guide/getting-started.md)** covers each step in detail, including what the launcher
+accepts from your own copy, the controls, where saves live, the settings, updates and troubleshooting.
 
 ## Status
 
-The game is playable from the title screen through chapter 6, with saves, music, voices and
-effects at 60 fps. Known gaps:
+v0.3.0 is playable through chapter 6. Known gaps:
 
-- Some lighting details still differ from the console (pending comparison with reference captures).
+- Some lighting details still differ from the console.
 - Floor reflections and the sword glow are missing.
-- Some in-game cutscenes drop to about 45 fps.
+- Some in-game cutscenes drop below 60 fps.
 
-The [roadmap](docs/target/roadmap.md) and the [development log](docs/log.md) have the details.
-
-## Quick start
-
-1. Download the latest release, or build from source (see below).
-2. Run `ngb-launcher.exe`.
-3. Click **Import game** and choose your Ninja Gaiden Black disc image (`.iso`, Redump or XISO)
-   or a folder with the extracted files (`default.xbe`). The launcher checks that it is the right
-   game and extracts it into its data folder.
-4. Press **PLAY**.
-
-Controls: an XInput gamepad, or the keyboard (the launcher's *Controls* page has the mapping).
-F12 saves a screenshot.
+The [roadmap](docs/target/roadmap.md) lists what is next, and the [development log](docs/log.md) records every step.
+Compatibility reports for chapters past 6 and for other regions are very welcome.
 
 ## Building from source
 
-Requirements:
-
-- Visual Studio 2022 with the C++ x86 toolset;
-- Python 3.13 for the tooling and the tests (stdlib only).
+Requirements: Visual Studio 2022 with the C++ x86 toolset, and Python 3.13 for the tools and tests (standard library
+only).
 
 ```bat
 port\build.cmd
 python -m unittest discover -s tests -v
 ```
 
-`build.cmd` compiles with `/W4 /WX` and runs the C unit tests. The binaries end up in
-`build\port\`:
+`build.cmd` compiles with `/W4 /WX` and runs the C unit tests. The binaries end up in `build\port\`:
 
 | Binary | What it is |
 | --- | --- |
-| `ngb-loader.exe` | the loader |
-| `ngb-core.dll` | the kernel, GPU and APU |
-| `ngb-launcher.exe` | the launcher |
+| `ngb-launcher.exe` | The launcher (Win32 + GDI) |
+| `ngb-loader.exe` | The loader that maps the game's XBE |
+| `ngb-core.dll` | The kernel, GPU and APU |
 
-## Repository layout
+Releases are built by GitHub Actions from a tag; see [ADR-07](docs/target/adr-07-releases-and-updater.md).
+
+## How it works
 
 | Path | Contents |
 | --- | --- |
 | `port/` | The native runtime in C: XBE loader, HLE kernel, NV2A/OpenGL renderer, APU, input, launcher |
-| `src/ngb_tools/` | Python reverse-engineering tools: AFS, XPR, KMD, audio, XBE, galleries |
-| `tests/` | Python unit tests |
-| `docs/` | The project knowledge base (an Obsidian vault): formats, reverse-engineering notes, decisions |
+| `src/ngb_tools/` | Python tools: reverse engineering (AFS, XPR, KMD, audio, XBE), the game-data guard, release packaging |
+| `tests/` | Python unit tests (the C tests live in `port/tests/`) |
+| `docs/` | The project's knowledge base (an Obsidian vault): formats, reverse-engineering notes, decisions |
 
-New contributors should start with [`docs/GOAL-ngb-port.md`](docs/GOAL-ngb-port.md) and
-[`docs/index.md`](docs/index.md).
+Start with [`docs/GOAL-ngb-port.md`](docs/GOAL-ngb-port.md) and [`docs/index.md`](docs/index.md).
+
+## Contributing
+
+Contributions are welcome: compatibility reports, bug reports, code and reverse-engineering notes. Read
+[CONTRIBUTING.md](CONTRIBUTING.md) first. It has the build, the workflow and the **mandatory legal rules**: no game data,
+no XDK, and a DCO sign-off on every commit. Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+Security issues go through [SECURITY.md](SECURITY.md).
+
+## Credits
+
+By **angeldev07** and [contributors](https://github.com/angeldev07/ninja-gaiden-black-port/graphs/contributors).
+
+The port stands on public work by others:
+
+- [xemu](https://github.com/xemu-project/xemu): the NV2A and APU behavior;
+- [nxdk](https://github.com/XboxDev/nxdk): the kernel export list;
+- [Cxbx-Reloaded](https://github.com/Cxbx-Reloaded/Cxbx-Reloaded) and [XboxDevWiki](https://xboxdevwiki.net/): XBE,
+  kernel and hardware documentation;
+- [envytools](https://github.com/envytools/envytools): NV2A documentation;
+- [RenderDoc](https://renderdoc.org/): the capture API header.
+
+[THIRD_PARTY.md](THIRD_PARTY.md) has the full list and the licenses.
 
 ## License
 
-[GPL-3.0-or-later](LICENSE). Parts of the renderer and the pusher follow xemu.
-[THIRD_PARTY.md](THIRD_PARTY.md) lists every third-party file, the code that follows another project, and the
-references.
+[GPL-3.0-or-later](LICENSE).
 
 ## Legal
 
-Ninja Gaiden is a trademark of Koei Tecmo. This project is not affiliated with or endorsed by
-Koei Tecmo, Team Ninja or Microsoft. It is non-commercial. No game data is distributed. The
-`ngb-hygiene` check (a pre-commit hook and CI) blocks game files from ever entering the
-repository. The Xbox kernel declarations come from public sources (nxdk, CC0), never from the
-leaked XDK.
+Ninja Gaiden is a trademark of Koei Tecmo. Xbox and Windows are trademarks of Microsoft. This project is not affiliated
+with or endorsed by Koei Tecmo, Team Ninja or Microsoft, and it is non-commercial: it accepts no donations or payments.
+
+No game data is distributed. The `ngb-hygiene` guard (a pre-commit hook, CI and the release packaging) blocks game
+files from entering the repository or a release. The Xbox kernel declarations come from public sources (nxdk, CC0),
+never from the leaked XDK.
