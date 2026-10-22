@@ -19,6 +19,7 @@
 
 #define PGL_PROGRAM_SLOTS 136
 #define PGL_CONSTANTS 192
+#define PGL_BLOCK 0x40
 
 /* Estado de PGRAPH que necesita el render. Lo escribe pgraph.c al decodificar. */
 typedef struct pgl_regs {
@@ -27,8 +28,13 @@ typedef struct pgl_regs {
     uint32_t prog_load;                        /* en palabras (SET_TRANSFORM_PROGRAM_LOAD x 4) */
     float constants[PGL_CONSTANTS * 4];        /* c[0..191] (0x0B80) */
     uint32_t const_load;                       /* en palabras (SET_TRANSFORM_CONSTANT_LOAD x 4) */
-    uint32_t const_serial;                     /* cambia con cada escritura de constantes */
     float vconst[16][4];                       /* atributos sin array: SET_VERTEX_DATA* */
+    /* Sellos de cambio para subir solo los uniforms que cambian: `stamp` sube cada vez que un
+     * método o una constante cambia de valor, y cada bloque de 16 métodos (PGL_BLOCK bytes) y
+     * cada constante guardan el sello de su último cambio. */
+    uint64_t stamp; /* 64 bits: a miles de cambios por frame, 32 darían la vuelta en minutos */
+    uint64_t blk_stamp[0x2000 / PGL_BLOCK];
+    uint64_t const_stamp[PGL_CONSTANTS];
 } pgl_regs;
 
 /* Una primitiva cerrada con SET_BEGIN_END(0). */

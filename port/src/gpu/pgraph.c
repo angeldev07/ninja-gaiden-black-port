@@ -625,16 +625,25 @@ int pgraph_dma_base(uint32_t method, uint32_t *phys) {
 static void gl_track(uint32_t method, uint32_t param) {
     float f;
     memcpy(&f, &param, 4);
-    g_r.m[method / 4] = param;
+    /* D3D reenvía muchos registros con el mismo valor (luces, material): solo un valor nuevo
+     * cuenta como cambio para los uniforms. */
+    if (g_r.m[method / 4] != param) {
+        g_r.m[method / 4] = param;
+        g_r.blk_stamp[method / PGL_BLOCK] = ++g_r.stamp;
+    }
     if (method >= 0x0B00 && method < 0x0B80) { /* SET_TRANSFORM_PROGRAM */
         if (g_r.prog_load < PGL_PROGRAM_SLOTS * 4)
             g_r.program[g_r.prog_load++] = param;
     } else if (method == 0x1E9C) { /* SET_TRANSFORM_PROGRAM_LOAD */
         g_r.prog_load = param < PGL_PROGRAM_SLOTS ? param * 4 : PGL_PROGRAM_SLOTS * 4;
     } else if (method >= 0x0B80 && method < 0x0C00) { /* SET_TRANSFORM_CONSTANT */
-        if (g_r.const_load < PGL_CONSTANTS * 4)
+        if (g_r.const_load < PGL_CONSTANTS * 4) {
+            uint32_t old;
+            memcpy(&old, &g_r.constants[g_r.const_load], 4);
+            if (old != param)
+                g_r.const_stamp[g_r.const_load / 4] = ++g_r.stamp;
             g_r.constants[g_r.const_load++] = f;
-        g_r.const_serial++;
+        }
     } else if (method == 0x1EA4) { /* SET_TRANSFORM_CONSTANT_LOAD */
         g_r.const_load = param < PGL_CONSTANTS ? param * 4 : PGL_CONSTANTS * 4;
     } else if (method >= 0x1940 && method < 0x1980) { /* SET_VERTEX_DATA4UB: D3DCOLOR */

@@ -293,3 +293,14 @@ Detalle en [[audio-apu]].
 - **Resultado:** gameplay de la demo a 54-60 fps, frente a 45-53. Sin errores del push buffer y con audio limpio.
 
 Detalle en [[gpu-nv2a]].
+
+## [2026-10-22] perf | Uniforms por grupos: solo se sube lo que cambia
+- **Medida:** en el gameplay de la demo, los uniforms costaban 3,1-5,3 ms por frame. Casi cada draw resubía
+  unos 250 vec4, porque la model-view cambia en cada objeto y entraba en el mismo hash que todo lo demás.
+- **Cambio:** sellos de cambio por bloque de 16 métodos y por constante, en el pusher. Cada programa sube solo
+  los grupos de uniforms cuyo sello cambió, y de `c[]` solo los tramos escritos.
+- **Resultado:** 0,8-1,5 ms por frame, unas 5 veces menos datos y capturas iguales. El dibujo baja de 8,6-15 a
+  6,7-9,5 ms por frame.
+- **Siguiente en coste:** la decodificación del push buffer (unos 6 ms) y la subida de vértices (2-3 ms).
+
+Detalle en [[gpu-nv2a]].

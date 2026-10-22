@@ -51,6 +51,25 @@
 
 typedef BOOL(WINAPI *swap_interval_fn)(int);
 
+/* Grupos de uniforms y los métodos de los que salen (rangos [lo, hi) en bytes, hasta dos).
+ * Un grupo se sube cuando alguno de sus bloques de métodos ha cambiado desde la última subida
+ * a ese programa: así un draw que solo cambia la model-view sube 16 vec4, no 250. */
+enum { UG_COMP, UG_MV, UG_INV, UG_TM, UG_PLANE, UG_LIGHT, UG_MAT, UG_FFI, UG_PSC, UG_BUMP, UG_N };
+static const struct {
+    uint16_t lo, hi, lo2, hi2;
+} k_ug[UG_N] = {
+    {0x0680, 0x06C0, 0, 0},           /* matriz compuesta */
+    {0x0480, 0x0580, 0, 0},           /* 4 model-view */
+    {0x0580, 0x0680, 0, 0},           /* sus inversas */
+    {0x06C0, 0x07C0, 0, 0},           /* matrices de textura */
+    {0x0840, 0x0940, 0, 0},           /* planos de texgen */
+    {0x1000, 0x1400, 0, 0},           /* 8 luces */
+    {0x03A8, 0x03B8, 0x0A10, 0x0A20}, /* material y ambiente de escena */
+    {0x0280, 0x0440, 0, 0},           /* control, color material, texgen y skinning (ffI) */
+    {0x0A60, 0x0AA0, 0, 0},           /* psC0 y psC1 */
+    {0x1B00, 0x1C00, 0, 0},           /* bump de las 4 etapas */
+};
+
 typedef struct gl_prog {
     uint64_t vkey, fkey;
     GLuint prog;
@@ -59,8 +78,11 @@ typedef struct gl_prog {
     GLint u_ffmv, u_ffinv, u_fftm, u_ffplane, u_ffl, u_ffm, u_ffi; /* pipeline fijo */
     GLint u_psc0, u_psc1, u_fc0, u_fc1, u_fog, u_bump, u_bscale, u_boff;
     GLint u_atest, u_afunc, u_aref, u_texscale, u_tex[4], u_fogcfg, u_fogparam;
-    uint32_t const_serial; /* constantes subidas por última vez (+1; 0 = nunca) */
-    uint64_t unif_hash;    /* del resto de uniforms subidos por última vez (0 = nunca) */
+    uint32_t ug_mask;      /* grupos de uniforms que usa el programa (bits UG_*) */
+    uint64_t ug_up[UG_N];  /* sello + 1 de cada grupo en su última subida (0 = nunca) */
+    uint64_t c_up;         /* sello + 1 de la última subida de c[] (0 = nunca) */
+    int c_n;               /* elementos activos de c[] con locations seguidas (0 = se sube entero) */
+    uint64_t misc_hash;    /* del resto de uniforms subidos por última vez (0 = nunca) */
 } gl_prog;
 
 static struct {
@@ -111,7 +133,7 @@ static struct {
 enum { PF_TARGET, PF_INDEX, PF_PROG, PF_STATE, PF_TEX, PF_UNIF, PF_VERT, PF_DRAW, PF_FLIP, PF_WATCH, PF_N };
 static struct {
     LONGLONG t[PF_N];
-    uint32_t draws, surf_new, tex_up, tex_hash, verts, state_sets, unif_sets, vc_hits;
+    uint32_t draws, surf_new, tex_up, tex_hash, verts, state_sets, unif_sets, unif_vec4, vc_hits;
 } P;
 
 static LONGLONG pf_now(void) {
@@ -144,10 +166,10 @@ void pgl_perf_take(char *out, size_t outlen, uint32_t frames) {
     if (n < outlen)
         snprintf(out + n, outlen - n,
                  "; por frame: %.0f draws (%.0f con los vértices ya en la GPU), %.0f vértices subidos, %.1f superficies nuevas, %.1f "
-                 "texturas subidas, %.0f hashes de textura, %.0f cambios de estado, %.0f de uniforms",
+                 "texturas subidas, %.0f hashes de textura, %.0f cambios de estado, %.0f de uniforms (%.0f vec4)",
                  (double)P.draws / frames, (double)P.vc_hits / frames, (double)P.verts / frames, (double)P.surf_new / frames,
                  (double)P.tex_up / frames, (double)P.tex_hash / frames, (double)P.state_sets / frames,
-                 (double)P.unif_sets / frames);
+                 (double)P.unif_sets / frames, (double)P.unif_vec4 / frames);
     memset(&P, 0, sizeof P);
 }
 
@@ -962,6 +984,34 @@ static void link_uniforms(gl_prog *p) {
     p->u_texscale = ngl_glGetUniformLocation(g, "texScale");
     p->u_fogcfg = ngl_glGetUniformLocation(g, "fogCfg");
     p->u_fogparam = ngl_glGetUniformLocation(g, "fogParam");
+    p->ug_mask = (uint32_t)(p->u_ffmat >= 0) << UG_COMP | (uint32_t)(p->u_ffmv >= 0) << UG_MV |
+                 (uint32_t)(p->u_ffinv >= 0) << UG_INV | (uint32_t)(p->u_fftm >= 0) << UG_TM |
+                 (uint32_t)(p->u_ffplane >= 0) << UG_PLANE | (uint32_t)(p->u_ffl >= 0) << UG_LIGHT |
+                 (uint32_t)(p->u_ffm >= 0) << UG_MAT | (uint32_t)(p->u_ffi >= 0) << UG_FFI |
+                 (uint32_t)(p->u_psc0 >= 0 || p->u_psc1 >= 0) << UG_PSC |
+                 (uint32_t)(p->u_bump >= 0 || p->u_bscale >= 0 || p->u_boff >= 0) << UG_BUMP;
+    /* c[]: el compilador recorta el array hasta el último elemento que se usa. Si las
+     * locations de sus elementos van seguidas (lo normal), se pueden subir solo los tramos
+     * que cambian; si no, se sube entero. */
+    p->c_n = 0;
+    if (p->u_c >= 0) {
+        char name[16];
+        int lo = 1, hi = PGL_CONSTANTS, mid;
+        while (lo < hi) { /* el mayor n con c[n-1] activo */
+            mid = (lo + hi + 1) / 2;
+            snprintf(name, sizeof name, "c[%d]", mid - 1);
+            if (ngl_glGetUniformLocation(g, name) >= 0)
+                lo = mid;
+            else
+                hi = mid - 1;
+        }
+        snprintf(name, sizeof name, "c[%d]", lo - 1);
+        if (ngl_glGetUniformLocation(g, name) == p->u_c + lo - 1) {
+            snprintf(name, sizeof name, "c[%d]", lo / 2);
+            if (ngl_glGetUniformLocation(g, name) == p->u_c + lo / 2)
+                p->c_n = lo;
+        }
+    }
     ngl_glUseProgram(g);
     R.cur_prog = g;
     for (i = 0; i < 4; i++) {
@@ -1053,79 +1103,137 @@ static int texgen_code(uint32_t mode) {
     }
 }
 
-/* Uniforms del pipeline fijo (ver k_ff_vs). */
-static void set_ff_uniforms(const pgl_regs *r, gl_prog *p) {
-    static float l[64 * 4], big[16 * 4];
+/* Sube `n` vec4 si el programa tiene ese uniform. */
+static void u4(GLint loc, int n, const float *v) {
+    if (loc < 0)
+        return;
+    ngl_glUniform4fv(loc, n, v);
+    P.unif_vec4 += (uint32_t)n;
+}
+
+/* 16 vec4 seguidos de los registros (las matrices son floats tal cual). */
+static void u4_regs(GLint loc, const pgl_regs *r, uint32_t method) {
+    float v[16 * 4];
+    memcpy(v, &r->m[method / 4], sizeof v);
+    u4(loc, 16, v);
+}
+
+/* Último cambio de los métodos de un grupo. */
+static uint64_t group_stamp(const pgl_regs *r, int g) {
+    uint64_t s = 0;
+    uint32_t b;
+    for (b = k_ug[g].lo / PGL_BLOCK; b < (k_ug[g].hi + PGL_BLOCK - 1u) / PGL_BLOCK; b++)
+        s = r->blk_stamp[b] > s ? r->blk_stamp[b] : s;
+    for (b = k_ug[g].lo2 / PGL_BLOCK; b < (k_ug[g].hi2 + PGL_BLOCK - 1u) / PGL_BLOCK; b++)
+        s = r->blk_stamp[b] > s ? r->blk_stamp[b] : s;
+    return s;
+}
+
+/* c[]: solo los tramos de constantes escritas con otro valor desde la última subida a este
+ * programa. Dos cambios a menos de 4 elementos van en la misma llamada. */
+static void upload_constants(const pgl_regs *r, gl_prog *p) {
+    uint64_t since = p->c_up;
+    int i, last;
+    if (p->u_c < 0)
+        return;
+    if (!p->c_n) {
+        for (i = 0; i < PGL_CONSTANTS; i++)
+            if (r->const_stamp[i] >= since)
+                break;
+        if (i < PGL_CONSTANTS)
+            u4(p->u_c, PGL_CONSTANTS, r->constants);
+    } else {
+        for (i = 0; i < p->c_n; i++) {
+            int k;
+            if (r->const_stamp[i] < since)
+                continue;
+            last = i;
+            for (k = i + 1; k < p->c_n && k - last <= 4; k++)
+                if (r->const_stamp[k] >= since)
+                    last = k;
+            u4(p->u_c + i, last - i + 1, &r->constants[i * 4]);
+            i = last;
+        }
+    }
+    p->c_up = r->stamp + 1;
+}
+
+/* Uniforms del pipeline fijo (ver k_ff_vs); `dirty` son los grupos UG_* que han cambiado. */
+static void set_ff_uniforms(const pgl_regs *r, gl_prog *p, uint32_t dirty) {
+    static float l[64 * 4];
     GLint ints[32];
     float m[3 * 4];
     int i, k, e, c;
-    for (i = 0; i < 64; i++)
-        big[i] = as_float(M(r, 0x0480 + 4 * i));
-    if (p->u_ffmv >= 0)
-        ngl_glUniform4fv(p->u_ffmv, 16, big);
-    for (i = 0; i < 64; i++)
-        big[i] = as_float(M(r, 0x0580 + 4 * i));
-    if (p->u_ffinv >= 0)
-        ngl_glUniform4fv(p->u_ffinv, 16, big);
-    for (i = 0; i < 64; i++)
-        big[i] = as_float(M(r, 0x06C0 + 4 * i));
-    if (p->u_fftm >= 0)
-        ngl_glUniform4fv(p->u_fftm, 16, big);
-    for (i = 0; i < 64; i++)
-        big[i] = as_float(M(r, 0x0840 + 4 * i));
-    if (p->u_ffplane >= 0)
-        ngl_glUniform4fv(p->u_ffplane, 16, big);
-    memset(l, 0, sizeof l);
-    for (i = 0; i < 8; i++) {
-        uint32_t b = 0x1000 + 0x80 * (uint32_t)i;
-        static const uint32_t src[7] = {0x00, 0x0C, 0x18, 0x34, 0x28, 0x5C, 0x68};
-        for (k = 0; k < 7; k++)
-            for (c = 0; c < 3; c++)
-                l[(i * 8 + k) * 4 + c] = as_float(M(r, b + src[k] + 4 * (uint32_t)c));
-        l[(i * 8 + 6) * 4 + 3] = as_float(M(r, b + 0x24)); /* rango de la luz local */
+    if (dirty & (1u << UG_MV))
+        u4_regs(p->u_ffmv, r, 0x0480);
+    if (dirty & (1u << UG_INV))
+        u4_regs(p->u_ffinv, r, 0x0580);
+    if (dirty & (1u << UG_TM))
+        u4_regs(p->u_fftm, r, 0x06C0);
+    if (dirty & (1u << UG_PLANE))
+        u4_regs(p->u_ffplane, r, 0x0840);
+    if (dirty & (1u << UG_LIGHT)) {
+        memset(l, 0, sizeof l);
+        for (i = 0; i < 8; i++) {
+            uint32_t b = 0x1000 + 0x80 * (uint32_t)i;
+            static const uint32_t src[7] = {0x00, 0x0C, 0x18, 0x34, 0x28, 0x5C, 0x68};
+            for (k = 0; k < 7; k++)
+                for (c = 0; c < 3; c++)
+                    l[(i * 8 + k) * 4 + c] = as_float(M(r, b + src[k] + 4 * (uint32_t)c));
+            l[(i * 8 + 6) * 4 + 3] = as_float(M(r, b + 0x24)); /* rango de la luz local */
+        }
+        u4(p->u_ffl, 64, l);
     }
-    ngl_glUniform4fv(p->u_ffl, 64, l);
-    memset(m, 0, sizeof m);
-    for (c = 0; c < 3; c++) {
-        m[c] = as_float(M(r, 0x0A10 + 4 * (uint32_t)c));
-        m[4 + c] = as_float(M(r, 0x03A8 + 4 * (uint32_t)c));
+    if (dirty & (1u << UG_MAT)) {
+        memset(m, 0, sizeof m);
+        for (c = 0; c < 3; c++) {
+            m[c] = as_float(M(r, 0x0A10 + 4 * (uint32_t)c));
+            m[4 + c] = as_float(M(r, 0x03A8 + 4 * (uint32_t)c));
+        }
+        m[7] = as_float(M(r, 0x03B4));
+        u4(p->u_ffm, 3, m);
     }
-    m[7] = as_float(M(r, 0x03B4));
-    if (p->u_ffm >= 0)
-        ngl_glUniform4fv(p->u_ffm, 3, m);
-    memset(ints, 0, sizeof ints);
-    ints[0] = (GLint)(M(r, 0x0314) & 1u);
-    ints[1] = (GLint)(M(r, 0x03BC) & 0xFFFFu);
-    ints[2] = (GLint)(M(r, 0x0298) & 0xFFu);
-    ints[3] = (GLint)(M(r, 0x03B8) & 1u);
-    ints[4] = (GLint)M(r, 0x0294);
-    for (e = 0; e < 4; e++) {
-        ints[5 + e] = (GLint)(M(r, 0x0420 + 4 * (uint32_t)e) & 1u);
-        for (c = 0; c < 4; c++)
-            ints[9 + e * 4 + c] = texgen_code(M(r, 0x03C0 + 0x10 * (uint32_t)e + 4 * (uint32_t)c));
-    }
-    ints[25] = (GLint)M(r, 0x02A0);
-    ints[26] = (GLint)(M(r, 0x0328) & 7u); /* SET_SKIN_MODE */
-    if (p->u_ffi >= 0)
+    if ((dirty & (1u << UG_FFI)) && p->u_ffi >= 0) {
+        memset(ints, 0, sizeof ints);
+        ints[0] = (GLint)(M(r, 0x0314) & 1u);
+        ints[1] = (GLint)(M(r, 0x03BC) & 0xFFFFu);
+        ints[2] = (GLint)(M(r, 0x0298) & 0xFFu);
+        ints[3] = (GLint)(M(r, 0x03B8) & 1u);
+        ints[4] = (GLint)M(r, 0x0294);
+        for (e = 0; e < 4; e++) {
+            ints[5 + e] = (GLint)(M(r, 0x0420 + 4 * (uint32_t)e) & 1u);
+            for (c = 0; c < 4; c++)
+                ints[9 + e * 4 + c] = texgen_code(M(r, 0x03C0 + 0x10 * (uint32_t)e + 4 * (uint32_t)c));
+        }
+        ints[25] = (GLint)M(r, 0x02A0);
+        ints[26] = (GLint)(M(r, 0x0328) & 7u); /* SET_SKIN_MODE */
         ngl_glUniform1iv(p->u_ffi, 32, ints);
+        P.unif_vec4 += 8;
+    }
 }
 
 static void set_uniforms(const pgl_regs *r, gl_prog *p, const gl_state *st, const float tex_scale[8]) {
     float v[16 * 4], surf[2], clip[2];
-    uint32_t src[24];
+    uint32_t src[24], dirty = 0;
     uint64_t h;
-    int i;
+    int i, g;
     if (R.cur_prog != p->prog) {
         ngl_glUseProgram(p->prog);
         R.cur_prog = p->prog;
     }
-    /* c[192] solo cuando el juego ha escrito constantes desde la última subida a este programa. */
-    if (p->u_c >= 0 && p->const_serial != r->const_serial + 1) {
-        ngl_glUniform4fv(p->u_c, PGL_CONSTANTS, r->constants);
-        p->const_serial = r->const_serial + 1;
+    upload_constants(r, p);
+    /* Grupos de registros: por sellos de cambio, sin mirar los valores. */
+    for (g = 0; g < UG_N; g++) {
+        uint64_t now;
+        if (!(p->ug_mask & (1u << g)))
+            continue;
+        now = group_stamp(r, g) + 1;
+        if (p->ug_up[g] != now) {
+            p->ug_up[g] = now;
+            dirty |= 1u << g;
+        }
     }
-    /* El resto de uniforms sale de unos pocos registros: si su hash no ha cambiado desde el
-     * último draw con este programa, no hay nada que subir. */
+    /* El resto sale de unos pocos registros y del estado del draw: un hash basta. */
     src[0] = R.target_w;
     src[1] = R.target_h;
     src[2] = M(r, 0x0394);
@@ -1143,93 +1251,89 @@ static void set_uniforms(const pgl_regs *r, gl_prog *p, const gl_state *st, cons
     src[14] = M(r, 0x09C4);
     memcpy(&src[15], tex_scale, 8 * sizeof(float));
     src[23] = 0x554Eu;
-    h = rc_hash(src, sizeof src, 0);
-    h = rc_hash(&r->m[0x0680 / 4], 16 * 4, h);      /* matriz compuesta */
-    h = rc_hash(&r->m[0x0A60 / 4], 16 * 4, h);      /* psC0 y psC1 */
-    h = rc_hash(&r->m[0x1B00 / 4], 0x100, h);       /* bump de las 4 etapas */
-    if (p->u_ffl >= 0) { /* pipeline fijo: luces, material, matrices y texgen */
-        h = rc_hash(&r->m[0x0280 / 4], 0x0180, h); /* 0x0280-0x03FF: control, material, texgen */
-        h = rc_hash(&r->m[0x0420 / 4], 0x0010, h); /* activación de matrices de textura */
-        h = rc_hash(&r->m[0x0480 / 4], 0x0200, h); /* 4 model-view y 4 inversas */
-        h = rc_hash(&r->m[0x06C0 / 4], 0x0100, h); /* matrices de textura */
-        h = rc_hash(&r->m[0x0840 / 4], 0x0100, h); /* planos de texgen */
-        h = rc_hash(&r->m[0x0A10 / 4], 0x0010, h); /* ambiente de escena */
-        h = rc_hash(&r->m[0x1000 / 4], 0x0400, h); /* 8 luces */
+    h = rc_hash(src, sizeof src, 0) | 1u;
+    if (p->misc_hash != h) {
+        p->misc_hash = h;
+        dirty |= 1u << UG_N;
     }
-    if (p->unif_hash == (h | 1u))
+    if (!dirty)
         return;
-    p->unif_hash = h | 1u;
     P.unif_sets++;
-    surf[0] = (float)R.target_w;
-    surf[1] = (float)R.target_h;
-    clip[0] = as_float(M(r, 0x0394));
-    clip[1] = as_float(M(r, 0x0398));
-    if (p->u_surface >= 0)
-        ngl_glUniform2fv(p->u_surface, 1, surf);
-    if (p->u_clip >= 0)
-        ngl_glUniform2fv(p->u_clip, 1, clip);
-    if (p->u_ffmat >= 0) {
-        for (i = 0; i < 16; i++)
-            v[i] = as_float(M(r, 0x0680 + 4 * i));
-        ngl_glUniform4fv(p->u_ffmat, 4, v);
+    if (dirty & (1u << UG_N)) {
+        surf[0] = (float)R.target_w;
+        surf[1] = (float)R.target_h;
+        clip[0] = as_float(M(r, 0x0394));
+        clip[1] = as_float(M(r, 0x0398));
+        if (p->u_surface >= 0)
+            ngl_glUniform2fv(p->u_surface, 1, surf);
+        if (p->u_clip >= 0)
+            ngl_glUniform2fv(p->u_clip, 1, clip);
+        if (p->u_fc0 >= 0) {
+            argb_to_vec4(M(r, 0x1E20), v);
+            u4(p->u_fc0, 1, v);
+        }
+        if (p->u_fc1 >= 0) {
+            argb_to_vec4(M(r, 0x1E24), v);
+            u4(p->u_fc1, 1, v);
+        }
+        if (p->u_fog >= 0) {
+            uint32_t c = M(r, 0x02A8); /* ABGR: R en el byte bajo */
+            v[0] = (float)(c & 0xFF) / 255.0f;
+            v[1] = (float)((c >> 8) & 0xFF) / 255.0f;
+            v[2] = (float)((c >> 16) & 0xFF) / 255.0f;
+            v[3] = (float)(c >> 24) / 255.0f;
+            u4(p->u_fog, 1, v);
+        }
+        if (p->u_atest >= 0)
+            ngl_glUniform1i(p->u_atest, st->alpha_test);
+        if (p->u_afunc >= 0)
+            ngl_glUniform1i(p->u_afunc, (GLint)st->alpha_func);
+        if (p->u_aref >= 0)
+            ngl_glUniform1fv(p->u_aref, 1, &st->alpha_ref);
+        if (p->u_texscale >= 0)
+            ngl_glUniform2fv(p->u_texscale, 4, tex_scale);
+        if (p->u_fogcfg >= 0)
+            ngl_glUniform3i(p->u_fogcfg, (GLint)(M(r, 0x02A4) & 1), (GLint)M(r, 0x029C), (GLint)M(r, 0x02A0));
+        if (p->u_fogparam >= 0) {
+            v[0] = as_float(M(r, 0x09C0));
+            v[1] = as_float(M(r, 0x09C4));
+            ngl_glUniform2fv(p->u_fogparam, 1, v);
+        }
+    }
+    if (dirty & (1u << UG_COMP)) {
+        memcpy(v, &r->m[0x0680 / 4], 16 * sizeof(float));
+        u4(p->u_ffmat, 4, v);
     }
     if (p->u_ffl >= 0)
-        set_ff_uniforms(r, p);
-    if (p->u_psc0 >= 0) {
-        for (i = 0; i < 8; i++)
-            argb_to_vec4(M(r, 0x0A60 + 4 * i), &v[4 * i]);
-        ngl_glUniform4fv(p->u_psc0, 8, v);
+        set_ff_uniforms(r, p, dirty);
+    if (dirty & (1u << UG_PSC)) {
+        if (p->u_psc0 >= 0) {
+            for (i = 0; i < 8; i++)
+                argb_to_vec4(M(r, 0x0A60 + 4 * i), &v[4 * i]);
+            u4(p->u_psc0, 8, v);
+        }
+        if (p->u_psc1 >= 0) {
+            for (i = 0; i < 8; i++)
+                argb_to_vec4(M(r, 0x0A80 + 4 * i), &v[4 * i]);
+            u4(p->u_psc1, 8, v);
+        }
     }
-    if (p->u_psc1 >= 0) {
-        for (i = 0; i < 8; i++)
-            argb_to_vec4(M(r, 0x0A80 + 4 * i), &v[4 * i]);
-        ngl_glUniform4fv(p->u_psc1, 8, v);
-    }
-    if (p->u_fc0 >= 0) {
-        argb_to_vec4(M(r, 0x1E20), v);
-        ngl_glUniform4fv(p->u_fc0, 1, v);
-    }
-    if (p->u_fc1 >= 0) {
-        argb_to_vec4(M(r, 0x1E24), v);
-        ngl_glUniform4fv(p->u_fc1, 1, v);
-    }
-    if (p->u_fog >= 0) {
-        uint32_t c = M(r, 0x02A8); /* ABGR: R en el byte bajo */
-        v[0] = (float)(c & 0xFF) / 255.0f;
-        v[1] = (float)((c >> 8) & 0xFF) / 255.0f;
-        v[2] = (float)((c >> 16) & 0xFF) / 255.0f;
-        v[3] = (float)(c >> 24) / 255.0f;
-        ngl_glUniform4fv(p->u_fog, 1, v);
-    }
-    if (p->u_bump >= 0) {
-        for (i = 0; i < 16; i++)
-            v[i] = as_float(M(r, 0x1B28 + 0x40 * (i / 4) + 4 * (i % 4)));
-        ngl_glUniformMatrix2fv(p->u_bump, 4, GL_FALSE, v);
-    }
-    if (p->u_bscale >= 0) {
-        for (i = 0; i < 4; i++)
-            v[i] = as_float(M(r, 0x1B38 + 0x40 * i));
-        ngl_glUniform1fv(p->u_bscale, 4, v);
-    }
-    if (p->u_boff >= 0) {
-        for (i = 0; i < 4; i++)
-            v[i] = as_float(M(r, 0x1B3C + 0x40 * i));
-        ngl_glUniform1fv(p->u_boff, 4, v);
-    }
-    if (p->u_atest >= 0)
-        ngl_glUniform1i(p->u_atest, st->alpha_test);
-    if (p->u_afunc >= 0)
-        ngl_glUniform1i(p->u_afunc, (GLint)st->alpha_func);
-    if (p->u_aref >= 0)
-        ngl_glUniform1fv(p->u_aref, 1, &st->alpha_ref);
-    if (p->u_texscale >= 0)
-        ngl_glUniform2fv(p->u_texscale, 4, tex_scale);
-    if (p->u_fogcfg >= 0)
-        ngl_glUniform3i(p->u_fogcfg, (GLint)(M(r, 0x02A4) & 1), (GLint)M(r, 0x029C), (GLint)M(r, 0x02A0));
-    if (p->u_fogparam >= 0) {
-        v[0] = as_float(M(r, 0x09C0));
-        v[1] = as_float(M(r, 0x09C4));
-        ngl_glUniform2fv(p->u_fogparam, 1, v);
+    if (dirty & (1u << UG_BUMP)) {
+        if (p->u_bump >= 0) {
+            for (i = 0; i < 16; i++)
+                v[i] = as_float(M(r, 0x1B28 + 0x40 * (i / 4) + 4 * (i % 4)));
+            ngl_glUniformMatrix2fv(p->u_bump, 4, GL_FALSE, v);
+        }
+        if (p->u_bscale >= 0) {
+            for (i = 0; i < 4; i++)
+                v[i] = as_float(M(r, 0x1B38 + 0x40 * i));
+            ngl_glUniform1fv(p->u_bscale, 4, v);
+        }
+        if (p->u_boff >= 0) {
+            for (i = 0; i < 4; i++)
+                v[i] = as_float(M(r, 0x1B3C + 0x40 * i));
+            ngl_glUniform1fv(p->u_boff, 4, v);
+        }
     }
 }
 

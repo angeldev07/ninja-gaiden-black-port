@@ -1,6 +1,6 @@
 ---
 tags: [ngb, reverse-engineering, runtime, gpu, h7]
-updated: 2026-10-21
+updated: 2026-10-22
 status: current
 ---
 
@@ -329,6 +329,27 @@ en el modo fijo.
   - El gameplay pasa de 45-53 a 54-60 fps.
   - El vídeo del montaje va a 30 fps, su ritmo de origen.
   - Audio limpio: 0 frames descartados.
+
+## Uniforms por grupos con sellos de cambio
+
+- **Medida** (demo determinista, gameplay): los uniforms costaban **3,1-5,3 ms por frame**. Casi cada draw
+  (400-560 de 450-600) resubía todo, unos 250 vec4 en el pipeline fijo, porque el hash de los registros incluía
+  la model-view, que cambia en cada objeto. El propio hash leía unos 3,3 KB por draw.
+- **Cambio:**
+  - `gl_track` (`pgraph.c`) solo cuenta como cambio un valor distinto del anterior, porque D3D reenvía
+    luces y material con el mismo valor. Cada bloque de 16 métodos (`PGL_BLOCK`) y cada constante `c[i]` guardan
+    el sello del reloj `stamp` en su último cambio. Los sellos son de 64 bits: con 32 darían la vuelta en minutos.
+  - `pgraph_gl.c` agrupa los uniforms (`k_ug`: compuesta, model-view, inversas, matrices de textura, planos,
+    luces, material, enteros del pipeline fijo, psC y bump). Cada programa sube un grupo solo si su sello cambió
+    desde la última subida a ese programa. El resto (superficie, niebla, alpha test...) sigue con un hash
+    pequeño.
+  - `c[]` sube solo los tramos que cambian, porque las locations de los elementos van seguidas. `link_uniforms`
+    lo comprueba y busca el tamaño activo del array; si no van seguidas, se sube entero como antes.
+- **Resultado** (`VERIFIED`, misma demo y mismas fases): los uniforms bajan a **0,8-1,5 ms por frame** y unos
+  19 000 vec4 por frame (antes, unos 100 000). El dibujo del hilo de render pasa de 8,6-15 a 6,7-9,5 ms. Las
+  capturas no muestran cambios.
+- **Lo siguiente en coste** dentro del dibujo: subir vértices (2,2-3,4 ms) y los draws (1,9-2,5 ms). Fuera del
+  dibujo, el resto de `pb_run` (unos 6 ms) es la decodificación del push buffer palabra a palabra.
 
 ## Siguiente
 
