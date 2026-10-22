@@ -624,3 +624,13 @@ Details in [[gpu-nv2a]].
     no donations).
 - The screenshots in `docs/images/` are of the launcher only, from a clean first run with no personal paths. The
   launcher art is original. PNG is not a game-data extension, so the guard lets them through.
+
+## [2026-10-22] chore | No personal paths in the tree before going public
+- The audit missed some `C:\Users\<owner>` paths still in the tree: the `port/README.md` example, the logfilter test
+  data, a launcher comment and the Ghidra H5 scripts. They now use `%USERPROFILE%` / `%NGB_DATA%` or a neutral
+  `player` name.
+- `tools/ghidra/h5-run.ps1` now reads `NGB_DATA` (default `%USERPROFILE%\ngb-data`) and needs `GHIDRA_HOME`.
+- **Publication plan:**
+  - the current repository is renamed to `ninja-gaiden-black-port-dev`, archived and kept private, with its PRs;
+  - a new repository with the original name gets the rewritten history: the noreply email and no personal paths;
+  - this is because GitHub keeps the commits of closed PRs forever, so an in-place rewrite would not hide them.

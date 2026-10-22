@@ -919,7 +919,7 @@ static void scrub_profile(wchar_t *s, size_t n) {
         return;
     }
     while (s[i] && o + 1 < n) {
-        if (!_wcsnicmp(s + i, prof, plen) && !iswalnum(s[i + plen])) { /* not %USERPROFILE%o */
+        if (!_wcsnicmp(s + i, prof, plen) && !iswalnum(s[i + plen])) { /* not C:\Users\annabel when it is C:\Users\anna */
             size_t k;
             for (k = 0; k < wcslen(rep) && o + 1 < n; k++)
                 tmp[o++] = rep[k];

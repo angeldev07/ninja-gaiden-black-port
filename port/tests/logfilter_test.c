@@ -43,7 +43,7 @@ static void test_scrub(void) {
     ngb_log_scrub(buf, sizeof buf, "C:\\Users\\player");
     CHECK(!strcmp(buf, "%USERPROFILE%\\a -> %USERPROFILE%\\b"));
     /* Forward slashes (paths given on the command line) count as separators too. */
-    strcpy(buf, "xbe: %USERPROFILE%/ngb-data/default.xbe");
+    strcpy(buf, "xbe: C:/Users/player/ngb-data/default.xbe");
     ngb_log_scrub(buf, sizeof buf, "C:\\Users\\player");
     CHECK(!strcmp(buf, "xbe: %USERPROFILE%/ngb-data/default.xbe"));
     /* No home, or no room to grow: unchanged. */

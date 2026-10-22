@@ -148,7 +148,8 @@ public class H5Report extends GhidraScript {
 	@Override
 	public void run() throws Exception {
 		String[] args = getScriptArgs();
-		File dir = new File(args.length > 0 ? args[0] : "C:\\Users\\player\\ngb-data\\ghidra\\reports");
+		File dir = new File(args.length > 0 ? args[0]
+			: System.getenv("USERPROFILE") + "\\ngb-data\\ghidra\\reports");
 		dir.mkdirs();
 		if (args.length > 1) {
 			for (String line : Files.readAllLines(Paths.get(args[1]))) {

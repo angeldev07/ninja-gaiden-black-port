@@ -1,15 +1,18 @@
 # H5: rebuilds the Ghidra project of default.xbe and the coverage reports.
-# Usage: powershell -ExecutionPolicy Bypass -File %USERPROFILE%\ngb-data\ghidra\scripts\h5-run.ps1 [-Fresh]
+# Usage: powershell -ExecutionPolicy Bypass -File %NGB_DATA%\ghidra\scripts\h5-run.ps1 [-Fresh]
+# NGB_DATA defaults to %USERPROFILE%\ngb-data; GHIDRA_HOME is the Ghidra install folder.
 # -Fresh deletes the ngb project and imports it again (about 5 min of analysis).
 param([switch]$Fresh)
 
 $ErrorActionPreference = "Stop"
-$ghidra = "%GHIDRA_HOME%\support\analyzeHeadless.bat"
-$root = "%USERPROFILE%\ngb-data\ghidra"
+$data = if ($env:NGB_DATA) { $env:NGB_DATA } else { "$env:USERPROFILE\ngb-data" }
+if (-not $env:GHIDRA_HOME) { throw "set GHIDRA_HOME to the Ghidra install folder" }
+$ghidra = "$env:GHIDRA_HOME\support\analyzeHeadless.bat"
+$root = "$data\ghidra"
 $scripts = "$root\scripts"
 $reports = "$root\reports"
 $logs = "$root\logs"
-$xbe = "%USERPROFILE%\ngb-data\game\default.xbe"
+$xbe = "$data\game\default.xbe"
 $env:GHIDRA_HEADLESS_MAXMEM = "6G"
 New-Item -ItemType Directory -Force $reports, $logs | Out-Null
 
