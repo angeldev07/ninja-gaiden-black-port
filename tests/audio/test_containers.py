@@ -1,4 +1,4 @@
-"""Bancos `.wva` y wave banks XWB sintéticos."""
+"""Synthetic `.wva` banks and XWB wave banks."""
 
 from __future__ import annotations
 

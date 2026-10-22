@@ -1,4 +1,4 @@
-"""Lectura primitiva: enteros little-endian con límites y decodificación de texto."""
+"""Primitive reads: bounds-checked little-endian integers and text decoding."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ class TextDecodingTests(unittest.TestCase):
         self.assertEqual(decode_build_text(b"c:\\Kunai")[1], "ascii")
 
     def test_undecodable_build_text_is_escaped(self) -> None:
-        # 0x81 abre un carácter doble de Shift-JIS que nunca se completa.
+        # 0x81 opens a Shift-JIS double-byte character that is never completed.
         self.assertEqual(decode_build_text(b"a\x81"), ("a\\x81", "ascii+escapes"))
 
     def test_utf16_stops_at_terminator_and_ignores_odd_byte(self) -> None:

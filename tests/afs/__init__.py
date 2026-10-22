@@ -1,1 +1,1 @@
-"""Tests de `ngb_tools.afs` con contenedores AFS sintéticos construidos en memoria."""
+"""Tests of `ngb_tools.afs` with synthetic AFS containers built in memory."""

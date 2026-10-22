@@ -1,4 +1,4 @@
-"""Tests de la CLI: subcomandos, salida y códigos de salida (0 ok, 1 hallazgos, 2 uso/IO)."""
+"""CLI tests: subcommands, output and exit codes (0 ok, 1 findings, 2 usage/IO)."""
 
 from __future__ import annotations
 
@@ -45,8 +45,8 @@ class InfoTests(CliTestCase):
     def test_summary_of_objects_groups_and_bones(self) -> None:
         code, out, _ = self.run_cli("info", self.write("a.kmd", build_kmd(parent_and_child())))
         self.assertEqual(code, ExitCode.OK)
-        self.assertIn("2 objetos, 1 texturas", out)
-        self.assertIn("huesos (objetos con hijos): 1", out)
+        self.assertIn("2 objects, 1 textures", out)
+        self.assertIn("bones (objects with children): 1", out)
 
     def test_issues_are_findings(self) -> None:
         objects = parent_and_child()
@@ -100,13 +100,13 @@ class ExportTests(CliTestCase):
         kmd = self.write("hero.kmd", build_kmd(objects))
         code, out, _ = self.run_cli("export", kmd, "--out", str(self.root / "o"))
         self.assertEqual(code, ExitCode.FINDINGS)
-        self.assertIn("aviso: obj1", out)
+        self.assertIn("warning: obj1", out)
         self.assertTrue((self.root / "o" / "hero.gltf").is_file())
 
 
 class NamingTests(unittest.TestCase):
     def test_dot_only_names_are_replaced(self) -> None:
-        self.assertEqual(model_stem(Path("..kmd")), "sin_nombre")
+        self.assertEqual(model_stem(Path("..kmd")), "unnamed")
         path = default_output_dir(Path("x/0000_ryu.kmd"), {"NGB_DATA": "/d"})
         self.assertEqual(path, Path("/d/extracted/models/0000_ryu"))
 

@@ -1,9 +1,9 @@
-"""Clips de animación listos para el glTF: muestras TRS por nodo (objeto del KMD).
+"""glTF-ready animation clips: per-node (KMD object) TRS samples.
 
-Es el formato intermedio entre `ngb_tools.kmd.rig` (que resuelve las motions) y
-`ngb_tools.kmd.gltf` (que los escribe como `animations`, con interpolación LINEAR). Cada
-canal es una ruta glTF (`translation` o `rotation`) de un objeto, con un valor por instante
-de `times`. Las rotaciones son cuaterniones glTF (x, y, z, w).
+This is the intermediate format between `ngb_tools.kmd.rig` (which resolves the motions) and
+`ngb_tools.kmd.gltf` (which writes them as `animations`, with LINEAR interpolation). Each
+channel is a glTF path (`translation` or `rotation`) of one object, with one value per instant
+in `times`. Rotations are glTF quaternions (x, y, z, w).
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ type ChannelPath = Literal["translation", "rotation"]
 
 @dataclass(frozen=True, slots=True)
 class NodeChannel:
-    """Valores de una propiedad de un nodo: VEC3 para traslación y VEC4 para rotación."""
+    """Values of one node property: VEC3 for translation and VEC4 for rotation."""
 
     obj: int
     path: ChannelPath
@@ -29,7 +29,7 @@ class NodeChannel:
 
 @dataclass(frozen=True, slots=True)
 class AnimationClip:
-    """Un clip: instantes en segundos (crecientes) y canales con un valor por instante."""
+    """A clip: instants in seconds (increasing) and channels with one value per instant."""
 
     name: str
     times: tuple[float, ...]

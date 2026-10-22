@@ -1,10 +1,10 @@
-# Exportaciones de xboxkrnl.exe (ordinal -> nombre).
-# Fuente: https://github.com/XboxDev/nxdk/blob/9e9c07f4b66b540b342e7ac000f02a4a82d7c6e5/lib/xboxkrnl/xboxkrnl.exe.def
-# Licencia de la fuente: CC0-1.0 (SPDX en el propio archivo; (c) 2017 Stefan Schmidt).
-# Transformación: se quitan decoraciones ('@' inicial = fastcall, sufijo '@N' = stdcall
-#   con N bytes de argumentos; sin decoración = cdecl). DATA = variable exportada.
-# Ordinales 367-373 no figuran en la fuente (no usados / sin nombre público).
-# Columnas: ordinal<TAB>name<TAB>kind(func|data)<TAB>callconv<TAB>arg_bytes
+# xboxkrnl.exe exports (ordinal -> name).
+# Source: https://github.com/XboxDev/nxdk/blob/9e9c07f4b66b540b342e7ac000f02a4a82d7c6e5/lib/xboxkrnl/xboxkrnl.exe.def
+# Source license: CC0-1.0 (SPDX in the file itself; (c) 2017 Stefan Schmidt).
+# Transformation: decorations are stripped (leading '@' = fastcall, '@N' suffix = stdcall
+#   with N bytes of arguments; no decoration = cdecl). DATA = exported variable.
+# Ordinals 367-373 are absent from the source (unused / no public name).
+# Columns: ordinal<TAB>name<TAB>kind(func|data)<TAB>callconv<TAB>arg_bytes
 1	AvGetSavedDataAddress	func	stdcall	0
 2	AvSendTVEncoderOption	func	stdcall	16
 3	AvSetDisplayMode	func	stdcall	24

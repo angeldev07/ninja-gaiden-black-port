@@ -1,10 +1,10 @@
-"""Análisis completo de un XBE: sigue los punteros de la cabecera a cada estructura.
+"""Full analysis of an XBE: follows the header pointers to every structure.
 
-La cabecera de imagen es el índice del archivo: guarda la VA del certificado,
-de las library versions, del directorio TLS, de las rutas de depuración, del
-registro CodeView y (ofuscada) de la tabla de thunks del kernel. `analyze`
-recorre esos punteros y devuelve un `XbeAnalysis` inmutable, que es lo que
-consumen los informes JSON y Markdown.
+The image header is the index of the file: it holds the VA of the certificate,
+the library versions, the TLS directory, the debug paths, the CodeView
+record and (obfuscated) the kernel thunk table. `analyze` walks those
+pointers and returns an immutable `XbeAnalysis`, which is what the JSON and
+Markdown reports consume.
 """
 
 from __future__ import annotations
@@ -39,17 +39,17 @@ XAPI_LIBRARY = "XAPILIB"
 
 @dataclass(frozen=True, slots=True)
 class DebugStrings:
-    """Rutas del build original que el enlazador deja en la cabecera."""
+    """Paths of the original build that the linker leaves in the header."""
 
     pathname: str | None
-    pathname_encoding: str | None  # 'ascii', 'cp932' (Shift-JIS) o 'ascii+escapes'
+    pathname_encoding: str | None  # 'ascii', 'cp932' (Shift-JIS) or 'ascii+escapes'
     filename: str | None
     unicode_filename: str | None
 
 
 @dataclass(frozen=True, slots=True)
 class XbeAnalysis:
-    """Todo lo que el inspector sabe de un XBE."""
+    """Everything the inspector knows about an XBE."""
 
     image: XbeImage
     sha256: str
@@ -60,9 +60,9 @@ class XbeAnalysis:
     xapi_library_version: LibraryVersion | None
     tls: TlsDirectory | None
     codeview: CodeViewRecord | None
-    kernel: KernelImportTable | None  # None si ninguna clave XOR dio el thunk
+    kernel: KernelImportTable | None  # None if no XOR key yielded the thunk
     entry_point_section: str | None
-    strings: StringSummary | None  # solo si se pidieron
+    strings: StringSummary | None  # only if requested
 
     @property
     def xdk_build_guess(self) -> int | None:
@@ -70,7 +70,7 @@ class XbeAnalysis:
 
 
 def guess_xdk_build(libraries: Sequence[LibraryVersion]) -> int | None:
-    """Build del XDK: el de XAPILIB si está; si no, el más frecuente."""
+    """XDK build: the one from XAPILIB if present; otherwise the most frequent."""
     for library in libraries:
         if library.name == XAPI_LIBRARY:
             return library.build
@@ -79,7 +79,7 @@ def guess_xdk_build(libraries: Sequence[LibraryVersion]) -> int | None:
 
 
 def read_debug_strings(image: XbeImage) -> DebugStrings:
-    """Rutas de depuración de la cabecera; un puntero nulo o sin respaldo da None."""
+    """Debug paths from the header; a null or unbacked pointer gives None."""
     header = image.header
 
     def build_text(va: int) -> tuple[str | None, str | None]:
@@ -98,7 +98,7 @@ def read_debug_strings(image: XbeImage) -> DebugStrings:
 
 
 def _read_libraries(image: XbeImage) -> tuple[LibraryVersion, ...]:
-    """Array de library versions: identifica el XDK con que se enlazó. Vive en la cabecera."""
+    """Library versions array: identifies the XDK it was linked with. Lives in the header."""
     count = image.header.library_version_count
     if not count:
         return ()
@@ -112,20 +112,20 @@ def _read_libraries(image: XbeImage) -> tuple[LibraryVersion, ...]:
 
 
 def _read_certificate(image: XbeImage) -> Certificate:
-    """Certificado: en la cabecera, entero (parte fija y la ampliada que declare `size`)."""
+    """Certificate: in the header, whole (fixed part plus the extended one declared by `size`)."""
     va = image.header.certificate_addr
-    offset = image.address_map.require_header_range(va, CERT_BASE_SIZE, "certificado")
+    offset = image.address_map.require_header_range(va, CERT_BASE_SIZE, "certificate")
     certificate = Certificate.parse(image.data, offset)
     if certificate.size > CERT_BASE_SIZE:
-        image.address_map.require_header_range(va, certificate.size, "certificado declarado")
+        image.address_map.require_header_range(va, certificate.size, "declared certificate")
     return certificate
 
 
 def _optional_region(image: XbeImage, va: int | None, min_size: int) -> bytes | None:
-    """Bytes de un puntero opcional hasta el final de su región.
+    """Bytes of an optional pointer up to the end of its region.
 
-    Un puntero nulo, sin respaldo o que no deja `min_size` bytes antes del final de
-    la región (o del archivo) cuenta como ausente: es un dato accesorio, no un fallo.
+    A null pointer, an unbacked one, or one that leaves fewer than `min_size` bytes before
+    the end of the region (or of the file) counts as absent: it is ancillary data, not a failure.
     """
     span = image.address_map.backed_span(va) if va else None
     if span is None or span[1] - span[0] < min_size:
@@ -146,13 +146,13 @@ def analyze(
     with_strings: bool = False,
     min_len: int = DEFAULT_MIN_LEN,
 ) -> XbeAnalysis:
-    """Lee todas las estructuras de `image`.
+    """Read every structure of `image`.
 
-    `exports` nombra los ordinales del kernel (por defecto, la tabla incluida).
-    Lanza `XbeFormatError` si una estructura obligatoria (certificado, library
-    versions, tabla de thunks) está fuera de su región o truncada. Los punteros
-    opcionales (TLS, CodeView, library versions del kernel y de XAPI) que no se
-    pueden leer cuentan como ausentes.
+    `exports` names the kernel ordinals (by default, the bundled table).
+    Raises `XbeFormatError` if a mandatory structure (certificate, library
+    versions, thunk table) lies outside its region or is truncated. Optional
+    pointers (TLS, CodeView, kernel and XAPI library versions) that cannot be
+    read count as absent.
     """
     header = image.header
     tls_region = _optional_region(image, header.tls_addr, TLS_DIRECTORY_SIZE)

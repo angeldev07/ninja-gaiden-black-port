@@ -1,4 +1,4 @@
-"""Utilidades de PCM16: intercalado de canales y bytes little endian."""
+"""PCM16 utilities: channel interleaving and little endian bytes."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from collections.abc import Sequence
 
 
 def interleave(channels: Sequence[array[int]], length: int) -> array[int]:
-    """Une los canales (recortados a `length` muestras) en un único flujo intercalado."""
+    """Join the channels (trimmed to `length` samples) into a single interleaved stream."""
     count = len(channels)
     if count == 1:
         return channels[0][:length]
@@ -19,7 +19,7 @@ def interleave(channels: Sequence[array[int]], length: int) -> array[int]:
 
 
 def to_le_bytes(samples: array[int]) -> bytes:
-    """Bytes s16le de `samples` (el orden del WAV), sea cual sea el de la máquina."""
+    """s16le bytes of `samples` (the WAV order), whatever the machine's order is."""
     if sys.byteorder == "little":
         return samples.tobytes()
     swapped = array("h", samples)
@@ -28,7 +28,7 @@ def to_le_bytes(samples: array[int]) -> bytes:
 
 
 def from_le_bytes(data: bytes) -> array[int]:
-    """`array('h')` desde bytes s16le (un byte suelto al final se ignora)."""
+    """`array('h')` from s16le bytes (a trailing lone byte is ignored)."""
     samples = array("h", data[: len(data) - len(data) % 2])
     if sys.byteorder != "little":
         samples.byteswap()
@@ -36,5 +36,5 @@ def from_le_bytes(data: bytes) -> array[int]:
 
 
 def from_u8(data: bytes) -> array[int]:
-    """PCM de 8 bits sin signo (el del WAV) a 16 bits con signo."""
+    """Unsigned 8-bit PCM (the WAV one) to signed 16-bit."""
     return array("h", ((b - 128) << 8 for b in data))

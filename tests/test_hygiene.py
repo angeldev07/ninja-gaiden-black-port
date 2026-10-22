@@ -1,4 +1,4 @@
-"""Tests unitarios de la guardia de higiene: reglas puras sobre contenido en memoria."""
+"""Unit tests of the hygiene guard: pure rules over in-memory content."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ OID = "0123456789abcdef0123456789abcdef01234567"
 
 
 def memory_reader(content: bytes) -> Callable[[int], bytes]:
-    """Lector de prefijos sobre bytes en memoria (lo que haría git con el blob)."""
+    """Prefix reader over in-memory bytes (what git would do with the blob)."""
     return lambda length: content[:length]
 
 
@@ -32,7 +32,7 @@ def rules_of(path: str, content: bytes, policy: Policy = DEFAULT_POLICY) -> set[
 
 
 def team_ninja_chunk(tag: bytes, field_18: int = 0x40, field_1c: int = 0x20) -> bytes:
-    """Cabecera de chunk de Team Ninja: tag de 12 bytes y dos u32 LE en 0x18 y 0x1C."""
+    """Team Ninja chunk header: 12-byte tag and two u32 LE at 0x18 and 0x1C."""
     return (
         tag.ljust(12, b"\0")
         + bytes(12)
@@ -71,15 +71,15 @@ class ExtensionRuleTest(unittest.TestCase):
                 self.assertEqual(rules_of(path, b"texto\n"), set())
 
     def test_unicode_lookalike_extensions_are_rejected(self) -> None:
-        # 'İ'.lower() es 'i' + U+0307: con str.lower, CMN.İSO no acabaría en '.iso'.
+        # 'İ'.lower() is 'i' + U+0307: with str.lower, CMN.İSO would not end in '.iso'.
         for path in ("CMN.İSO", "x.ＩＳＯ", "a.Kmd"):
             with self.subTest(path=ascii(path)):
                 self.assertEqual(rules_of(path, b"x"), {Rule.EXTENSION})
 
     def test_fonts_are_not_blocked_by_extension_only_by_size(self) -> None:
-        self.assertEqual(rules_of("fonts/libre.ttf", b"\x00\x01\x00\x00"), set())
+        self.assertEqual(rules_of("fonts/free.ttf", b"\x00\x01\x00\x00"), set())
         too_big = Policy(max_bytes=10)
-        self.assertEqual(rules_of("fonts/juego.ttf", b"\x00\x01" * 6, too_big), {Rule.SIZE})
+        self.assertEqual(rules_of("fonts/game.ttf", b"\x00\x01" * 6, too_big), {Rule.SIZE})
 
     def test_empty_file_passes(self) -> None:
         self.assertEqual(rules_of("empty.txt", b""), set())
@@ -88,7 +88,7 @@ class ExtensionRuleTest(unittest.TestCase):
 class PathRuleTest(unittest.TestCase):
     def test_paths_under_ignored_top_level_dirs_are_rejected(self) -> None:
         paths = (
-            "game/notas.txt",
+            "game/notes.txt",
             "GAME/a.txt",
             "Extracted/a/b.json",
             "build/out.txt",
@@ -99,7 +99,7 @@ class PathRuleTest(unittest.TestCase):
                 self.assertEqual(rules_of(path, b"texto\n"), {Rule.PATH})
 
     def test_similar_paths_pass(self) -> None:
-        for path in ("docs/game/notas.md", "gamebook/a.txt", "src/build.py", "game", "build"):
+        for path in ("docs/game/notes.md", "gamebook/a.txt", "src/build.py", "game", "build"):
             with self.subTest(path=path):
                 self.assertEqual(rules_of(path, b"texto\n"), set())
 
@@ -152,7 +152,7 @@ class SignatureRuleTest(unittest.TestCase):
                 self.assertEqual(match_signature(adx_header(offset)) is not None, is_adx)
 
     def test_adx_shorter_than_its_header_is_not_adx(self) -> None:
-        # Sin la comprobación de longitud, el byte 0x20 se leería como offset válido.
+        # Without the length check, byte 0x20 would be read as a valid offset.
         self.assertIsNone(match_signature(b"\x80\x00\x20"))
 
     def test_team_ninja_chunk_header_matches(self) -> None:
@@ -163,12 +163,12 @@ class SignatureRuleTest(unittest.TestCase):
 
     def test_team_ninja_lookalikes_do_not_match(self) -> None:
         cases = {
-            "tag de 2 chars": team_ninja_chunk(b"ab"),
-            "tag no imprimible": team_ninja_chunk(b"itm\x01dat"),
-            "basura tras el NUL": team_ninja_chunk(b"itm\x00dat"),
-            "0x1C distinto de 0x20": team_ninja_chunk(b"itm_dat2", field_1c=0x40),
-            "0x18 fuera del conjunto": team_ninja_chunk(b"itm_dat2", field_18=0x10),
-            "cabecera truncada": team_ninja_chunk(b"itm_dat2")[:0x1F],
+            "2-char tag": team_ninja_chunk(b"ab"),
+            "non-printable tag": team_ninja_chunk(b"itm\x01dat"),
+            "garbage after the NUL": team_ninja_chunk(b"itm\x00dat"),
+            "0x1C different from 0x20": team_ninja_chunk(b"itm_dat2", field_1c=0x40),
+            "0x18 outside the set": team_ninja_chunk(b"itm_dat2", field_18=0x10),
+            "truncated header": team_ninja_chunk(b"itm_dat2")[:0x1F],
         }
         for case, head in cases.items():
             with self.subTest(case=case):
@@ -186,7 +186,7 @@ class SignatureRuleTest(unittest.TestCase):
 
 
 class ReadBoundsTest(unittest.TestCase):
-    """El blob se lee por un tubo: nunca entero, y nunca más allá de su tamaño."""
+    """The blob is read through a pipe: never in full, and never past its size."""
 
     @staticmethod
     def recording_reader(requested: list[int]) -> Callable[[int], bytes]:
@@ -226,7 +226,7 @@ class AllowlistTest(unittest.TestCase):
     ALLOWED = frozenset({"tools/fixture.bin"})
 
     def test_parse_skips_comments_and_blank_lines(self) -> None:
-        text = "# fixtures legítimos\n\n  tools/fixture.bin  \r\nlaunch.def\n"
+        text = "# legitimate fixtures\n\n  tools/fixture.bin  \r\nlaunch.def\n"
         self.assertEqual(parse_allowlist(text), {"tools/fixture.bin", "launch.def"})
 
     def test_allowed_path_skips_the_extension_rule(self) -> None:

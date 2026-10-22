@@ -1,17 +1,17 @@
-"""Estructuras del formato XBE, parseadas desde bytes y offsets de archivo.
+"""Structures of the XBE format, parsed from bytes and file offsets.
 
-Un XBE empieza con la cabecera de imagen. El cargador del kernel copia la
-cabecera tal cual a `base_address` (normalmente 0x00010000) y cada sección de
-`raw_addr` a `virtual_addr`, así que casi todos los punteros del formato son
-direcciones virtuales (VA) de esa imagen ya cargada. Este módulo solo sabe leer
-cada estructura en un offset de archivo dado; traducir VA a offset es cosa de
+An XBE starts with the image header. The kernel loader copies the
+header as-is to `base_address` (normally 0x00010000) and each section from
+`raw_addr` to `virtual_addr`, so almost all pointers in the format are
+virtual addresses (VA) of that loaded image. This module only knows how to read
+each structure at a given file offset; translating VA to offset is the job of
 `ngb_tools.xbe.image`.
 
-Referencias públicas usadas para los offsets:
+Public references used for the offsets:
 
-- https://xboxdevwiki.net/Xbe (cabecera, claves XOR, flags de medio)
+- https://xboxdevwiki.net/Xbe (header, XOR keys, media flags)
 - https://github.com/Cxbx-Reloaded/Cxbx-Reloaded, `src/common/xbe/Xbe.h`
-  (offsets del certificado, cabecera de sección y regiones)
+  (certificate, section header and region offsets)
 """
 
 from __future__ import annotations
@@ -34,17 +34,17 @@ from ngb_tools.xbe.binary import (
 from ngb_tools.xbe.errors import BadMagicError, TruncatedDataError
 
 XBE_MAGIC = b"XBEH"
-IMAGE_HEADER_MIN_SIZE = 0x178  # cabecera más antigua; las nuevas añaden campos al final
-SECTION_HEADER_SIZE = 0x38  # 9 u32 + SHA-1 de 20 bytes
-LIBRARY_VERSION_SIZE = 0x10  # nombre[8] + 4 u16
-TLS_DIRECTORY_SIZE = 0x18  # 6 u32, el mismo layout que el directorio TLS de PE
-CERT_BASE_SIZE = 0x1D0  # certificado original, hasta las claves alternativas incluidas
-CERT_TITLE_NAME_CHARS = 40  # título en UTF-16LE de longitud fija
+IMAGE_HEADER_MIN_SIZE = 0x178  # oldest header; newer ones add fields at the end
+SECTION_HEADER_SIZE = 0x38  # 9 u32 + 20-byte SHA-1
+LIBRARY_VERSION_SIZE = 0x10  # name[8] + 4 u16
+TLS_DIRECTORY_SIZE = 0x18  # 6 u32, same layout as the PE TLS directory
+CERT_BASE_SIZE = 0x1D0  # original certificate, up to and including the alternate keys
+CERT_TITLE_NAME_CHARS = 40  # fixed-length UTF-16LE title
 CERT_ALTERNATE_IDS = 16
 CODEVIEW_RSDS = b"RSDS"
-CODEVIEW_HEADER_SIZE = 24  # firma + GUID (16) + age; detrás va la ruta del .pdb
+CODEVIEW_HEADER_SIZE = 24  # signature + GUID (16) + age; the .pdb path follows
 
-# Máscaras de bits de cada campo de flags: bit -> nombre.
+# Bit masks of each flags field: bit -> name.
 INIT_FLAGS: Mapping[int, str] = {
     0x1: "MOUNT_UTILITY_DRIVE",
     0x2: "FORMAT_UTILITY_DRIVE",
@@ -81,12 +81,12 @@ SECTION_FLAGS: Mapping[int, str] = {
     0x10: "HEAD_PAGE_RO",
     0x20: "TAIL_PAGE_RO",
 }
-# Campo de 2 bits de una library version: ¿la aprobó Microsoft para retail?
-LIBRARY_APPROVED: Mapping[int, str] = {0: "no", 1: "posible", 2: "sí", 3: "desconocido"}
+# 2-bit field of a library version: did Microsoft approve it for retail?
+LIBRARY_APPROVED: Mapping[int, str] = {0: "no", 1: "possible", 2: "yes", 3: "unknown"}
 
 
 def decode_flags(value: int, table: Mapping[int, str]) -> list[str]:
-    """Nombres de los bits activos de `value`; los bits desconocidos van en hex."""
+    """Names of the set bits of `value`; unknown bits are given in hex."""
     names = [name for bit, name in table.items() if value & bit]
     unknown = value & ~reduce(operator.or_, table, 0)
     if unknown:
@@ -95,12 +95,12 @@ def decode_flags(value: int, table: Mapping[int, str]) -> list[str]:
 
 
 def iso_utc(timestamp: int) -> str:
-    """Timestamp UNIX (los del XBE son UTC) en ISO 8601."""
+    """UNIX timestamp (XBE ones are UTC) as ISO 8601."""
     return datetime.fromtimestamp(timestamp, tz=UTC).isoformat()
 
 
 def format_title_id(title_id: int) -> str:
-    """0x5443000D -> 'TC-013': 2 letras de editor (byte alto) + número de juego (u16)."""
+    """0x5443000D -> 'TC-013': 2 publisher letters (high byte) + game number (u16)."""
     publisher = bytes(((title_id >> 24) & 0xFF, (title_id >> 16) & 0xFF))
     if all(0x20 < byte < 0x7F for byte in publisher):
         prefix = publisher.decode("ascii")
@@ -111,11 +111,11 @@ def format_title_id(title_id: int) -> str:
 
 @dataclass(frozen=True, slots=True)
 class ImageHeader:
-    """Cabecera de imagen (offset 0): tamaños y punteros VA al resto de estructuras.
+    """Image header (offset 0): sizes and VA pointers to the rest of the structures.
 
-    Entre el magic y `base_address` (0x004-0x103) va la firma RSA de 256 bytes,
-    que aquí no se verifica. `entry_point_encoded` y `kernel_thunk_encoded`
-    están ofuscados con XOR; ver `ngb_tools.xbe.image.decode_xor`.
+    Between the magic and `base_address` (0x004-0x103) sits the 256-byte RSA
+    signature, which is not verified here. `entry_point_encoded` and
+    `kernel_thunk_encoded` are XOR-obfuscated; see `ngb_tools.xbe.image.decode_xor`.
     """
 
     base_address: int
@@ -129,7 +129,7 @@ class ImageHeader:
     init_flags: int
     entry_point_encoded: int
     tls_addr: int
-    stack_size: int  # xboxdevwiki: SizeOfStackReserve; Cxbx lo llama StackCommit
+    stack_size: int  # xboxdevwiki: SizeOfStackReserve; Cxbx calls it StackCommit
     pe_heap_reserve: int
     pe_heap_commit: int
     pe_base_address: int
@@ -148,17 +148,17 @@ class ImageHeader:
     logo_bitmap_addr: int
     logo_bitmap_size: int
     unknown1: bytes | None  # xboxdevwiki: Unknown1, XDK >= 5028
-    debug_info_addr: int | None  # xboxdevwiki: Unknown2, XDK >= 5455; observado: VA de un RSDS
+    debug_info_addr: int | None  # xboxdevwiki: Unknown2, XDK >= 5455; observed: VA of an RSDS
 
     @classmethod
     def parse(cls, data: bytes) -> ImageHeader:
-        """Lee la cabecera desde el inicio del archivo."""
+        """Read the header from the start of the file."""
         if len(data) < IMAGE_HEADER_MIN_SIZE:
             raise TruncatedDataError(0, IMAGE_HEADER_MIN_SIZE)
         if data[:4] != XBE_MAGIC:
-            raise BadMagicError(f"magic inválido {data[:4]!r}; se esperaba {XBE_MAGIC!r}")
+            raise BadMagicError(f"invalid magic {data[:4]!r}; expected {XBE_MAGIC!r}")
         u32 = partial(read_u32, data)
-        # Los campos opcionales existen solo si la cabecera declarada los cubre.
+        # Optional fields exist only if the declared header covers them.
         size_of_image_header = u32(0x110)
         return cls(
             base_address=u32(0x104),
@@ -209,17 +209,17 @@ class ImageHeader:
 
 @dataclass(frozen=True, slots=True)
 class Certificate:
-    """Certificado: identidad del título, medios y regiones permitidos, versión.
+    """Certificate: title identity, allowed media and regions, version.
 
-    Entre 0xB0 y 0x1CF van las claves LAN, de firma y alternativas (no se
-    exponen). Los campos posteriores dependen del tamaño declarado en `size`.
+    Between 0xB0 and 0x1CF sit the LAN, signature and alternate keys (not
+    exposed). The later fields depend on the size declared in `size`.
     """
 
     size: int
     timedate: int
     title_id: int
     title_name: str
-    alternate_title_ids: tuple[int, ...]  # solo los no nulos
+    alternate_title_ids: tuple[int, ...]  # non-zero ones only
     allowed_media: int
     game_region: int
     game_ratings: int
@@ -231,7 +231,7 @@ class Certificate:
 
     @classmethod
     def parse(cls, data: bytes, offset: int) -> Certificate:
-        """Lee el certificado que empieza en el offset de archivo `offset`."""
+        """Read the certificate that starts at file offset `offset`."""
 
         def u32(field: int) -> int:
             return read_u32(data, offset + field)
@@ -239,7 +239,7 @@ class Certificate:
         size = u32(0x00)
 
         def optional_u32(field: int) -> int | None:
-            """Campo de la parte ampliada: existe solo si el `size` declarado lo cubre."""
+            """Field of the extended part: exists only if the declared `size` covers it."""
             return u32(field) if size >= field + 4 else None
 
         name_raw = read_bytes(data, offset + 0x0C, 2 * CERT_TITLE_NAME_CHARS)
@@ -278,7 +278,7 @@ class Certificate:
 
     @property
     def online_service_text(self) -> str | None:
-        """El servicio online es un FourCC: leído como u32 big endian da el texto."""
+        """The online service is a FourCC: read as a big-endian u32 it gives the text."""
         if self.online_service is None:
             return None
         raw = self.online_service.to_bytes(4, "big")
@@ -287,9 +287,9 @@ class Certificate:
 
 @dataclass(frozen=True, slots=True)
 class SectionHeader:
-    """Cabecera de sección (0x38 bytes) de la tabla de secciones.
+    """Section header (0x38 bytes) of the section table.
 
-    `digest` es el SHA-1 de `u32 raw_size || datos crudos`; ver
+    `digest` is the SHA-1 of `u32 raw_size || raw data`; see
     `ngb_tools.xbe.image.section_digest_ok`.
     """
 
@@ -336,7 +336,7 @@ class SectionHeader:
 
     @property
     def backed_size(self) -> int:
-        """Bytes de la sección que vienen del archivo; el resto en memoria es BSS (ceros)."""
+        """Section bytes that come from the file; the rest in memory is BSS (zeros)."""
         return min(self.raw_size, self.virtual_size)
 
     @property
@@ -345,15 +345,15 @@ class SectionHeader:
 
     @property
     def is_inserted_file(self) -> bool:
-        """Archivo binario embebido ($$XTIMAGE, $$XSIMAGE, .XTLID), no código ni datos."""
+        """Embedded binary file ($$XTIMAGE, $$XSIMAGE, .XTLID), not code or data."""
         return bool(self.flags & SECTION_INSERTED_FILE)
 
 
 @dataclass(frozen=True, slots=True)
 class LibraryVersion:
-    """Versión de una librería del XDK enlazada (16 bytes); identifica el XDK usado.
+    """Version of a linked XDK library (16 bytes); identifies the XDK used.
 
-    `flags` (u16) empaqueta: bits 0-12 QFE, bits 13-14 aprobación, bit 15 debug.
+    `flags` (u16) packs: bits 0-12 QFE, bits 13-14 approval, bit 15 debug.
     """
 
     name: str
@@ -392,7 +392,7 @@ class LibraryVersion:
 
 @dataclass(frozen=True, slots=True)
 class TlsDirectory:
-    """Directorio TLS: mismo layout que en PE, con direcciones absolutas (VA)."""
+    """TLS directory: same layout as in PE, with absolute addresses (VA)."""
 
     raw_data_start_addr: int
     raw_data_end_addr: int
@@ -409,10 +409,10 @@ class TlsDirectory:
 
 @dataclass(frozen=True, slots=True)
 class CodeViewRecord:
-    """Registro CodeView 'RSDS' (PDB 7.0): GUID + age + ruta del .pdb.
+    """CodeView 'RSDS' record (PDB 7.0): GUID + age + .pdb path.
 
-    GUID y age identifican el PDB exacto con que se enlazó el ejecutable; es la
-    clave del symbol server de Microsoft (`pdb_id`).
+    GUID and age identify the exact PDB the executable was linked with; it is the
+    Microsoft symbol server key (`pdb_id`).
     """
 
     guid_bytes: bytes
@@ -421,7 +421,7 @@ class CodeViewRecord:
 
     @classmethod
     def parse(cls, data: bytes, offset: int) -> CodeViewRecord | None:
-        """El registro en `offset`, o None si no es un RSDS completo."""
+        """The record at `offset`, or None if it is not a complete RSDS."""
         raw = data[offset : offset + CODEVIEW_HEADER_SIZE]
         if len(raw) < CODEVIEW_HEADER_SIZE or raw[:4] != CODEVIEW_RSDS:
             return None
@@ -434,7 +434,7 @@ class CodeViewRecord:
 
     @property
     def guid(self) -> str:
-        """GUID en notación de Windows: los 3 primeros campos son little endian."""
+        """GUID in Windows notation: the first 3 fields are little-endian."""
         data1 = read_u32(self.guid_bytes, 0)
         data2, data3 = read_u16s(self.guid_bytes, 4, 2)
         data4 = self.guid_bytes[8:].hex().upper()
@@ -442,5 +442,5 @@ class CodeViewRecord:
 
     @property
     def pdb_id(self) -> str:
-        """Clave del symbol server: GUID sin guiones + age en hex."""
+        """Symbol server key: GUID without dashes + age in hex."""
         return self.guid.replace("-", "") + f"{self.age:X}"

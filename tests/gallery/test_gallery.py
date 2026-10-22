@@ -1,4 +1,4 @@
-"""Tests de la galería sobre un juego sintético: recorrido, motions, fallos y salidas."""
+"""Gallery tests over a synthetic game: traversal, motions, failures and outputs."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ from ngb_tools.kmd.motion import parse_motion_bank
 
 REPO = Path(__file__).resolve().parents[2]
 TILE = (32, 40)
-# Banco con el id 0 de relleno (4 frames) y el idle en el id 1.
+# Bank with a filler id 0 (4 frames) and the idle at id 1.
 BANK = chr_dat(build_bank([standing_motion(4), standing_motion(2)], [0, 1]))
 
 
@@ -103,7 +103,7 @@ class MotionIndexTests(GameCase):
         self.assertEqual(index.find(hero, ["hero"]).archive.name, "chr_hero.afs")  # type: ignore[union-attr]
         found = index.find(list_entries(self.game / "chr_ryuz.afs"), ["ryuz", "ryu"])
         self.assertEqual((found.archive.name, found.name), ("cmn.afs", "ryu.mtn"))  # type: ignore[union-attr]
-        self.assertIsNone(index.find([], ["nadie"]))
+        self.assertIsNone(index.find([], ["nobody"]))
 
 
 class BuildTests(GameCase):
@@ -122,8 +122,8 @@ class BuildTests(GameCase):
 
     def test_each_failure_keeps_its_reason(self) -> None:
         self.assertTrue(self.rows["broken"]["reason"].startswith("KmdFormatError"))
-        self.assertEqual(self.rows["empty"]["reason"], "sin KMD en el AFS")
-        self.assertTrue(self.rows["trunc"]["reason"].startswith("AFS ilegible"))
+        self.assertEqual(self.rows["empty"]["reason"], "no KMD in the AFS")
+        self.assertTrue(self.rows["trunc"]["reason"].startswith("unreadable AFS"))
 
     def test_animated_glb_with_the_idle(self) -> None:
         hero = self.rows["hero"]
@@ -138,8 +138,8 @@ class BuildTests(GameCase):
 
     def test_without_bank_or_rig_the_glb_has_no_animation(self) -> None:
         self.assertEqual(self.rows["twin"]["kmd"], "other.kmd (#1)")
-        self.assertEqual(self.rows["twin"]["motion_note"], "sin banco de motions")
-        self.assertTrue(self.rows["rigless"]["motion_note"].startswith("sin animación"))
+        self.assertEqual(self.rows["twin"]["motion_note"], "no motion bank")
+        self.assertTrue(self.rows["rigless"]["motion_note"].startswith("no animation"))
         gltf, _ = load_glb((self.out / "rigless.glb").read_bytes())
         self.assertNotIn("animations", gltf)
 
@@ -147,10 +147,10 @@ class BuildTests(GameCase):
         png = (self.out / "gallery.png").read_bytes()
         self.assertTrue(png.startswith(b"\x89PNG"))
         text = (self.out / "gallery.md").read_text(encoding="utf-8")
-        self.assertIn("4 de 7 exportados a GLB, 2 con idle animado", text)
+        self.assertIn("4 of 7 exported to GLB, 2 with animated idle", text)
         self.assertIn("| chr_hero.afs | hero.kmd (#0) |", text)
-        self.assertIn("## Fallos por causa", text)
-        self.assertIn("**sin KMD en el AFS** (1): empty", text)
+        self.assertIn("## Failures by cause", text)
+        self.assertIn("**no KMD in the AFS** (1): empty", text)
 
 
 class RobustnessTests(GameCase):
@@ -161,7 +161,7 @@ class RobustnessTests(GameCase):
         with mock.patch.object(build_module, "parse_kmd", boom):
             result = build_character(self.game / "chr_hero.afs", MotionIndex([]), self.out, TILE)
         self.assertIs(result.entry.status, Status.FAILED)
-        self.assertEqual(result.entry.reason, "error interno RuntimeError: bug")
+        self.assertEqual(result.entry.reason, "internal error RuntimeError: bug")
         self.assertIsNone(result.tile)
 
     def test_only_selects_and_unknown_names_are_usage_errors(self) -> None:
@@ -169,12 +169,12 @@ class RobustnessTests(GameCase):
             "build", "--game", str(self.game), "--out", str(self.out), "--only", "chr_hero"
         )
         self.assertEqual(code, ExitCode.OK, out)
-        self.assertIn("1 de 1 exportados", out)
+        self.assertIn("1 of 1 exported", out)
         code, _, err = self.run_cli(
-            "build", "--game", str(self.game), "--out", str(self.out), "--only", "nadie"
+            "build", "--game", str(self.game), "--out", str(self.out), "--only", "nobody"
         )
         self.assertEqual(code, ExitCode.ERROR)
-        self.assertIn("nadie", err)
+        self.assertIn("nobody", err)
 
     def test_output_inside_the_repo_and_missing_game_are_errors(self) -> None:
         code, _, _ = self.run_cli("build", "--game", str(self.game), "--out", str(REPO / "galx"))
@@ -197,7 +197,7 @@ class DrawingTests(unittest.TestCase):
 
     def test_unknown_characters_use_the_question_mark(self) -> None:
         a, b = bytearray(3 * 6 * 7), bytearray(3 * 6 * 7)
-        draw_text(a, 6, 0, 0, "ñ", color=(9, 9, 9))
+        draw_text(a, 6, 0, 0, "\u00f1", color=(9, 9, 9))
         draw_text(b, 6, 0, 0, "?", color=(9, 9, 9))
         self.assertEqual(a, b)
 

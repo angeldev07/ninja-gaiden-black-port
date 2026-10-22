@@ -1,1 +1,1 @@
-"""Tests de `ngb_tools.teamninja` con chunks sintéticos construidos en memoria."""
+"""Tests of `ngb_tools.teamninja` with synthetic chunks built in memory."""

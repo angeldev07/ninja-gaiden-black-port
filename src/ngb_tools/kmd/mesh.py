@@ -1,43 +1,43 @@
-"""Descriptor de malla: el USERDATA de Team Ninja que acompaña a cada par VB/IB del XPR0.
+"""Mesh descriptor: the Team Ninja USERDATA that accompanies each VB/IB pair of the XPR0.
 
-El XPR0 de un KMD lleva un USERDATA de cabecera (`ModelHeader`) y luego uno por objeto, en
-el orden de los objetos de OBJINFO (verificado: 59 en `ryu.kmd`, 63 en `r_ryu.kmd`). Todo
-u32 little endian.
+The XPR0 of a KMD carries a header USERDATA (`ModelHeader`) and then one per object, in
+the order of the OBJINFO objects (verified: 59 in `ryu.kmd`, 63 in `r_ryu.kmd`). Everything
+is little-endian u32.
 
-Cabecera del descriptor (`8 + 0x20 * n_parts` bytes; 0x28 con una parte):
+Descriptor header (`8 + 0x20 * n_parts` bytes; 0x28 with one part):
 
-    0x00  n_parts      partes: pares VB/IB del objeto, uno por FVF (casi siempre 1)
-    0x04  n_sub        submallas de todas las partes
-    0x08 + 0x20 * p    la parte p, 8 u32:
-          +0x00 fvf          D3DFVF del VB (`ngb_tools.kmd.vertices`)
+    0x00  n_parts      parts: VB/IB pairs of the object, one per FVF (almost always 1)
+    0x04  n_sub        submeshes across all the parts
+    0x08 + 0x20 * p    part p, 8 u32:
+          +0x00 fvf          D3DFVF of the VB (`ngb_tools.kmd.vertices`)
           +0x0C vertex_count
-          +0x10 stride       bytes por vértice; tiene que cuadrar con el FVF
-          +0x1C index_count  índices u16 del IB de la parte (las submallas que leen del IB)
+          +0x10 stride       bytes per vertex; must match the FVF
+          +0x1C index_count  u16 indices of the part's IB (the submeshes that read from the IB)
 
-Cada submalla son 0x60 bytes fijos, luego un material de 0x50 bytes si `+0x20` vale 1 y
-luego `+0x08` etapas de textura de 0x40 bytes. Campos fijos conocidos:
+Each submesh is a fixed 0x60 bytes, then a 0x50-byte material if `+0x20` is 1, and then
+`+0x08` texture stages of 0x40 bytes. Known fixed fields:
 
-    +0x00 índice   +0x04 parte   +0x08 n_tex
-    +0x10 origen de los índices (2 = IB, 0 = push buffer)
-    +0x14 inicio y +0x18 tamaño del rango de índices, en bytes
-    +0x20 lleva material
-    +0x28 alpha blend (INFERRED: 1 en las piezas aditivas o transparentes)
-    +0x30 cull (INFERRED: 0x900 = D3DCULL_CW de Xbox; 0 = sin cull, doble cara)
-    +0x38/+0x3C factores de blend origen/destino (valores NV2A: 0x302 SRC_ALPHA,
+    +0x00 index   +0x04 part   +0x08 n_tex
+    +0x10 index source (2 = IB, 0 = push buffer)
+    +0x14 start and +0x18 size of the index range, in bytes
+    +0x20 has material
+    +0x28 alpha blend (INFERRED: 1 on additive or transparent pieces)
+    +0x30 cull (INFERRED: 0x900 = Xbox D3DCULL_CW; 0 = no cull, double sided)
+    +0x38/+0x3C source/destination blend factors (NV2A values: 0x302 SRC_ALPHA,
                 0x303 ONE_MINUS_SRC_ALPHA, 1 ONE)
 
-**Varias partes** (VERIFIED): en 462 objetos de los escenarios y en 15 de 10 personajes
-(Doku, Aruma, el tanque, el camión con 4...). Cada parte lleva FVF propio (0x112 con normal
-y 0x142 con color, típicamente) y las submallas leen de la parte que dice `+0x04` (en los
-personajes de una parte vale 0). `parse_multipart_descriptor` reparte las submallas y
-parsea cada parte como un descriptor de una parte con `parse_mesh_descriptor`.
-`chr_doku#0` obj1: parte 0 FVF 0x112 y parte 1 FVF 0x012; antes de leerlo así, el
-"origen de submalla 24" era la segunda parte de la cabecera leída como submalla.
+**Several parts** (VERIFIED): in 462 stage objects and in 15 objects of 10 characters
+(Doku, Aruma, the tank, the truck with 4...). Each part has its own FVF (typically 0x112
+with normal and 0x142 with color) and the submeshes read from the part that `+0x04` says
+(in single-part characters it is 0). `parse_multipart_descriptor` distributes the submeshes
+and parses each part as a single-part descriptor with `parse_mesh_descriptor`.
+`chr_doku#0` obj1: part 0 FVF 0x112 and part 1 FVF 0x012; before reading it this way, the
+"submesh 24 source" was the second part of the header read as a submesh.
 
-Material: D3DMATERIAL8 (diffuse, ambient, specular, emissive en RGBA f32 y power) y 3 u32
-sin interpretar. Etapa: 4 bytes con la cola del nombre de la textura (`dy_o`, `eye2`), el
-índice i32 de la textura en el XPR0 (-1 = la asigna el juego en ejecución) y 14 u32 de
-estados (el tercero parece el D3DTOP de Xbox: 4 MODULATE, 14 BLENDTEXTUREALPHA).
+Material: D3DMATERIAL8 (diffuse, ambient, specular, emissive as RGBA f32 and power) and 3
+uninterpreted u32. Stage: 4 bytes with the tail of the texture name (`dy_o`, `eye2`), the
+i32 index of the texture in the XPR0 (-1 = assigned by the game at runtime) and 14 u32 of
+states (the third looks like the Xbox D3DTOP: 4 MODULATE, 14 BLENDTEXTUREALPHA).
 """
 
 from __future__ import annotations
@@ -54,14 +54,14 @@ SUBMESH_FIXED_SIZE: Final = 0x60
 MATERIAL_SIZE: Final = 0x50
 STAGE_SIZE: Final = 0x40
 STAGE_STATE_WORDS: Final = 14
-# Topes de cordura: lo máximo observado es 8 submallas y 3 etapas.
+# Sanity caps: the maximum observed is 8 submeshes and 3 stages.
 MAX_SUBMESHES: Final = 256
 MAX_STAGES: Final = 8
 CULL_NONE: Final = 0
 MODEL_HEADER_WORDS: Final = 7
 DESCRIPTOR_PREFIX_SIZE: Final = 8
 PART_HEADER_SIZE: Final = 0x20
-# Tope de partes por objeto: el máximo observado es 4 (`truck.kmd`, `zppln_*`).
+# Cap on parts per object: the maximum observed is 4 (`truck.kmd`, `zppln_*`).
 MAX_PARTS: Final = 16
 FIELD_PART: Final = 1
 FIELD_STAGES: Final = 2
@@ -76,7 +76,7 @@ _STAGE: Final = struct.Struct(f"<4si{STAGE_STATE_WORDS}I")
 
 
 class IndexSource(IntEnum):
-    """Campo `+0x10` de la submalla: de dónde salen sus índices."""
+    """Submesh field `+0x10`: where its indices come from."""
 
     PUSH_BUFFER = 0
     INDEX_BUFFER = 2
@@ -84,7 +84,7 @@ class IndexSource(IntEnum):
 
 @dataclass(frozen=True, slots=True)
 class Material:
-    """D3DMATERIAL8 de la submalla y los 3 u32 que le siguen."""
+    """The submesh D3DMATERIAL8 and the 3 u32 that follow it."""
 
     diffuse: Color4
     ambient: Color4
@@ -96,7 +96,7 @@ class Material:
 
 @dataclass(frozen=True, slots=True)
 class TextureStage:
-    """Una etapa de textura: cola del nombre, índice en el XPR0 (-1 = en ejecución) y estados."""
+    """A texture stage: name tail, XPR0 index (-1 = at runtime) and states."""
 
     name: str
     texture: int
@@ -105,7 +105,7 @@ class TextureStage:
 
 @dataclass(frozen=True, slots=True)
 class Submesh:
-    """Una submalla: rango de índices (en bytes), estado de render y material."""
+    """A submesh: index range (in bytes), render state and material."""
 
     index: int
     source: IndexSource
@@ -141,13 +141,13 @@ class Submesh:
 
     @property
     def base_texture(self) -> int:
-        """Textura de la primera etapa, o -1 si no hay etapas o la asigna el juego."""
+        """Texture of the first stage, or -1 if there are no stages or the game assigns it."""
         return self.stages[0].texture if self.stages else -1
 
 
 @dataclass(frozen=True, slots=True)
 class MeshDescriptor:
-    """Cabecera y submallas de un descriptor."""
+    """Header and submeshes of a descriptor."""
 
     fvf: int
     vertex_count: int
@@ -159,10 +159,11 @@ class MeshDescriptor:
 
 @dataclass(frozen=True, slots=True)
 class ModelHeader:
-    """El primer USERDATA del XPR0 (7 u32): 63, texturas, VB, IB, push buffers y 2 más.
+    """The first USERDATA of the XPR0 (7 u32): 63, textures, VB, IB, push buffers and 2 more.
 
-    El tercero cuenta VB, no objetos: con objetos de varias partes hay más VB que objetos
-    (`boff_01.kmd`: (63, 98, 43, 42, 22) con 36 objetos; `doku.kmd`: 88 VB, 87 objetos).
+    The third counts VBs, not objects: with multi-part objects there are more VBs than
+    objects (`boff_01.kmd`: (63, 98, 43, 42, 22) with 36 objects; `doku.kmd`: 88 VBs, 87
+    objects).
     """
 
     words: tuple[int, ...]
@@ -178,12 +179,12 @@ class ModelHeader:
 
 def parse_model_header(payload: bytes) -> ModelHeader:
     if len(payload) < 4 * MODEL_HEADER_WORDS:
-        raise KmdFormatError(f"USERDATA de cabecera de {len(payload)} bytes, se esperaban 28")
+        raise KmdFormatError(f"header USERDATA of {len(payload)} bytes, expected 28")
     return ModelHeader(struct.unpack_from(f"<{MODEL_HEADER_WORDS}I", payload))
 
 
 def _stage_name(raw: bytes) -> str:
-    """Los 4 bytes del nombre, sin NUL y con lo no imprimible escapado."""
+    """The 4 name bytes, without NULs and with non-printable bytes escaped."""
     text = raw.rstrip(b"\0")
     return "".join(chr(b) if 0x20 <= b < 0x7F else f"\\x{b:02x}" for b in text)
 
@@ -203,20 +204,20 @@ def _parse_material(payload: bytes, offset: int) -> Material:
 
 def _parse_submesh(payload: bytes, ordinal: int, pos: int) -> tuple[Submesh, int]:
     if pos + SUBMESH_FIXED_SIZE > len(payload):
-        raise KmdFormatError(f"submalla {ordinal}: registro fijo cortado en {pos:#x}")
+        raise KmdFormatError(f"submesh {ordinal}: fixed record truncated at {pos:#x}")
     fixed = _FIXED.unpack_from(payload, pos)
     n_tex, source, start, size, has_material = fixed[2], fixed[4], fixed[5], fixed[6], fixed[8]
     if source not in (IndexSource.PUSH_BUFFER, IndexSource.INDEX_BUFFER):
-        raise KmdFormatError(f"submalla {ordinal}: origen de índices desconocido {source}")
+        raise KmdFormatError(f"submesh {ordinal}: unknown index source {source}")
     if start % 2 or size % 2:
-        raise KmdFormatError(f"submalla {ordinal}: rango [{start}, +{size}) no alineado a u16")
+        raise KmdFormatError(f"submesh {ordinal}: range [{start}, +{size}) not u16-aligned")
     if has_material not in (0, 1):
-        raise KmdFormatError(f"submalla {ordinal}: campo de material {has_material}")
+        raise KmdFormatError(f"submesh {ordinal}: material field {has_material}")
     if n_tex > MAX_STAGES:
-        raise KmdFormatError(f"submalla {ordinal}: {n_tex} etapas supera el tope de {MAX_STAGES}")
+        raise KmdFormatError(f"submesh {ordinal}: {n_tex} stages exceeds the cap of {MAX_STAGES}")
     end = pos + SUBMESH_FIXED_SIZE + MATERIAL_SIZE * has_material + STAGE_SIZE * n_tex
     if end > len(payload):
-        raise KmdFormatError(f"submalla {ordinal}: material y etapas no caben en el descriptor")
+        raise KmdFormatError(f"submesh {ordinal}: material and stages do not fit in the descriptor")
     cursor = pos + SUBMESH_FIXED_SIZE
     material = None
     if has_material:
@@ -240,9 +241,11 @@ def _parse_submesh(payload: bytes, ordinal: int, pos: int) -> tuple[Submesh, int
 
 
 def parse_mesh_descriptor(payload: bytes) -> MeshDescriptor:
-    """Parsea un descriptor; tiene que acabar exactamente al final del USERDATA."""
+    """Parse a descriptor; it must end exactly at the end of the USERDATA."""
     if len(payload) < DESCRIPTOR_HEADER_SIZE:
-        raise KmdFormatError(f"descriptor de {len(payload)} bytes, mínimo {DESCRIPTOR_HEADER_SIZE}")
+        raise KmdFormatError(
+            f"descriptor of {len(payload)} bytes, minimum {DESCRIPTOR_HEADER_SIZE}"
+        )
     header = _HEADER.unpack_from(payload)
     n_sub, fvf, vertex_count, stride, index_count = (
         header[1],
@@ -252,7 +255,9 @@ def parse_mesh_descriptor(payload: bytes) -> MeshDescriptor:
         header[9],
     )
     if n_sub > MAX_SUBMESHES:
-        raise KmdFormatError(f"descriptor con {n_sub} submallas supera el tope de {MAX_SUBMESHES}")
+        raise KmdFormatError(
+            f"descriptor with {n_sub} submeshes exceeds the cap of {MAX_SUBMESHES}"
+        )
     pos = DESCRIPTOR_HEADER_SIZE
     submeshes: list[Submesh] = []
     for ordinal in range(n_sub):
@@ -260,7 +265,7 @@ def parse_mesh_descriptor(payload: bytes) -> MeshDescriptor:
         submeshes.append(submesh)
     if pos != len(payload):
         raise KmdFormatError(
-            f"descriptor: las submallas acaban en {pos:#x} pero el USERDATA mide {len(payload):#x}"
+            f"descriptor: the submeshes end at {pos:#x} but the USERDATA is {len(payload):#x}"
         )
     return MeshDescriptor(
         fvf=fvf,
@@ -274,9 +279,9 @@ def parse_mesh_descriptor(payload: bytes) -> MeshDescriptor:
 
 @dataclass(frozen=True, slots=True)
 class MultipartDescriptor:
-    """Las partes de un objeto. `order[k]` = (parte, posición en la parte) de la submalla k.
+    """The parts of an object. `order[k]` = (part, position within the part) of submesh k.
 
-    `header` son los u32 de la cabecera: `n_parts`, `n_sub` y los 8 de cada parte.
+    `header` is the header u32s: `n_parts`, `n_sub` and the 8 of each part.
     """
 
     parts: tuple[MeshDescriptor, ...]
@@ -296,54 +301,58 @@ _PREFIX: Final = struct.Struct("<2I")
 
 
 def _record_extent(payload: bytes, ordinal: int, pos: int) -> tuple[int, int]:
-    """Parte y fin del registro de la submalla que empieza en `pos`.
+    """Part and end of the submesh record that starts at `pos`.
 
-    Solo lee lo imprescindible para trocear (parte, etapas y material); el resto lo valida
-    `parse_mesh_descriptor`.
+    Reads only what is strictly needed to slice (part, stages and material); the rest is
+    validated by `parse_mesh_descriptor`.
     """
     if pos + SUBMESH_FIXED_SIZE > len(payload):
-        raise KmdFormatError(f"submalla {ordinal}: registro fijo cortado en {pos:#x}")
+        raise KmdFormatError(f"submesh {ordinal}: fixed record truncated at {pos:#x}")
     fixed = _FIXED.unpack_from(payload, pos)
     part, n_tex, has_material = fixed[FIELD_PART], fixed[FIELD_STAGES], fixed[FIELD_MATERIAL]
     if has_material not in (0, 1) or n_tex > MAX_STAGES:
         raise KmdFormatError(
-            f"submalla {ordinal}: material {has_material} o {n_tex} etapas inválidos"
+            f"submesh {ordinal}: invalid material {has_material} or {n_tex} stages"
         )
     end = pos + SUBMESH_FIXED_SIZE + MATERIAL_SIZE * has_material + STAGE_SIZE * n_tex
     if end > len(payload):
-        raise KmdFormatError(f"submalla {ordinal}: material y etapas no caben en el descriptor")
+        raise KmdFormatError(f"submesh {ordinal}: material and stages do not fit in the descriptor")
     return part, end
 
 
 def parse_multipart_descriptor(payload: bytes) -> MultipartDescriptor:
-    """Parsea un descriptor de una o varias partes; tiene que ocupar todo el USERDATA.
+    """Parse a one-part or multi-part descriptor; it must fill the whole USERDATA.
 
-    Con una parte, `parts[0]` es exactamente lo que da `parse_mesh_descriptor(payload)`.
-    Con 0 partes es un objeto vacío, sin VB (`rail_cmn` `ra_door1.kmd` obj1).
+    With one part, `parts[0]` is exactly what `parse_mesh_descriptor(payload)` returns.
+    With 0 parts it is an empty object, without VBs (`rail_cmn` `ra_door1.kmd` obj1).
     """
     if len(payload) < DESCRIPTOR_PREFIX_SIZE:
-        raise KmdFormatError(f"descriptor de {len(payload)} bytes, mínimo {DESCRIPTOR_PREFIX_SIZE}")
+        raise KmdFormatError(
+            f"descriptor of {len(payload)} bytes, minimum {DESCRIPTOR_PREFIX_SIZE}"
+        )
     n_parts, n_sub = _PREFIX.unpack_from(payload)
     if n_parts > MAX_PARTS:
-        raise KmdFormatError(f"descriptor con {n_parts} partes supera el tope de {MAX_PARTS}")
+        raise KmdFormatError(f"descriptor with {n_parts} parts exceeds the cap of {MAX_PARTS}")
     if n_sub > MAX_SUBMESHES:
-        raise KmdFormatError(f"descriptor con {n_sub} submallas supera el tope de {MAX_SUBMESHES}")
+        raise KmdFormatError(
+            f"descriptor with {n_sub} submeshes exceeds the cap of {MAX_SUBMESHES}"
+        )
     pos = DESCRIPTOR_PREFIX_SIZE + PART_HEADER_SIZE * n_parts
     if pos > len(payload):
-        raise KmdFormatError(f"cabecera de {n_parts} partes cortada ({len(payload):#x} bytes)")
+        raise KmdFormatError(f"header of {n_parts} parts truncated ({len(payload):#x} bytes)")
     header = struct.unpack_from(f"<{pos // 4}I", payload)
     records: list[list[bytes]] = [[] for _ in range(n_parts)]
     order: list[tuple[int, int]] = []
     for ordinal in range(n_sub):
         part, end = _record_extent(payload, ordinal, pos)
         if part >= n_parts:
-            raise KmdFormatError(f"submalla {ordinal}: parte {part}, hay {n_parts}")
+            raise KmdFormatError(f"submesh {ordinal}: part {part}, but there are {n_parts}")
         order.append((part, len(records[part])))
         records[part].append(payload[pos:end])
         pos = end
     if pos != len(payload):
         raise KmdFormatError(
-            f"descriptor: las submallas acaban en {pos:#x} pero el USERDATA mide {len(payload):#x}"
+            f"descriptor: the submeshes end at {pos:#x} but the USERDATA is {len(payload):#x}"
         )
     parts = []
     for p, chunks in enumerate(records):

@@ -1,4 +1,4 @@
-"""Tests de HITMDL: registros `VHD` con varios bloques."""
+"""HITMDL tests: `VHD` records with several blocks."""
 
 from __future__ import annotations
 
@@ -29,18 +29,18 @@ class CollisionRecordTests(unittest.TestCase):
 
     def test_bad_magic_is_a_format_error(self) -> None:
         raw = b"XXX\0" + vhd_record([FLOOR])[4:]
-        with self.assertRaisesRegex(StageFormatError, "magia"):
+        with self.assertRaisesRegex(StageFormatError, "magic"):
             parse_collision_record(0, raw)
 
     def test_triangle_outside_the_block_is_a_format_error(self) -> None:
         raw = bytearray(vhd_record([FLOOR]))
         struct.pack_into("<H", raw, 0x30 + 0x50, 7)
-        with self.assertRaisesRegex(StageFormatError, "fuera de rango"):
+        with self.assertRaisesRegex(StageFormatError, "out of range"):
             parse_collision_record(0, bytes(raw))
 
     def test_offsets_beyond_the_record_are_a_format_error(self) -> None:
         raw = vhd_record([FLOOR])
-        with self.assertRaisesRegex(StageFormatError, "no encajan"):
+        with self.assertRaisesRegex(StageFormatError, "do not fit"):
             parse_collision_record(0, raw[:-4])
 
 
@@ -54,7 +54,7 @@ class HitmdlTests(unittest.TestCase):
         self.assertEqual(parse_hitmdl(build_chunk(b"HITMDL", [None, None]), 2), {})
 
     def test_slot_count_must_match_the_objects(self) -> None:
-        with self.assertRaisesRegex(StageFormatError, "2 slots y hay 3"):
+        with self.assertRaisesRegex(StageFormatError, "2 slots but there are 3"):
             parse_hitmdl(build_chunk(b"HITMDL", [None, None]), 3)
 
     def test_other_tag_is_a_format_error(self) -> None:

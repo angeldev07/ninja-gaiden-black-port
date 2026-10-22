@@ -1,4 +1,4 @@
-"""Punto de entrada de `python -m ngb_tools.audio`."""
+"""Entry point of `python -m ngb_tools.audio`."""
 
 from __future__ import annotations
 

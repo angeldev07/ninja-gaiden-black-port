@@ -1,4 +1,4 @@
-"""CLI `python -m ngb_tools.xbe`: salidas y códigos (0 ok, 1 validación, 2 uso/IO)."""
+"""CLI `python -m ngb_tools.xbe`: outputs and exit codes (0 ok, 1 validation, 2 usage/IO)."""
 
 from __future__ import annotations
 
@@ -68,7 +68,7 @@ class SuccessTests(CliTestCase):
         self.assertEqual(code, ExitCode.OK)
         imports = json.loads((self.tmp / "r.json").read_text(encoding="utf-8"))["kernel_imports"]
         self.assertEqual([imp["name"] for imp in imports][1], "MiDbgPrint")
-        self.assertIn("desconocido", imports[0]["name"])
+        self.assertIn("unknown", imports[0]["name"])
 
 
 class ValidationFailureTests(CliTestCase):
@@ -92,7 +92,7 @@ class ValidationFailureTests(CliTestCase):
         xbe = self.write_xbe(build_synthetic_xbe(extra_sections=(extra,)))
         code, _, stderr = self.run_cli(str(xbe), "--json", str(self.tmp / "r.json"))
         self.assertEqual(code, ExitCode.VALIDATION)
-        self.assertIn("solapa", stderr)
+        self.assertIn("overlap", stderr)
         self.assertTrue((self.tmp / "r.json").exists())
 
 
@@ -126,11 +126,11 @@ class UsageErrorTests(CliTestCase):
         xbe = self.write_xbe(build_synthetic_xbe())
         code, _, stderr = self.run_cli(str(xbe), "--exports", str(exports))
         self.assertEqual(code, ExitCode.USAGE)
-        self.assertIn("línea 1", stderr)
+        self.assertIn("line 1", stderr)
 
     def test_unwritable_output_is_a_usage_error(self) -> None:
         blocker = self.tmp / "blocker"
-        blocker.write_text("no soy un directorio", encoding="utf-8")
+        blocker.write_text("not a directory", encoding="utf-8")
         xbe = self.write_xbe(build_synthetic_xbe())
         code, _, _ = self.run_cli(str(xbe), "--md", str(blocker / "r.md"))
         self.assertEqual(code, ExitCode.USAGE)
@@ -140,7 +140,7 @@ class UsageErrorTests(CliTestCase):
         xbe = self.write_xbe(data)
         code, _, stderr = self.run_cli(str(xbe), "--md", str(xbe))
         self.assertEqual(code, ExitCode.USAGE)
-        self.assertIn("entrada", stderr)
+        self.assertIn("input file", stderr)
         self.assertEqual(xbe.read_bytes(), data)
 
 

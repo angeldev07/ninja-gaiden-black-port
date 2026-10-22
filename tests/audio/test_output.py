@@ -1,4 +1,4 @@
-"""WAV que relee `wave`, PNG válido y estadísticas de señal."""
+"""WAV that `wave` reads back, valid PNG and signal statistics."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ class WavTests(unittest.TestCase):
         self.assertEqual(data[:4] + data[8:16], b"RIFFWAVEfmt ")
         (riff_size,) = struct.unpack_from("<I", data, 4)
         self.assertEqual(riff_size, 36 + 4)
-        self.assertEqual(struct.unpack_from("<I", data, 28)[0], 16000)  # bytes por segundo
+        self.assertEqual(struct.unpack_from("<I", data, 28)[0], 16000)  # bytes per second
 
     def test_samples_must_fill_whole_frames(self) -> None:
         with self.assertRaises(ValueError):
@@ -55,7 +55,7 @@ class PngTests(unittest.TestCase):
         )
 
     def test_spectrum_peaks_at_the_tone_bin(self) -> None:
-        # 1000 Hz a 8000 Hz con FFT de 1024: bin 1000/8000·1024 = 128.
+        # 1000 Hz at 8000 Hz with a 1024-point FFT: bin 1000/8000·1024 = 128.
         tone = [round(10000 * math.sin(2 * math.pi * 1000 * i / 8000)) for i in range(1024)]
         mags = _Fft(1024).magnitudes(tone)
         self.assertEqual(mags.index(max(mags)), 128)
@@ -71,7 +71,7 @@ class PngTests(unittest.TestCase):
 
 class StatsTests(unittest.TestCase):
     def test_half_scale_square_is_minus_six_dbfs(self) -> None:
-        # |16384| / 32768 = 0.5 → 20·log10(0.5) = −6.02 dBFS en cada segundo.
+        # |16384| / 32768 = 0.5 -> 20·log10(0.5) = −6.02 dBFS in each second.
         samples = array("h", [16384, -16384] * 50)
         stats = signal_stats(samples, 1, 50)
         self.assertEqual(stats.rms_per_second_dbfs, (-6.02, -6.02))

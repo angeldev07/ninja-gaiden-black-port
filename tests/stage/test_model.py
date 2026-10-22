@@ -1,4 +1,4 @@
-"""Tests del KMD de escenario: partes, push buffers, colisión e incidencias."""
+"""Tests of the stage KMD: parts, push buffers, collision and issues."""
 
 from __future__ import annotations
 
@@ -64,13 +64,13 @@ class StageModelTests(unittest.TestCase):
         obj = SynthStageObject(parts=[SynthPart(strip=(0, 1, 9))])
         model = parse_stage_kmd(build_stage_kmd([obj]))
         self.assertFalse(model.exportable((0, 0, 0)))
-        self.assertIn("índice 9", str(model.issues[0]))
+        self.assertIn("index 9", str(model.issues[0]))
 
     def test_more_parts_than_vertex_buffers_is_a_format_error(self) -> None:
         two_parts = synthetic.descriptor(two_part_object())
         with mock.patch.object(synthetic, "descriptor", lambda _obj: two_parts):
             data = build_stage_kmd([SynthStageObject()], collision=False)
-        with self.assertRaisesRegex(StageFormatError, "2 partes y hay 1 VB"):
+        with self.assertRaisesRegex(StageFormatError, "2 parts and there are 1 VB"):
             parse_stage_kmd(data)
 
     def test_missing_xpr_is_a_format_error(self) -> None:

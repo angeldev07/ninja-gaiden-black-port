@@ -1,15 +1,14 @@
-"""De dónde salen los personajes: los `chr_*.afs`, su KMD principal y su banco de motions.
+"""Where the characters come from: the `chr_*.afs` files, their main KMD and motion bank.
 
-- **KMD principal** de `chr_<nombre>.afs`: la entrada `<nombre>.kmd` y, si no la hay, el
-  primer KMD por índice (`chr_heri` trae `heli.kmd`; `chr_arub`, `arub.kmd` en la #4). Hay
-  AFS sin ningún KMD (`chr_dragn`, cuyo dragón vive en `chr_s_mur`, y `chr_e_ryu`).
-- **Banco de motions**: se busca por nombre, `<nombre>.mtn` (o `.mot`), primero en el propio
-  AFS del personaje, luego en `cmn.afs` y luego en los `*_cmn.afs`. Los trajes de Ryu
-  (`ryua`…`ryug`) usan `ryu.mtn` de `cmn.afs`. Si el KMD tiene otro nombre, se prueba
-  también ese.
+- **Main KMD** of `chr_<name>.afs`: the `<name>.kmd` entry and, if there is none, the first
+  KMD by index (`chr_heri` carries `heli.kmd`; `chr_arub`, `arub.kmd` at #4). Some AFS files
+  have no KMD at all (`chr_dragn`, whose dragon lives in `chr_s_mur`, and `chr_e_ryu`).
+- **Motion bank**: looked up by name, `<name>.mtn` (or `.mot`), first in the character's own
+  AFS, then in `cmn.afs` and then in the `*_cmn.afs` files. Ryu's costumes (`ryua`...`ryug`)
+  use `ryu.mtn` from `cmn.afs`. If the KMD has a different name, that one is tried too.
 
-Los AFS se abren con `ngb_tools.afs.archive`: solo se leen la cabecera y la tabla, y de cada
-entrada, los bytes que se piden.
+The AFS files are opened with `ngb_tools.afs.archive`: only the header and table are read,
+and from each entry, the bytes that are requested.
 """
 
 from __future__ import annotations
@@ -32,7 +31,7 @@ RYU_COSTUME_PREFIX: Final = "ryu"
 
 @dataclass(frozen=True, slots=True)
 class EntryRef:
-    """Una entrada de un AFS: archivo, índice, nombre y extensión en bytes."""
+    """An entry of an AFS: file, index, name and byte extent."""
 
     archive: Path
     index: int
@@ -44,7 +43,7 @@ class EntryRef:
         with self.archive.open("rb") as handle:
             data = read_at(handle, self.offset, self.size)
         if len(data) != self.size:
-            raise OSError(f"{self.archive.name}#{self.index}: entrada truncada")
+            raise OSError(f"{self.archive.name}#{self.index}: truncated entry")
         return data
 
     @property
@@ -60,10 +59,10 @@ class EntryRef:
 
 
 def list_entries(path: Path) -> list[EntryRef]:
-    """Entradas con nombre y datos de un AFS; si alguna no cabe en el archivo, está truncado.
+    """Named entries with data of an AFS; if any does not fit in the file, it is truncated.
 
-    Sin esa comprobación, un AFS cortado pierde la tabla de nombres (va al final) y parece
-    un AFS sin KMD.
+    Without that check, a cut-off AFS loses its name table (it goes at the end) and looks
+    like an AFS without a KMD.
     """
     with path.open("rb") as handle:
         archive: AfsArchive = open_afs(handle, path.name)
@@ -71,8 +70,8 @@ def list_entries(path: Path) -> list[EntryRef]:
     for entry in archive.data_entries():
         if entry.offset + entry.size > size:
             raise AfsTruncatedError(
-                f"entrada {entry.index} acaba en {entry.offset + entry.size:#x}, "
-                f"el archivo mide {size:#x}"
+                f"entry {entry.index} ends at {entry.offset + entry.size:#x}, "
+                f"the file is {size:#x} long"
             )
     return [_ref(path, entry) for entry in archive.data_entries() if entry.name]
 
@@ -91,13 +90,13 @@ def character_archives(game_dir: Path) -> list[Path]:
 
 
 def common_archives(game_dir: Path) -> list[Path]:
-    """`cmn.afs` primero y después los `*_cmn.afs`, por nombre."""
+    """`cmn.afs` first and then the `*_cmn.afs` files, by name."""
     common = [game_dir / COMMON_ARCHIVE] if (game_dir / COMMON_ARCHIVE).is_file() else []
     return common + sorted(p for p in game_dir.glob(f"*{COMMON_SUFFIX}") if p.is_file())
 
 
 def main_kmd(entries: Sequence[EntryRef], name: str) -> EntryRef | None:
-    """El KMD que se llama como el personaje o, si no, el primero por índice."""
+    """The KMD named like the character or, failing that, the first by index."""
     kmds = [e for e in entries if e.suffix == ".kmd"]
     named = [e for e in kmds if e.stem.lower() == name.lower()]
     if named:
@@ -106,7 +105,7 @@ def main_kmd(entries: Sequence[EntryRef], name: str) -> EntryRef | None:
 
 
 def motion_candidates(name: str, kmd_stem: str | None) -> list[str]:
-    """Nombres de banco a probar, en orden."""
+    """Bank names to try, in order."""
     names = [name, kmd_stem or name]
     if name.startswith(RYU_COSTUME_PREFIX):
         names.append(RYU_COSTUME_PREFIX)
@@ -114,7 +113,7 @@ def motion_candidates(name: str, kmd_stem: str | None) -> list[str]:
 
 
 class MotionIndex:
-    """Bancos de motions por nombre en los AFS comunes (se leen bajo demanda)."""
+    """Motion banks by name in the common AFS files (read on demand)."""
 
     def __init__(self, archives: Iterable[Path]) -> None:
         self._archives = list(archives)
@@ -129,7 +128,7 @@ class MotionIndex:
         return index
 
     def find(self, own: Sequence[EntryRef], candidates: Sequence[str]) -> EntryRef | None:
-        """El primer candidato en el propio AFS y, si no está, en los comunes."""
+        """The first candidate in the AFS itself and, if absent, in the common ones."""
         local = {e.stem.lower(): e for e in own if e.suffix in MOTION_SUFFIXES}
         for name in candidates:
             if name in local:

@@ -1,8 +1,8 @@
-"""Hoja de contactos `gallery.png`: un render de frente por personaje, con su nombre debajo.
+"""Contact sheet `gallery.png`: a front render per character, with its name below.
 
-Cuadrícula de `columns` columnas, con un título arriba. Cada celda lleva el render (o un
-recuadro con FALLO), el nombre del personaje y una segunda línea: ANIM en verde si el GLB
-lleva el idle, SIN ANIM en gris si no y la causa abreviada en rojo si no se exportó.
+Grid of `columns` columns, with a title on top. Each cell holds the render (or a box with
+FAILED), the character name and a second line: ANIM in green if the GLB carries the idle,
+NO ANIM in grey if not, and the abbreviated cause in red if it was not exported.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ def _fill(dst: bytearray, width: int, color: tuple[int, int, int], rect: tuple[i
 def _centered(
     rgb: bytearray, width: int, box: tuple[int, int, int], text: str, color: tuple[int, int, int]
 ) -> None:
-    """`text` centrado en la caja (x, ancho, y), a escala 2 si cabe."""
+    """`text` centered in the box (x, width, y), at scale 2 if it fits."""
     x, w, y = box
     scale = 2 if text_width(text, 2) <= w else 1
     left = x + max(0, (w - text_width(text, scale)) // 2)
@@ -55,15 +55,15 @@ def _centered(
 def _second_line(result: CharacterResult) -> tuple[str, tuple[int, int, int]]:
     entry = result.entry
     if entry.status is Status.FAILED:
-        reason = (entry.reason or "fallo").split(":")[0]
+        reason = (entry.reason or "failed").split(":")[0]
         return reason.upper()[:24], RED
-    return ("ANIM", GREEN) if entry.motion else ("SIN ANIM", GREY)
+    return ("ANIM", GREEN) if entry.motion else ("NO ANIM", GREY)
 
 
 def contact_sheet(
     results: Sequence[CharacterResult], tile_size: tuple[int, int], columns: int, title: str
 ) -> bytes:
-    """PNG RGBA de la hoja de contactos."""
+    """RGBA PNG of the contact sheet."""
     tile_w, tile_h = tile_size
     cell_w, cell_h = tile_w + GAP, tile_h + LABEL_HEIGHT + GAP
     rows = max(1, (len(results) + columns - 1) // columns)
@@ -78,7 +78,7 @@ def contact_sheet(
             _paste(rgb, width, result.tile, size=(tile_w, tile_h), at=(x, y))
         else:
             _fill(rgb, width, TILE_FAILED, (x, y, tile_w, tile_h))
-            _centered(rgb, width, (x, tile_w, y + tile_h // 2 - GLYPH_HEIGHT), "FALLO", RED)
+            _centered(rgb, width, (x, tile_w, y + tile_h // 2 - GLYPH_HEIGHT), "FAILED", RED)
         _centered(rgb, width, (x, tile_w, y + tile_h + 4), result.entry.character.upper(), WHITE)
         text, color = _second_line(result)
         _centered(rgb, width, (x, tile_w, y + tile_h + 8 + 2 * GLYPH_HEIGHT), text, color)

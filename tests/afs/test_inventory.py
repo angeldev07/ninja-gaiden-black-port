@@ -1,4 +1,4 @@
-"""Tests de las fichas por archivo y de los agregados del inventario."""
+"""Tests of the per-file cards and of the inventory aggregates."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ OUTER = build_afs([("inner.afs", INNER), ("raw", b"\x01\x00\x00\x00" * 8)], "bef
 
 
 def fan_out(copies: int) -> bytes:
-    """AFS cuya entrada #0 es INNER y las `copies` siguientes apuntan al mismo hijo."""
+    """AFS whose entry #0 is INNER and the next `copies` entries point to the same child."""
     files = [("inner.afs", INNER), *((f"dup{i}", b"x") for i in range(copies))]
     buf = bytearray(build_afs(files, "none"))
     toc0 = buf[8:16]
@@ -37,20 +37,20 @@ def fan_out(copies: int) -> bytes:
 
 
 def self_cycle() -> bytes:
-    """AFS cuya entrada #0 cubre el archivo entero desde el offset 0: se contiene a sí mismo."""
+    """AFS whose entry #0 covers the whole file from offset 0: it contains itself."""
     buf = bytearray(build_afs(FILES, "none"))
     struct.pack_into("<II", buf, 8, 0, len(buf))
     return bytes(buf)
 
 
 def inventory_bytes(data: bytes, **limits: int) -> ArchiveRecord:
-    """Ficha de un AFS en memoria; `limits` son los presupuestos (`max_records`, ...)."""
+    """Card for an in-memory AFS; `limits` are the budgets (`max_records`, ...)."""
     source = io.BytesIO(data)
     return inventory_archive(source, open_afs(source, "t.afs"), **limits)
 
 
 def with_null_tail(nulls: int) -> bytes:
-    """FILES más `nulls` entradas nulas (0, 0) al final de la TOC."""
+    """FILES plus `nulls` null entries (0, 0) at the end of the TOC."""
     files = [*FILES, *((f"n{i}", b"x") for i in range(nulls))]
     buf = bytearray(build_afs(files, "none"))
     for i in range(len(FILES), len(files)):
@@ -58,7 +58,7 @@ def with_null_tail(nulls: int) -> bytes:
     return bytes(buf)
 
 
-INNER_COST = 8 + 2 * 8 + 2 * (8 + 0x30)  # cabecera + 2 punteros + 2 x (TOC + atributos)
+INNER_COST = 8 + 2 * 8 + 2 * (8 + 0x30)  # header + 2 pointers + 2 x (TOC + attributes)
 
 
 def all_refs(record: ArchiveRecord) -> list[str]:
@@ -104,14 +104,14 @@ class InventoryTests(unittest.TestCase):
         (self.root / "plain.afs").write_bytes(build_afs(FILES))
         inv = build_inventory(self.root)
         broken = inv["archives"][0]
-        self.assertIn("magia", broken.get("error", ""))
+        self.assertIn("magic", broken.get("error", ""))
         self.assertEqual([i["code"] for i in broken["issues"]], ["unreadable"])
         invariants = inv["summary"]["invariants"]
         self.assertEqual(invariants["archives_ok"], 1)
         self.assertEqual(invariants["issue_counts"], {"unreadable": 1})
         self.assertEqual(inv["summary"]["attr_pointer_locations"], {"error": 1, "after_toc": 1})
         (example,) = invariants["issue_examples"]["unreadable"]
-        self.assertTrue(example.startswith("broken.afs: magia"), example)  # sin "#None"
+        self.assertTrue(example.startswith("broken.afs: invalid magic"), example)  # no "#None"
 
     def test_record_carries_metadata_and_injected_clock(self) -> None:
         (self.root / "plain.afs").write_bytes(build_afs(FILES))
@@ -139,7 +139,7 @@ class NestingBudgetTests(unittest.TestCase):
         self.assertEqual(len(all_refs(record)), 6 + 2)
         self.assertEqual(sum("nested" in e for e in record["entries"]), 1)
         self.assertEqual(issue_codes(record).count("nested_revisit"), 5)
-        self.assertIn("ya inventariado", record["entries"][3].get("nested_error", ""))
+        self.assertIn("already inventoried", record["entries"][3].get("nested_error", ""))
 
     def test_archive_that_contains_itself_is_not_reopened(self) -> None:
         record = inventory_bytes(self_cycle())
@@ -164,7 +164,7 @@ class NestingBudgetTests(unittest.TestCase):
         self.assertNotIn("truncated", inventory_bytes(with_null_tail(2)))
 
     def test_cut_archive_is_truncated_and_counts_only_what_it_lists(self) -> None:
-        record = inventory_bytes(with_null_tail(2), max_records=4)  # #0-#2 y una nula
+        record = inventory_bytes(with_null_tail(2), max_records=4)  # #0-#2 and one null
         self.assertTrue(record.get("truncated"))
         self.assertEqual(record["null_entries"], 1)
         self.assertEqual(record["entries_bytes"], sum(len(data) for _, data in FILES))
@@ -177,7 +177,7 @@ class MetadataBudgetTests(unittest.TestCase):
     def test_child_beyond_the_metadata_budget_is_not_opened(self) -> None:
         record = inventory_bytes(OUTER, max_metadata=INNER_COST - 1)
         self.assertNotIn("nested", record["entries"][0])
-        self.assertIn("presupuesto", record["entries"][0].get("nested_error", ""))
+        self.assertIn("budget", record["entries"][0].get("nested_error", ""))
         self.assertEqual(issue_codes(record).count("metadata_budget"), 1)
         self.assertTrue(record.get("truncated"))
 
@@ -188,8 +188,8 @@ class MetadataBudgetTests(unittest.TestCase):
         self.assertEqual(issue_codes(record).count("metadata_budget"), 1)
 
     def test_hostile_child_count_does_not_spend_the_budget(self) -> None:
-        # Un hijo que declara 16M entradas en 64 bytes: su TOC no cabe y no se cobra, así que el
-        # hijo real que viene detrás todavía se abre.
+        # A child declaring 16M entries in 64 bytes: its TOC does not fit and it is not charged,
+        # so the real child that follows is still opened.
         hostile = b"AFS\x00" + (0xFFFFFF).to_bytes(4, "little") + bytes(56)
         outer = build_afs([("h.afs", hostile), ("b.afs", INNER)])
         record = inventory_bytes(outer, max_metadata=INNER_COST)
@@ -216,8 +216,8 @@ class IoErrorTests(unittest.TestCase):
 
 class NameExtensionTests(unittest.TestCase):
     def test_extension_buckets(self) -> None:
-        self.assertEqual(name_extension(None), "(sin nombre)")
-        self.assertEqual(name_extension("readme"), "(sin extensión)")
+        self.assertEqual(name_extension(None), "(no name)")
+        self.assertEqual(name_extension("readme"), "(no extension)")
         self.assertEqual(name_extension("BOFF_01.KMD"), ".kmd")
 
 

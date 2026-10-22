@@ -1,1 +1,1 @@
-"""Tests de `ngb_tools.audio` con flujos sintéticos en memoria (nunca datos del juego)."""
+"""Tests of `ngb_tools.audio` with synthetic in-memory streams (never game data)."""

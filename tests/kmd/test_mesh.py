@@ -1,4 +1,4 @@
-"""Tests de OBJINFO, HIERARC y el descriptor de malla por separado."""
+"""Tests of OBJINFO, HIERARC and the mesh descriptor, each on its own."""
 
 from __future__ import annotations
 

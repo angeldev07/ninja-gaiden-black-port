@@ -1,4 +1,4 @@
-"""Tests de la disposición de mips y de la decodificación del nivel 0 de una textura."""
+"""Tests of mip layout and of level-0 decoding of a texture."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def levels_of(fmt: int, size: int = 0) -> list[tuple[int, int, int, int]]:
 
 class MipChainTests(unittest.TestCase):
     def test_dxt1_levels_are_packed_back_to_back(self) -> None:
-        # 64x64 = 16x16 bloques de 8 B; cada nivel es la cuarta parte del anterior.
+        # 64x64 = 16x16 blocks of 8 B; each level is a quarter of the previous one.
         levels = levels_of(format_word(DXT1, 6, 6, levels=4))
         self.assertEqual(
             levels,
@@ -62,7 +62,7 @@ class MipChainTests(unittest.TestCase):
         self.assertEqual(sizes, [32, 8, 8, 8])
 
     def test_swizzled_levels_stop_at_1x1(self) -> None:
-        # 8x4 ARGB declara 10 niveles pero solo caben 4: 8x4, 4x2, 2x1, 1x1.
+        # 8x4 ARGB declares 10 levels but only 4 fit: 8x4, 4x2, 2x1, 1x1.
         levels = levels_of(format_word(A8R8G8B8, 3, 2, levels=10))
         self.assertEqual(levels, [(8, 4, 0, 128), (4, 2, 128, 32), (2, 1, 160, 8), (1, 1, 168, 4)])
 
@@ -86,7 +86,7 @@ class UnsupportedLayoutTests(unittest.TestCase):
             texture_layout(bare_texture(format_word(DXT1, 4, 4, cubemap=True)))
 
     def test_volume_is_detected(self) -> None:
-        with self.assertRaisesRegex(UnsupportedTextureError, "volumen"):
+        with self.assertRaisesRegex(UnsupportedTextureError, "volume"):
             texture_layout(bare_texture(format_word(A8, 4, 4, dimensions=3, log2_p=2)))
 
     def test_unknown_format_code(self) -> None:
@@ -94,7 +94,7 @@ class UnsupportedLayoutTests(unittest.TestCase):
             texture_layout(bare_texture(format_word(0x08, 4, 4)))
 
     def test_known_but_undecodable_format_has_a_layout_but_no_decoder(self) -> None:
-        # Se sabe cuántos bytes ocupa (para el sha256 del manifiesto), no cómo pintarlo.
+        # How many bytes it takes is known (for the manifest sha256), but not how to draw it.
         layout = texture_layout(bare_texture(format_word(D24S8, 4, 4)))
         self.assertEqual(layout.byte_size, 16 * 16 * 4)
         xpr = parse_xpr(build_xpr([texture_header(0, format_word(D24S8, 4, 4))], bytes(1024)))
@@ -102,13 +102,13 @@ class UnsupportedLayoutTests(unittest.TestCase):
             decode_texture(xpr, xpr.textures[0])
 
     def test_linear_pitch_shorter_than_a_row(self) -> None:
-        # 32 píxeles ARGB = 128 bytes por fila, pero el pitch declarado es 64.
+        # 32 ARGB pixels = 128 bytes per row, but the declared pitch is 64.
         texture = bare_texture(format_word(LIN_A8R8G8B8, 0, 0), size_word(32, 2, 64))
         with self.assertRaisesRegex(UnsupportedTextureError, "pitch"):
             texture_layout(texture)
 
     def test_dimensions_other_than_two_or_three(self) -> None:
-        with self.assertRaisesRegex(UnsupportedTextureError, r"^1 dimensiones"):
+        with self.assertRaisesRegex(UnsupportedTextureError, r"^1 dimensions"):
             texture_layout(bare_texture(format_word(DXT1, 4, 0, dimensions=1)))
 
     def test_linear_texture_without_size_word(self) -> None:
@@ -117,11 +117,11 @@ class UnsupportedLayoutTests(unittest.TestCase):
 
 
 class DecodeTextureTests(unittest.TestCase):
-    """XPR0 sintético con dos texturas (DXT1 8x4 y P8 4x4 swizzled) y una paleta."""
+    """Synthetic XPR0 with two textures (DXT1 8x4 and swizzled P8 4x4) and a palette."""
 
     def setUp(self) -> None:
-        dxt1 = solid_dxt1_block(RED) + solid_dxt1_block(BLUE)  # 2 bloques: 16 B
-        p8 = bytes(range(16))  # memoria swizzled: el byte k es el índice k
+        dxt1 = solid_dxt1_block(RED) + solid_dxt1_block(BLUE)  # 2 blocks: 16 B
+        p8 = bytes(range(16))  # swizzled memory: byte k is index k
         palette = b"".join(d3dcolor(k, 0, 0) for k in range(256))
         self.xpr = parse_xpr(
             build_xpr(
@@ -147,7 +147,7 @@ class DecodeTextureTests(unittest.TestCase):
 
     def test_p8_without_palette_is_unsupported(self) -> None:
         xpr = parse_xpr(build_xpr([texture_header(0, format_word(P8, 2, 2))], bytes(16)))
-        with self.assertRaisesRegex(UnsupportedTextureError, "paleta"):
+        with self.assertRaisesRegex(UnsupportedTextureError, "palette"):
             decode_texture(xpr, xpr.textures[0])
 
     def test_swizzled_a8_follows_the_morton_order(self) -> None:
@@ -156,7 +156,7 @@ class DecodeTextureTests(unittest.TestCase):
         self.assertEqual(list(image.pixels[3::4]), flatten(MORTON_8X4))
 
     def test_only_level_zero_is_decoded(self) -> None:
-        # 8x8 DXT1 con 2 niveles: nivel 0 rojo (4 bloques) y nivel 1 azul (1 bloque).
+        # 8x8 DXT1 with 2 levels: level 0 red (4 blocks) and level 1 blue (1 block).
         data = solid_dxt1_block(RED) * 4 + solid_dxt1_block(BLUE)
         xpr = parse_xpr(build_xpr([texture_header(0, format_word(DXT1, 3, 3, levels=2))], data))
         image = decode_texture(xpr, xpr.textures[0])
@@ -170,7 +170,7 @@ class DecodeTextureTests(unittest.TestCase):
 
 
 class CheckTextureTests(unittest.TestCase):
-    """`check_texture` valida sin decodificar: lo que `list` necesita para avisar."""
+    """`check_texture` validates without decoding: what `list` needs in order to warn."""
 
     def test_valid_texture_returns_its_layout(self) -> None:
         xpr = parse_xpr(build_xpr([texture_header(0, format_word(DXT1, 3, 3))], bytes(32)))
@@ -178,7 +178,7 @@ class CheckTextureTests(unittest.TestCase):
         self.assertEqual((check.layout.byte_size, check.present_levels), (32, 1))
 
     def test_missing_low_mips_keep_level_zero(self) -> None:
-        # El nivel 0 cabe (32 B) pero el 1 no: se exporta el 0 y se avisa de lo que falta.
+        # Level 0 fits (32 B) but level 1 does not: 0 is exported and what is missing is flagged.
         header = texture_header(0, format_word(DXT1, 3, 3, levels=2))
         xpr = parse_xpr(build_xpr([header], bytes(32)))
         check = check_texture(xpr, xpr.textures[0])
@@ -205,10 +205,10 @@ class CheckTextureTests(unittest.TestCase):
 
 
 class HostileTextureTests(unittest.TestCase):
-    """Cabeceras de textura manipuladas: se rechazan antes de reservar memoria."""
+    """Tampered texture headers: rejected before allocating memory."""
 
     def test_absurd_dimensions_are_refused_by_the_layout(self) -> None:
-        # log2 = 15: 32768x32768 RGBA serían 4 GiB.
+        # log2 = 15: 32768x32768 RGBA would be 4 GiB.
         with self.assertRaisesRegex(TextureTooLargeError, "32768x32768"):
             texture_layout(bare_texture(format_word(A8R8G8B8, 15, 15)))
 
@@ -232,7 +232,7 @@ class HostileTextureTests(unittest.TestCase):
             check_texture(xpr, xpr.textures[0])
 
     def test_indices_past_a_short_palette_are_transparent(self) -> None:
-        # Paleta de 32 entradas (código 3) e índices 40: no hay entrada, negro transparente.
+        # Palette of 32 entries (code 3) and indices 40: no entry, transparent black.
         headers = [texture_header(0, format_word(P8, 2, 2)), palette_header(16, size_code=3)]
         palette = b"".join(d3dcolor(255, 255, 255) for _ in range(32))
         xpr = parse_xpr(build_xpr(headers, bytes([40] * 16) + palette))
@@ -242,15 +242,15 @@ class HostileTextureTests(unittest.TestCase):
 
 class DecoderErrorTests(unittest.TestCase):
     def test_decoder_value_errors_become_format_errors(self) -> None:
-        # La API pública solo lanza errores tipados: un ValueError interno no escapa.
+        # The public API only raises typed errors: an internal ValueError does not escape.
         xpr = parse_xpr(build_xpr([texture_header(0, format_word(DXT1, 2, 2))], bytes(8)))
-        broken = mock.patch("ngb_tools.xpr.texture.decode_bc1", side_effect=ValueError("roto"))
-        with broken, self.assertRaisesRegex(XprFormatError, "roto"):
+        broken = mock.patch("ngb_tools.xpr.texture.decode_bc1", side_effect=ValueError("broken"))
+        with broken, self.assertRaisesRegex(XprFormatError, "broken"):
             decode_texture(xpr, xpr.textures[0])
 
 
 class AlphaModeTests(unittest.TestCase):
-    """DXT2/DXT3 y DXT4/DXT5 comparten código: el alfa recto solo se puede suponer o probar."""
+    """DXT2/DXT3 and DXT4/DXT5 share a code: straight alpha can only be assumed or proven."""
 
     DXT5 = FORMATS[0x0F]
 
@@ -258,7 +258,7 @@ class AlphaModeTests(unittest.TestCase):
         self.assertEqual(alpha_mode(FORMATS[DXT1], bytes(4)), AlphaMode.STRAIGHT)
 
     def test_a_channel_above_alpha_proves_straight_alpha(self) -> None:
-        # Premultiplicado exige R, G, B <= A: (200, 0, 0, 100) no puede serlo.
+        # Premultiplied requires R, G, B <= A: (200, 0, 0, 100) cannot be.
         rgba = bytes([10, 10, 10, 100, 200, 0, 0, 100])
         self.assertEqual(alpha_mode(self.DXT5, rgba), AlphaMode.STRAIGHT_PROVEN)
 

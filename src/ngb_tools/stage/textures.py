@@ -1,13 +1,14 @@
-"""Los PNG de las texturas de cada parte: los de `ngb_tools.xpr` si cuadran y, si no, se exportan.
+"""The texture PNGs of each part: the `ngb_tools.xpr` ones if they match, else exported.
 
-Cada parte va a `$NGB_DATA/extracted/textures/<parte>` (`textures/boff_01`), con el mismo
-`_manifest.json` que `python -m ngb_tools.xpr export --kmd`. El manifiesto solo se reutiliza
-si describe este mismo XPR0: mismo número de texturas, mismo índice de recurso y mismo
-sha256 de cada una, y su PNG existe. Si no, se vuelve a exportar con `export_textures`
-(que también garantiza que la salida queda fuera de los repos).
+Each part goes to `$NGB_DATA/extracted/textures/<part>` (`textures/boff_01`), with the same
+`_manifest.json` as `python -m ngb_tools.xpr export --kmd`. The manifest is only reused if it
+describes this same XPR0: same number of textures, same resource index and same sha256 for
+each one, and its PNG exists. Otherwise it is exported again with `export_textures` (which
+also guarantees the output stays outside the repos).
 
-TODO(kmd): es la lógica de `ngb_tools.kmd.textures.resolve_texture_files`, que pide un
-`KmdModel`; con una versión que reciba el XPR0 y su posición, este módulo sobra.
+TODO(kmd): this is the logic of `ngb_tools.kmd.textures.resolve_texture_files`, which takes
+a `KmdModel`; with a version that takes the XPR0 and its position, this module becomes
+redundant.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ TEXTURES_SUBDIR: Final = "textures"
 
 @dataclass(frozen=True, slots=True)
 class TextureSet:
-    """PNG por número de textura y si se exportaron ahora."""
+    """PNG per texture number and whether they were exported just now."""
 
     files: Mapping[int, Path]
     exported: bool
@@ -84,7 +85,7 @@ def _read_manifest(directory: Path) -> Any:
 
 
 def resolve_textures(model: StageModel, origin: Path, directory: Path) -> TextureSet:
-    """PNG de cada textura exportable de la parte; `origin` solo va al manifiesto."""
+    """PNG of each exportable texture of the part; `origin` only goes into the manifest."""
     found = _from_manifest(model, _read_manifest(directory), directory)
     if found is not None:
         return found
@@ -92,5 +93,5 @@ def resolve_textures(model: StageModel, origin: Path, directory: Path) -> Textur
     export_textures(source, directory)
     found = _from_manifest(model, _read_manifest(directory), directory)
     if found is None:
-        raise XprError(f"el manifiesto recién exportado en {directory} no cuadra con el KMD")
+        raise XprError(f"the manifest just exported to {directory} does not match the KMD")
     return TextureSet(found.files, exported=True)

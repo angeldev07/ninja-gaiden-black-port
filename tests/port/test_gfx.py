@@ -1,10 +1,10 @@
-"""Ejecuta `gfx_test.exe` (presentador de frames, port/src/gfx) sin mostrar la ventana.
+"""Run `gfx_test.exe` (frame presenter, port/src/gfx) without showing the window.
 
-Necesita Windows y el test compilado (`port\\build.cmd` deja `build\\port\\gfx_test.exe`).
-`NGB_LOADER` puede apuntar al loader de otra carpeta: el test se busca a su lado. Si falta,
-se salta. El ejecutable ya comprueba por sí solo las conversiones (código de salida 1 si
-fallan). Aquí se valida además el PNG que escribe en C: firma, IHDR, el CRC de cada chunk,
-el zlib del IDAT y los colores de los cuadrantes del patrón swizzled.
+Needs Windows and the compiled test (`port\\build.cmd` leaves `build\\port\\gfx_test.exe`).
+`NGB_LOADER` may point to the loader in another folder: the test is looked up next to it. If it is
+missing, the test is skipped. The executable already checks the conversions by itself (exit
+code 1 if they fail). Here the PNG it writes in C is also validated: signature, IHDR, the CRC
+of each chunk, the IDAT zlib stream and the colors of the quadrants of the swizzled pattern.
 """
 
 from __future__ import annotations
@@ -24,10 +24,10 @@ PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 def read_png_rgb(path: Path) -> tuple[int, int, bytes]:
-    """(ancho, alto, filas RGB sin el byte de filtro) de un PNG RGB de 8 bits, filtro 0."""
+    """(width, height, RGB rows without the filter byte) of an 8-bit RGB PNG, filter 0."""
     data = path.read_bytes()
     if not data.startswith(PNG_SIGNATURE):
-        raise ValueError("firma PNG ausente")
+        raise ValueError("PNG signature missing")
     pos, idat, header = 8, b"", b""
     while pos < len(data):
         (length,) = struct.unpack_from(">I", data, pos)
@@ -35,7 +35,7 @@ def read_png_rgb(path: Path) -> tuple[int, int, bytes]:
         body = data[pos + 8 : pos + 8 + length]
         (crc,) = struct.unpack_from(">I", data, pos + 8 + length)
         if zlib.crc32(kind + body) != crc:
-            raise ValueError(f"CRC incorrecto en {kind!r}")
+            raise ValueError(f"bad CRC in {kind!r}")
         if kind == b"IHDR":
             header = body
         elif kind == b"IDAT":
@@ -43,16 +43,16 @@ def read_png_rgb(path: Path) -> tuple[int, int, bytes]:
         pos += 12 + length
     width, height, depth, color = struct.unpack(">IIBB", header[:10])
     if (depth, color) != (8, 2):
-        raise ValueError(f"se esperaba RGB de 8 bits, hay depth {depth} color {color}")
+        raise ValueError(f"expected 8-bit RGB, got depth {depth} color {color}")
     raw = zlib.decompress(idat)
     stride = 1 + 3 * width
     if len(raw) != stride * height or any(raw[y * stride] for y in range(height)):
-        raise ValueError("filas de tamaño o filtro inesperados")
+        raise ValueError("rows of unexpected size or filter")
     rows = b"".join(raw[y * stride + 1 : (y + 1) * stride] for y in range(height))
     return width, height, rows
 
 
-@unittest.skipUnless(os.name == "nt" and GFX_TEST.is_file(), "requiere Windows y gfx_test.exe")
+@unittest.skipUnless(os.name == "nt" and GFX_TEST.is_file(), "requires Windows and gfx_test.exe")
 class GfxTestRun(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -87,12 +87,12 @@ class GfxTestRun(unittest.TestCase):
             i = 3 * (y * width + x)
             return tuple(rgb[i : i + 3])
 
-        self.assertEqual(pixel(40, 10), (0xE0, 0x30, 0x30))  # rojo, arriba a la izquierda
-        self.assertEqual(pixel(200, 50), (0x30, 0xC0, 0x30))  # verde, arriba a la derecha
-        self.assertEqual(pixel(50, 200), (0x30, 0x50, 0xE0))  # azul, abajo a la izquierda
-        self.assertEqual(pixel(200, 170), (0xE0, 0xD0, 0x30))  # amarillo, abajo a la derecha
+        self.assertEqual(pixel(40, 10), (0xE0, 0x30, 0x30))  # red, top left
+        self.assertEqual(pixel(200, 50), (0x30, 0xC0, 0x30))  # green, top right
+        self.assertEqual(pixel(50, 200), (0x30, 0x50, 0xE0))  # blue, bottom left
+        self.assertEqual(pixel(200, 170), (0xE0, 0xD0, 0x30))  # yellow, bottom right
         self.assertEqual(pixel(77, 77), (0xFF, 0xFF, 0xFF))  # diagonal
-        self.assertEqual(pixel(64, 100), (0, 0, 0))  # rejilla cada 32 px
+        self.assertEqual(pixel(64, 100), (0, 0, 0))  # grid every 32 px
 
 
 if __name__ == "__main__":

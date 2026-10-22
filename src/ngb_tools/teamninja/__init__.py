@@ -1,7 +1,7 @@
-"""Formatos propios de Team Ninja que no son de un middleware conocido.
+"""Team Ninja's own formats that do not belong to a known middleware.
 
-De momento solo la cabecera de chunk común a los archivos de los AFS (`chunk`) y la
-búsqueda del XPR0 que lleva dentro un KMD. El resto del KMD es del hito H3.
+For now only the chunk header common to the AFS files (`chunk`) and the
+search for the XPR0 carried inside a KMD. The rest of the KMD belongs to milestone H3.
 """
 
 from __future__ import annotations

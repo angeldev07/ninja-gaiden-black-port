@@ -1,13 +1,13 @@
-"""Rutas compartidas por las herramientas: datos del juego, repos protegidos y escritura atómica.
+"""Shared tool paths: game data, protected repos and atomic writes.
 
-Los datos del juego tienen copyright: viven en `NGB_DATA` (por defecto `~/ngb-data`, con
-`game/` inmutable y `extracted/`) y nunca deben caer dentro de un repo git. Toda
-herramienta que escriba algo derivado del juego pasa su ruta de salida por
-`ensure_outside_repos` y escribe con `atomic_write_*`, así que un archivo con su nombre
-final siempre está completo.
+The game data is copyrighted: it lives in `NGB_DATA` (default `~/ngb-data`, with an
+immutable `game/` and `extracted/`) and must never end up inside a git repo. Every tool
+that writes something derived from the game passes its output path through
+`ensure_outside_repos` and writes with `atomic_write_*`, so a file with its final name is
+always complete.
 
-Un repo se reconoce por su `.git`: una carpeta (clon normal) o un archivo que empieza por
-`gitdir:` (worktree o submódulo). Cualquier otro `.git` no cuenta.
+A repo is recognized by its `.git`: a folder (normal clone) or a file starting with
+`gitdir:` (worktree or submodule). Any other `.git` does not count.
 """
 
 from __future__ import annotations
@@ -27,14 +27,14 @@ _GITDIR_PREFIX: Final = b"gitdir:"
 
 
 class UnsafeOutputError(Exception):
-    """Se pidió escribir dentro de un repositorio git (fuera de las carpetas permitidas)."""
+    """Writing inside a git repository (outside the allowed folders) was requested."""
 
 
 def data_root(environ: Mapping[str, str] | None = None) -> Path:
-    """Raíz de los datos del juego: `$NGB_DATA`, o `~/ngb-data` si no está definida o vacía.
+    """Game data root: `$NGB_DATA`, or `~/ngb-data` if it is unset or empty.
 
-    Si `~` es a su vez un repo git (dotfiles), `~/ngb-data` cae dentro de él y la guarda
-    rechazará escribir ahí: en ese caso `NGB_DATA` tiene que apuntar fuera del repo.
+    If `~` is itself a git repo (dotfiles), `~/ngb-data` falls inside it and the guard
+    will refuse to write there: in that case `NGB_DATA` must point outside the repo.
     """
     env = os.environ if environ is None else environ
     value = env.get(DATA_ENV_VAR)
@@ -42,9 +42,9 @@ def data_root(environ: Mapping[str, str] | None = None) -> Path:
 
 
 def is_repo_marker(marker: Path) -> bool:
-    """Indica si `marker` (un `.git`) delata un repo: carpeta, o archivo `gitdir: ...`.
+    """Whether `marker` (a `.git`) betrays a repo: a folder, or a `gitdir: ...` file.
 
-    Un `.git` que existe pero no se puede leer cuenta como repo: ante la duda, se protege.
+    A `.git` that exists but cannot be read counts as a repo: when in doubt, protect.
     """
     try:
         if marker.is_dir():
@@ -58,47 +58,47 @@ def is_repo_marker(marker: Path) -> bool:
 
 
 def find_repo_roots(start: Path) -> tuple[Path, ...]:
-    """Todos los repos que contienen `start`, del más cercano al más lejano.
+    """All the repos that contain `start`, from the nearest to the farthest.
 
-    `start` no tiene por qué existir: así se puede comprobar una salida antes de crearla.
+    `start` does not need to exist, so an output can be checked before it is created.
     """
     return tuple(c for c in (start, *start.parents) if is_repo_marker(c / ".git"))
 
 
 def find_repo_root(start: Path) -> Path | None:
-    """El repo más cercano que contiene `start`, o None."""
+    """The nearest repo that contains `start`, or None."""
     return next((c for c in (start, *start.parents) if is_repo_marker(c / ".git")), None)
 
 
 def package_repo_root() -> Path | None:
-    """Repo que contiene el código de `ngb_tools`, o None si el paquete está instalado aparte."""
+    """Repo that contains the `ngb_tools` code, or None if the package is installed elsewhere."""
     return find_repo_root(Path(__file__).resolve().parent)
 
 
 def protected_roots() -> tuple[Path, ...]:
-    """Repos que se protegen aunque la salida no esté bajo ellos: el del paquete y el del cwd."""
+    """Repos protected even if the output is not under them: the package's and the cwd's."""
     candidates = (package_repo_root(), find_repo_root(Path.cwd().resolve()))
     return tuple(sorted({root for root in candidates if root is not None}))
 
 
 def report_dirs() -> tuple[Path, ...]:
-    """Carpetas del repo donde sí se pueden escribir informes: `build/` del repo del paquete.
+    """Repo folders where reports may be written: the package repo's `build/`.
 
-    `build/` está en .gitignore y la guardia de higiene la bloquea aunque se fuerce un
-    `git add -f`, así que lo que se escribe ahí no puede acabar versionado.
+    `build/` is in .gitignore and the hygiene guard blocks it even if someone forces a
+    `git add -f`, so whatever is written there cannot end up versioned.
     """
     root = package_repo_root()
     return () if root is None else (root / BUILD_SUBDIR,)
 
 
 def _is_exempt(resolved: Path, repos: Sequence[Path], allow: Iterable[Path]) -> bool:
-    """La excepción de `allow` solo vale dentro del repo del paquete.
+    """The `allow` exception only holds inside the package repo.
 
-    Hace falta que el repo más cercano a la ruta ya resuelta sea el del paquete (no un clon
-    anidado en build/, ni otro repo al que apunte un symlink o una unión) y que la carpeta
-    permitida, también resuelta, sea una subcarpeta de ese repo. La carpeta permitida no
-    puede ser un enlace: si `build/` fuera una unión hacia `src/` del mismo repo, la ruta
-    resuelta seguiría dentro del repo del paquete pero fuera de la zona ignorada.
+    The repo nearest to the already-resolved path must be the package's (not a clone nested
+    in build/, nor another repo that a symlink or junction points to) and the allowed
+    folder, also resolved, must be a subfolder of that repo. The allowed folder cannot be a
+    link: if `build/` were a junction to `src/` of the same repo, the resolved path would
+    still be inside the package repo but outside the ignored area.
     """
     package = package_repo_root()
     if package is None or not repos or repos[0] != package:
@@ -114,12 +114,12 @@ def _is_exempt(resolved: Path, repos: Sequence[Path], allow: Iterable[Path]) -> 
 
 
 def ensure_outside_repos(path: Path, *, allow: Iterable[Path] = ()) -> Path:
-    """Devuelve `path` resuelto, o lanza `UnsafeOutputError` si cae dentro de un repo git.
+    """Return `path` resolved, or raise `UnsafeOutputError` if it falls inside a git repo.
 
-    `resolve()` sigue symlinks y uniones y normaliza `..` aunque la ruta no exista. Se
-    rechaza si la ruta resuelta está bajo cualquiera de los repos que la contienen (todos
-    los ancestros con `.git`, no solo el más cercano) o bajo `protected_roots()`. La única
-    excepción es `allow`, con las condiciones de `_is_exempt`.
+    `resolve()` follows symlinks and junctions and normalizes `..` even if the path does not
+    exist. The path is rejected if the resolved path is under any of the repos that contain
+    it (all ancestors with `.git`, not just the nearest) or under `protected_roots()`. The
+    only exception is `allow`, under the conditions of `_is_exempt`.
     """
     resolved = path.resolve()
     repos = find_repo_roots(resolved)
@@ -127,17 +127,17 @@ def ensure_outside_repos(path: Path, *, allow: Iterable[Path] = ()) -> Path:
         return resolved
     for repo in (*repos, *protected_roots()):
         if resolved.is_relative_to(repo):
-            raise UnsafeOutputError(f"salida dentro del repo {repo} prohibida: {resolved}")
+            raise UnsafeOutputError(f"output inside repo {repo} is forbidden: {resolved}")
     return resolved
 
 
 def partial_path(path: Path) -> Path:
-    """Nombre temporal (`<nombre>.part`) mientras se escribe `path`."""
+    """Temporary name (`<name>.part`) used while `path` is being written."""
     return path.with_name(path.name + PARTIAL_SUFFIX)
 
 
 def _fsync_dir(directory: Path) -> None:
-    """En POSIX el renombrado solo es durable tras un fsync de la carpeta (Windows no lo admite)."""
+    """On POSIX a rename is only durable after an fsync of the folder (Windows lacks it)."""
     if os.name != "posix":
         return
     fd = os.open(directory, os.O_RDONLY)
@@ -148,18 +148,18 @@ def _fsync_dir(directory: Path) -> None:
 
 
 def atomic_write_chunks(path: Path, chunks: Iterable[bytes], *, fsync: bool = False) -> None:
-    """Escribe `chunks` en `path` sin dejar nunca un archivo a medias con el nombre final.
+    """Write `chunks` to `path` without ever leaving a half-written file under the final name.
 
-    Atómico frente a fallos del proceso (una excepción, un kill): queda el archivo completo o
-    el anterior. Durable ante cortes de luz solo con `fsync=True`.
+    Atomic against process failures (an exception, a kill): either the complete file or the
+    previous one remains. Durable against power cuts only with `fsync=True`.
 
-    Borra un `.part` que haya dejado un corte previo (si es un symlink, se borra el enlace,
-    no su destino), lo crea en modo exclusivo ("xb"), escribe, hace `fsync` si se pide y lo
-    renombra con `os.replace` (vía `Path.replace`). Si algo falla, el `.part` se borra solo
-    si lo creó esta llamada: si "xb" falla porque otro escritor lo recreó, no se toca. La
-    carpeta de destino debe existir. No está pensado para varios escritores simultáneos sobre
-    la misma ruta: el borrado inicial del `.part` asume un único escritor (las herramientas
-    son de un solo proceso).
+    Deletes a `.part` left by an earlier interruption (if it is a symlink, the link is
+    deleted, not its target), creates it in exclusive mode ("xb"), writes, calls `fsync` if
+    requested and renames it with `os.replace` (via `Path.replace`). If anything fails, the
+    `.part` is deleted only if this call created it: if "xb" fails because another writer
+    recreated it, it is left alone. The destination folder must exist. Not meant for several
+    simultaneous writers on the same path: the initial deletion of the `.part` assumes a
+    single writer (the tools are single-process).
     """
     partial = partial_path(path)
     partial.unlink(missing_ok=True)
@@ -172,7 +172,7 @@ def atomic_write_chunks(path: Path, chunks: Iterable[bytes], *, fsync: bool = Fa
             if fsync:
                 out.flush()
                 os.fsync(out.fileno())
-        partial.replace(path)  # os.replace: atómico en el mismo volumen
+        partial.replace(path)  # os.replace: atomic on the same volume
         owned = False
         if fsync:
             _fsync_dir(path.parent)
@@ -182,5 +182,5 @@ def atomic_write_chunks(path: Path, chunks: Iterable[bytes], *, fsync: bool = Fa
 
 
 def atomic_write_bytes(path: Path, data: bytes, *, fsync: bool = False) -> None:
-    """`atomic_write_chunks` con un único bloque."""
+    """`atomic_write_chunks` with a single block."""
     atomic_write_chunks(path, (data,), fsync=fsync)

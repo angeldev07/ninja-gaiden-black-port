@@ -1,8 +1,8 @@
-"""Tests de las texturas de relieve con signo (V8U8, L6V5U5), con bytes calculados a mano.
+"""Tests of signed bump textures (V8U8, L6V5U5), with hand-computed bytes.
 
-Mapeo (`ngb_tools.xpr.bump`): R/G = U/V en binario desplazado (8 bits: +128; 5 bits: +16 y
-ampliado replicando bits), B = floor((z + 1) * 127.5 + 0.5) con z = sqrt(1 - u² - v²),
-A = 255 (V8U8) o L ampliada de 6 a 8 bits (L6V5U5).
+Mapping (`ngb_tools.xpr.bump`): R/G = U/V in offset binary (8 bits: +128; 5 bits: +16 and
+widened by replicating bits), B = floor((z + 1) * 127.5 + 0.5) with z = sqrt(1 - u² - v²),
+A = 255 (V8U8) or L widened from 6 to 8 bits (L6V5U5).
 """
 
 from __future__ import annotations
@@ -26,12 +26,12 @@ L6V5U5, V8U8, LIN_L6V5U5, DXT1 = 0x27, 0x28, 0x37, 0x0C
 
 
 def v8u8(u: int, v: int) -> int:
-    """Palabra V8U8: U en el byte bajo, V en el alto, en complemento a 2."""
+    """V8U8 word: U in the low byte, V in the high byte, in two's complement."""
     return (u & 0xFF) | ((v & 0xFF) << 8)
 
 
 def l6v5u5(u: int, v: int, lum: int) -> int:
-    """Palabra L6V5U5: U en los bits 0-4, V en 5-9 (complemento a 2) y L en 10-15."""
+    """L6V5U5 word: U in bits 0-4, V in 5-9 (two's complement) and L in 10-15."""
     return (u & 0x1F) | ((v & 0x1F) << 5) | (lum << 10)
 
 
@@ -46,14 +46,14 @@ class V8U8Tests(unittest.TestCase):
         self.assertEqual(v8u8_texel(v8u8(0, 0)), bytes((128, 128, 255, 255)))
 
     def test_extremes(self) -> None:
-        # u = -1, v = 127/128: u² + v² > 1, así que z = 0 -> B = 128.
+        # u = -1, v = 127/128: u² + v² > 1, so z = 0 -> B = 128.
         self.assertEqual(v8u8_texel(0x7F80), bytes((0, 255, 128, 255)))
         # u = 127/128: z = sqrt(1 - 0.98443603515625) = 0.12476 -> floor(143.41 + 0.5) = 143.
         self.assertEqual(v8u8_texel(v8u8(127, 0)), bytes((255, 128, 143, 255)))
         self.assertEqual(v8u8_texel(v8u8(-128, -128)), bytes((0, 0, 128, 255)))
 
     def test_small_values_around_zero(self) -> None:
-        # U = -1 (0xFF) y V = 1: casi plano, z = 0.99994 -> 255.
+        # U = -1 (0xFF) and V = 1: almost flat, z = 0.99994 -> 255.
         self.assertEqual(v8u8_texel(0x01FF), bytes((127, 129, 255, 255)))
 
 
@@ -88,11 +88,11 @@ class DecodeBumpTests(unittest.TestCase):
         self.assertEqual(decoded, flat + edge + edge + flat)
 
     def test_short_data_is_a_value_error(self) -> None:
-        with self.assertRaisesRegex(ValueError, "necesita 8"):
+        with self.assertRaisesRegex(ValueError, "needs 8"):
             decode_bump(bytes(6), 2, 2, FORMATS[V8U8])
 
     def test_other_codec_is_a_value_error(self) -> None:
-        with self.assertRaisesRegex(ValueError, "relieve"):
+        with self.assertRaisesRegex(ValueError, "bump"):
             decode_bump(bytes(8), 2, 2, FORMATS[DXT1])
 
     def test_formats_are_decodable_and_marked(self) -> None:
@@ -104,7 +104,7 @@ class DecodeBumpTests(unittest.TestCase):
 
 
 def bump_xpr() -> bytes:
-    """V8U8 2x2 (plano, U mínima, V máxima, U = V = -1), L6V5U5 2x2 y un DXT1 4x4."""
+    """V8U8 2x2 (flat, min U, max V, U = V = -1), L6V5U5 2x2 and a 4x4 DXT1."""
     v8 = struct.pack("<4H", v8u8(0, 0), v8u8(-128, 0), v8u8(0, 127), v8u8(-1, -1))
     l6 = struct.pack("<4H", *(l6v5u5(0, 0, 0),) * 4)
     return build_xpr(

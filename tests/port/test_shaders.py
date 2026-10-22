@@ -1,8 +1,9 @@
-"""Ejecuta el test en C de los traductores de shaders del NV2A (port/tests/shaders_test.c).
+"""Run the C test of the NV2A shader translators (port/tests/shaders_test.c).
 
-`port\\build.cmd` compila y ejecuta `build\\port\\shaders_test.exe`; `NGB_SHADERS_TEST` puede
-apuntar a otro. Sin Windows o sin el ejecutable, se salta. Si hay `glslangValidator` en el
-PATH, además compila los GLSL generados; si no, esa prueba se salta y queda la del texto.
+`port\\build.cmd` builds and runs `build\\port\\shaders_test.exe`; `NGB_SHADERS_TEST` may
+point to another. Without Windows or without the executable, it is skipped. If
+`glslangValidator` is on the PATH, the generated GLSL is also compiled; if not, that test is
+skipped and the text one remains.
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ def run(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-@unittest.skipUnless(os.name == "nt" and SHADERS_TEST.is_file(), "requiere el test C compilado")
+@unittest.skipUnless(os.name == "nt" and SHADERS_TEST.is_file(), "requires the compiled C test")
 class ShadersTest(unittest.TestCase):
     def test_c_suite_passes(self) -> None:
         result = run()
@@ -44,7 +45,7 @@ class ShadersTest(unittest.TestCase):
                 self.assertTrue(text.startswith("#version 400\n"), name)
                 self.assertIn("void main() {", text)
 
-    @unittest.skipUnless(GLSLANG, "glslangValidator no está en el PATH")
+    @unittest.skipUnless(GLSLANG, "glslangValidator is not on the PATH")
     def test_generated_glsl_compiles(self) -> None:
         assert GLSLANG is not None
         with tempfile.TemporaryDirectory() as tmp:

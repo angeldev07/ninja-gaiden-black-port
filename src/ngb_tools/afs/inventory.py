@@ -1,9 +1,9 @@
-"""Inventario por streaming de todos los AFS de un directorio: fichas y agregados.
+"""Streaming inventory of all the AFS files in a directory: cards and aggregates.
 
-El resultado es un documento JSON cuya forma exacta fija `records`.
-Cada entrada se resume con su cabecera, su tipo y la entropía de su ventana inicial;
-los AFS anidados se inventarían en su sitio, hasta `MAX_NESTING` niveles, una sola vez
-cada uno y con un tope de `MAX_ENTRY_RECORDS_PER_FILE` fichas por archivo físico.
+The result is a JSON document whose exact shape `records` fixes. Each entry is summarized
+with its header, its type and the entropy of its initial window; nested AFS files are
+inventoried in place, up to `MAX_NESTING` levels, once each and with a cap of
+`MAX_ENTRY_RECORDS_PER_FILE` cards per physical file.
 """
 
 from __future__ import annotations
@@ -60,13 +60,13 @@ from ngb_tools.afs.records import (
 TOOL: Final = "ngb_tools.afs"
 HEAD_BYTES: Final = 16
 MAX_NESTING: Final = 3
-# Presupuestos por archivo físico frente a AFS hostiles o corruptos. Acotan cosas distintas:
-# - MAX_ENTRY_RECORDS_PER_FILE: fichas de entrada, sumando todos los niveles, y con ellas
-#   las ventanas de 64 KB que se leen (como mucho 1 GiB). El AFS real más grande (spr.afs)
-#   tiene 684 entradas. No acota el parseo de las TOC y los atributos de los hijos:
-# - MAX_METADATA_BYTES_PER_FILE: bytes de cabecera, TOC y atributos que lee cada
-#   `open_afs` de un AFS hijo, cobrados en el peor caso antes de abrirlo. La TOC del
-#   propio archivo ya está acotada por su tamaño. Ninguno de los 206 AFS reales tiene hijos.
+# Budgets per physical file against hostile or corrupt AFS files. They bound different things:
+# - MAX_ENTRY_RECORDS_PER_FILE: entry cards, summing all the levels, and with them the 64 KB
+#   windows that are read (1 GiB at most). The largest real AFS (spr.afs) has 684 entries.
+#   It does not bound the parsing of the children's TOCs and attributes:
+# - MAX_METADATA_BYTES_PER_FILE: bytes of header, TOC and attributes that each `open_afs`
+#   of a child AFS reads, charged in the worst case before opening it. The file's own TOC
+#   is already bounded by its size. None of the 206 real AFS files has children.
 MAX_ENTRY_RECORDS_PER_FILE: Final = 16_384
 MAX_METADATA_BYTES_PER_FILE: Final = 64 * 1024 * 1024
 EXAMPLES_PER_KIND: Final = 3
@@ -75,18 +75,18 @@ NULL_KIND: Final = "null"
 UNREADABLE_LOCATION: Final = "error"
 _NULL_CLASSIFICATION: Final = Classification(NULL_KIND, "")
 
-# --- Fichas -------------------------------------------------------------------------------
+# --- Cards -------------------------------------------------------------------------------
 
 
 @dataclass(slots=True)
 class _FileWalk:
-    """Estado del recorrido de un archivo físico, para acotar el trabajo ante AFS hostiles.
+    """Traversal state of a physical file, to bound the work against hostile AFS files.
 
-    Varias entradas que apuntan al mismo AFS hijo (o un AFS que se contiene a sí mismo)
-    harían crecer el recorrido como N^MAX_NESTING. Por eso cada AFS, identificado por su
-    (offset absoluto, tamaño), se inventaría una sola vez por archivo, y hay dos topes:
-    fichas (`max_records`) y bytes de metadatos de los hijos (`max_metadata`). Al agotarse
-    uno se anota una incidencia, se corta y la ficha del archivo queda `truncated`.
+    Several entries pointing at the same child AFS (or an AFS that contains itself) would
+    make the traversal grow like N^MAX_NESTING. That is why each AFS, identified by its
+    (absolute offset, size), is inventoried only once per file, and there are two caps:
+    cards (`max_records`) and children metadata bytes (`max_metadata`). When one is
+    exhausted an issue is noted, the traversal is cut and the file's card is `truncated`.
     """
 
     max_records: int
@@ -103,38 +103,38 @@ class _FileWalk:
         return self.records_exhausted or self.metadata_exhausted
 
     def take_record(self, archive: AfsArchive, entry: AfsEntry) -> bool:
-        """Gasta una ficha; al agotarse, lo anota una sola vez y devuelve False."""
+        """Spend a card; when exhausted, note it only once and return False."""
         if self.records_left > 0:
             self.records_left -= 1
             return True
         if not self.records_exhausted:
             self.records_exhausted = True
             detail = (
-                f"tope de {self.max_records} fichas por archivo alcanzado en "
-                f"{archive.label}#{entry.index}; se omite el resto"
+                f"cap of {self.max_records} cards per file reached at "
+                f"{archive.label}#{entry.index}; the rest is skipped"
             )
             self.issues.append(Issue(IssueCode.ENTRY_BUDGET, detail))
         return False
 
     def take_metadata(self, cost: int, ref: str) -> bool:
-        """Cobra `cost` bytes de metadatos; agotado el tope, no se abre ningún hijo más."""
+        """Charge `cost` metadata bytes; once the cap is exhausted, no more children are opened."""
         if not self.metadata_exhausted and cost <= self.metadata_left:
             self.metadata_left -= cost
             return True
         if not self.metadata_exhausted:
             self.metadata_exhausted = True
             detail = (
-                f"tope de {self.max_metadata} bytes de metadatos de AFS anidados alcanzado "
-                f"en {ref}; no se abren más hijos"
+                f"cap of {self.max_metadata} nested AFS metadata bytes reached "
+                f"at {ref}; no more children are opened"
             )
             self.issues.append(Issue(IssueCode.METADATA_BUDGET, detail))
         return False
 
 
 def nested_metadata_cost(count: int) -> int:
-    """Peor caso de lo que lee `open_afs` de un hijo de `count` entradas.
+    """Worst case of what `open_afs` reads from a child of `count` entries.
 
-    Cabecera, los dos punteros de atributos candidatos, la TOC y la tabla de atributos.
+    Header, the two candidate attribute pointers, the TOC and the attribute table.
     """
     return HEADER_SIZE + 2 * ATTR_PTR_SIZE + count * (TOC_ENTRY_SIZE + ATTR_ENTRY_SIZE)
 
@@ -146,9 +146,9 @@ def issue_record(issue: Issue) -> IssueRecord:
 def _entry_record(
     source: ByteSource, archive: AfsArchive, entry: AfsEntry, depth: int, walk: _FileWalk
 ) -> EntryRecord:
-    """Ficha de una entrada; si es un AFS aún no visitado, lo abre en su sitio y lo inventaría.
+    """Card for an entry; if it is a not-yet-visited AFS, open it in place and inventory it.
 
-    Una entrada nula se trata como una ventana vacía: entropía 0 y banda `empty`.
+    A null entry is treated as an empty window: entropy 0 and band `empty`.
     """
     window = b"" if entry.is_null else read_entry_prefix(source, entry, ENTROPY_WINDOW)
     found = _NULL_CLASSIFICATION if entry.is_null else classify(window)
@@ -172,18 +172,18 @@ def _entry_record(
     ref, key = f"{archive.label}#{entry.index}", (entry.offset, entry.size)
     if key in walk.visited:
         where = f"{entry.offset:#x} ({entry.size:#x} B)"
-        record["nested_error"] = f"AFS ya inventariado en este archivo: {where}"
-        walk.issues.append(Issue(IssueCode.NESTED_REVISIT, f"{ref} vuelve al AFS de {where}"))
+        record["nested_error"] = f"AFS already inventoried in this file: {where}"
+        walk.issues.append(Issue(IssueCode.NESTED_REVISIT, f"{ref} revisits the AFS at {where}"))
         return record
     walk.visited.add(key)
     try:
-        # Se lee solo la cabecera para saber N y cobrar el peor caso antes de abrirlo.
+        # Only the header is read, to learn N and charge the worst case before opening it.
         _, count = parse_header(read_at(source, entry.offset, min(HEADER_SIZE, entry.size)))
-        # Si la TOC declarada no cabe en la entrada, open_afs la rechaza sin leerla: no se cobra,
-        # para que un N hostil no agote el presupuesto de los hijos siguientes.
+        # If the declared TOC does not fit in the entry, open_afs rejects it without reading
+        # it: it is not charged, so a hostile N does not exhaust the budget of the next children.
         toc_fits = HEADER_SIZE + count * TOC_ENTRY_SIZE <= entry.size
         if toc_fits and not walk.take_metadata(nested_metadata_cost(count), ref):
-            record["nested_error"] = "presupuesto de metadatos agotado: no se abre"
+            record["nested_error"] = "metadata budget exhausted: not opened"
             return record
         child = open_afs(source, ref, base=entry.offset, limit=entry.size)
     except AfsFormatError as err:
@@ -196,8 +196,8 @@ def _entry_record(
 def _archive_record(
     source: ByteSource, archive: AfsArchive, depth: int, walk: _FileWalk
 ) -> ArchiveRecord:
-    """Ficha de un AFS. Los recuentos salen de las entradas listadas, no de la TOC entera,
-    para que cuadren con los totales aunque el recorrido se corte; `count` es el de la TOC.
+    """Card for an AFS. The counts come from the listed entries, not the whole TOC, so they
+    match the totals even if the traversal is cut; `count` is the TOC's.
     """
     entries: list[EntryRecord] = []
     cut = False
@@ -240,7 +240,7 @@ def inventory_archive(
     max_records: int = MAX_ENTRY_RECORDS_PER_FILE,
     max_metadata: int = MAX_METADATA_BYTES_PER_FILE,
 ) -> ArchiveRecord:
-    """Ficha de un AFS ya abierto, con la de sus entradas y la de sus AFS anidados."""
+    """Card for an already-open AFS, with those of its entries and its nested AFS files."""
     walk = _FileWalk(
         max_records=max_records,
         max_metadata=max_metadata,
@@ -256,7 +256,7 @@ def inventory_archive(
 
 
 def unreadable_record(label: str, size: int, error: AfsFormatError | OSError) -> ArchiveRecord:
-    """Ficha de un archivo que no se pudo leer: queda registrado, no aborta el inventario."""
+    """Card for a file that could not be read: it is recorded, it does not abort the inventory."""
     return ArchiveRecord(
         label=label,
         size=size,
@@ -287,7 +287,7 @@ def inventory_file(
     max_records: int = MAX_ENTRY_RECORDS_PER_FILE,
     max_metadata: int = MAX_METADATA_BYTES_PER_FILE,
 ) -> ArchiveRecord:
-    """Ficha de un .afs en disco; un fallo de formato o de E/S queda como `unreadable`."""
+    """Card for a .afs on disk; a format or I/O failure ends up as `unreadable`."""
     try:
         with path.open("rb") as source:
             archive = open_afs(source, path.name)
@@ -300,12 +300,12 @@ def inventory_file(
     return record
 
 
-# --- Agregados ----------------------------------------------------------------------------
+# --- Aggregates ----------------------------------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
 class FlatEntry:
-    """Una entrada de cualquier nivel con su referencia (`a.afs#3#0`) y su profundidad."""
+    """An entry of any level with its reference (`a.afs#3#0`) and its depth."""
 
     ref: str
     entry: EntryRecord
@@ -313,7 +313,7 @@ class FlatEntry:
 
 
 def iter_flat_entries(archives: Iterable[ArchiveRecord], depth: int = 0) -> Iterator[FlatEntry]:
-    """Recorrido en preorden: las entradas de un AFS anidado van tras la que lo contiene."""
+    """Preorder traversal: the entries of a nested AFS come right after the one containing it."""
     for archive in archives:
         for entry in archive["entries"]:
             yield FlatEntry(f"{archive['label']}#{entry['index']}", entry, depth)
@@ -322,10 +322,10 @@ def iter_flat_entries(archives: Iterable[ArchiveRecord], depth: int = 0) -> Iter
 
 
 def name_extension(name: str | None) -> str:
-    """Extensión del nombre en minúsculas, o la etiqueta del cubo sin nombre/sin extensión."""
+    """Lowercase name extension, or the label of the no-name/no-extension bucket."""
     if not name:
-        return "(sin nombre)"
-    return PurePosixPath(name).suffix.lower() or "(sin extensión)"
+        return "(no name)"
+    return PurePosixPath(name).suffix.lower() or "(no extension)"
 
 
 @dataclass(slots=True)
@@ -351,7 +351,7 @@ def _mean(total: float, n: int) -> float:
 
 
 def _kind_histogram(flat: Iterable[FlatEntry]) -> list[KindRecord]:
-    """Tipos por número de entradas (y bytes); los empates conservan el orden de aparición."""
+    """Types by number of entries (and bytes); ties keep the order of appearance."""
     tallies: dict[str, _KindTally] = {}
     for item in flat:
         e = item.entry
@@ -464,7 +464,7 @@ def _totals(archives: list[ArchiveRecord], flat: list[FlatEntry]) -> TotalsRecor
 
 
 def aggregate(archives: list[ArchiveRecord]) -> SummaryRecord:
-    """Totales, histograma de tipos, bandas de entropía, anidados, extensiones e invariantes."""
+    """Totals, type histogram, entropy bands, nested files, extensions and invariants."""
     flat = list(iter_flat_entries(archives))
     with_data = [item for item in flat if item.entry["kind"] != NULL_KIND]
     custom: Counter[str] = Counter()
@@ -483,14 +483,14 @@ def aggregate(archives: list[ArchiveRecord]) -> SummaryRecord:
 
 
 def find_archives(root: Path) -> list[Path]:
-    """Todos los .afs bajo `root`, en orden alfabético de ruta."""
+    """All the .afs files under `root`, in alphabetical path order."""
     if not root.is_dir():
-        raise AfsUsageError(f"no es un directorio: {root}")
+        raise AfsUsageError(f"not a directory: {root}")
     return sorted(p for p in root.rglob("*") if p.is_file() and p.suffix.lower() == ".afs")
 
 
 def build_inventory(root: Path, *, generated: dt.datetime | None = None) -> InventoryRecord:
-    """Inventaría todos los .afs bajo `root` y agrega. `generated` fija el reloj (tests)."""
+    """Inventory all the .afs files under `root` and aggregate. `generated` fixes the clock."""
     archives = [inventory_file(p) for p in find_archives(root)]
     stamp = generated if generated is not None else dt.datetime.now()
     return InventoryRecord(

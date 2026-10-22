@@ -1,1 +1,1 @@
-"""Tests de `ngb_tools.xbe` sobre XBE sintéticos en memoria (nunca datos del juego)."""
+"""Tests of `ngb_tools.xbe` on synthetic in-memory XBEs (never game data)."""

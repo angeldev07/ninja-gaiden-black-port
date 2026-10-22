@@ -1,4 +1,4 @@
-"""Estructuras del XBE parseadas desde bytes, sin resolver direcciones virtuales."""
+"""XBE structures parsed from bytes, without resolving virtual addresses."""
 
 from __future__ import annotations
 
@@ -46,13 +46,13 @@ class ImageHeaderTests(unittest.TestCase):
             ImageHeader.parse(b"XBEH" + b"\0" * 0x20)
 
     def test_old_xdk_header_has_no_extension_fields(self) -> None:
-        # Cabecera de 0x178 bytes (XDK < 5028): ni Unknown1 ni puntero CodeView.
+        # 0x178-byte header (XDK < 5028): neither Unknown1 nor a CodeView pointer.
         header = ImageHeader.parse(with_u32(build_synthetic_xbe(), 0x110, 0x178))
         self.assertIsNone(header.unknown1)
         self.assertIsNone(header.debug_info_addr)
 
     def test_extension_fields_follow_header_size(self) -> None:
-        # 0x180 bytes: hay Unknown1 (8 bytes) pero aún no el campo 0x180.
+        # 0x180 bytes: Unknown1 (8 bytes) is present but not the 0x180 field yet.
         data = with_u32(build_synthetic_xbe(), 0x110, 0x180)
         header = ImageHeader.parse(with_u32(data, 0x178, 0xDDCCBBAA))
         self.assertEqual(header.unknown1, bytes.fromhex("aabbccdd00000000"))
@@ -95,12 +95,12 @@ class SmallStructTests(unittest.TestCase):
     def test_library_version(self) -> None:
         lib = LibraryVersion.parse(build_synthetic_xbe(), LIBRARY_OFF)
         self.assertEqual((lib.name, lib.version), ("XAPILIB", "1.0.5849"))
-        self.assertEqual((lib.qfe, lib.approved_text, lib.debug_build), (1, "sí", False))
+        self.assertEqual((lib.qfe, lib.approved_text, lib.debug_build), (1, "yes", False))
 
     def test_library_flags_pack_qfe_approval_and_debug(self) -> None:
         raw = b"D3D8\0\0\0\0" + struct.pack("<4H", 1, 0, 5849, 0x8000 | (3 << 13) | 5)
         lib = LibraryVersion.parse(raw, 0)
-        self.assertEqual((lib.qfe, lib.approved, lib.approved_text), (5, 3, "desconocido"))
+        self.assertEqual((lib.qfe, lib.approved, lib.approved_text), (5, 3, "unknown"))
         self.assertTrue(lib.debug_build)
 
     def test_tls_directory_field_order(self) -> None:

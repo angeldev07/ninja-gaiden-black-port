@@ -1,4 +1,4 @@
-"""Tests del GLB y de las animaciones en el glTF, y de `--format glb` / `--motions` en la CLI."""
+"""Tests of the GLB and the glTF animations, and of `--format glb` / `--motions` in the CLI."""
 
 from __future__ import annotations
 

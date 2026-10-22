@@ -1,4 +1,4 @@
-"""Tests del descriptor multiparte y de los objetos de varias partes en un KMD de personaje."""
+"""Tests of the multi-part descriptor and of multi-part objects in a character KMD."""
 
 from __future__ import annotations
 
@@ -46,20 +46,20 @@ class MultipartDescriptorTests(unittest.TestCase):
 
     def test_part_out_of_range_is_a_format_error(self) -> None:
         raw = struct.pack("<2I", 1, 1) + bytes(0x20) + submesh(0, 1, False)
-        with self.assertRaisesRegex(KmdFormatError, "parte 1, hay 1"):
+        with self.assertRaisesRegex(KmdFormatError, "part 1, but there are 1"):
             parse_multipart_descriptor(raw)
 
     def test_trailing_bytes_are_a_format_error(self) -> None:
-        with self.assertRaisesRegex(KmdFormatError, "USERDATA mide"):
+        with self.assertRaisesRegex(KmdFormatError, "the USERDATA is"):
             parse_multipart_descriptor(one_part_descriptor() + bytes(4))
 
     def test_truncated_record_is_a_format_error(self) -> None:
         raw = struct.pack("<2I", 1, 1) + bytes(0x20) + submesh(0, 0, False)[:0x40]
-        with self.assertRaisesRegex(KmdFormatError, "cortado"):
+        with self.assertRaisesRegex(KmdFormatError, "truncated"):
             parse_multipart_descriptor(raw)
 
     def test_too_many_parts_is_a_format_error(self) -> None:
-        with self.assertRaisesRegex(KmdFormatError, "tope"):
+        with self.assertRaisesRegex(KmdFormatError, "cap"):
             parse_multipart_descriptor(struct.pack("<2I", 99, 0))
 
 
@@ -94,7 +94,7 @@ class MultipartModelTests(unittest.TestCase):
         self.assertEqual(len(data), 8)
         self.assertEqual(data.positions[4], (2.0, 0.0, 0.0))
         assert data.normals is not None and data.colors is not None and data.uvs is not None
-        # Parte 1 (0x142) sin normales: se suavizan desde sus triángulos, que miran a +Z.
+        # Part 1 (0x142) has no normals: they are smoothed from its triangles, which face +Z.
         self.assertEqual(data.normals, ((0.0, 0.0, 1.0),) * 8)
         self.assertEqual(data.colors, (FILL_COLOR,) * 4 + (COLOR,) * 4)
         self.assertEqual(data.uvs[5], (1.0, 0.0))
@@ -115,11 +115,11 @@ class MultipartModelTests(unittest.TestCase):
 
     def test_header_counts_vertex_buffers(self) -> None:
         model = parse_kmd(build_multipart_kmd(vb_count=2))
-        self.assertIn("la cabecera dice 2 VB, hay 3", [str(i) for i in model.issues])
+        self.assertIn("the header says 2 VB, found 3", [str(i) for i in model.issues])
 
     def test_parts_that_do_not_match_the_buffers_are_an_error(self) -> None:
         three = struct.pack("<2I", 3, 0) + bytes(3 * 0x20)
-        with self.assertRaisesRegex(KmdFormatError, "4 partes y 3 VB"):
+        with self.assertRaisesRegex(KmdFormatError, "4 parts and 3 VB"):
             parse_kmd(build_multipart_kmd(descriptor=three))
 
 

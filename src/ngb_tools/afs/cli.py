@@ -1,21 +1,19 @@
-"""CLI de la herramienta AFS: `python -I -m ngb_tools.afs {list,extract,inventory}`.
+"""CLI of the AFS tool: `python -I -m ngb_tools.afs {list,extract,inventory}`.
 
-Códigos de salida:
+Exit codes:
 
-- 0: todo correcto.
-- 1: hallazgo sobre los datos: incidencias de invariantes o un AFS ilegible.
-- 2: error de uso o de E/S: argumentos, índices, salida dentro de un repo, archivos.
+- 0: everything fine.
+- 1: finding about the data: invariant issues or an unreadable AFS.
+- 2: usage or I/O error: arguments, indices, output inside a repo, files.
 
-Salidas: `extract` nunca escribe dentro de un repo git. Los informes de `inventory`
-(`--json`, `--md`) llevan nombres y cabeceras de los archivos del juego, así que pasan por
-la misma guarda con una única excepción explícita: `build/` del repo de las herramientas,
-que .gitignore ignora y la guardia de higiene bloquea, y donde van los informes por
-convención (`build/reports/afs/`).
+Outputs: `extract` never writes inside a git repo. The `inventory` reports (`--json`,
+`--md`) carry names and headers of the game files, so they go through the same guard with a
+single explicit exception: `build/` of the tools repo, which .gitignore ignores and the
+hygiene guard blocks, and where reports go by convention (`build/reports/afs/`).
 
-Sobre datos del juego se ejecuta en modo aislado (`-I`, o `-P -s` con PYTHONPATH=src),
-para que ningún `.py` del directorio de datos entre en `sys.path`. `__main__` además hace
-que la consola sustituya los caracteres que no sabe representar; `main()` no toca
-`sys.stdout`.
+On game data it runs in isolated mode (`-I`, or `-P -s` with PYTHONPATH=src), so that no
+`.py` in the data directory enters `sys.path`. `__main__` also makes the console substitute
+characters it cannot represent; `main()` does not touch `sys.stdout`.
 """
 
 from __future__ import annotations
@@ -71,13 +69,13 @@ def cmd_extract(args: argparse.Namespace) -> ExitCode:
     manifest = extract_archive(afs_path, out_dir, indices)
     for m in manifest["entries"]:
         print(f"{m['index']:4d}  {m['size']:>10}  {m['kind']:<16}  {m['file']}")
-    print(f"{len(manifest['entries'])} entradas -> {out_dir.resolve()}")
+    print(f"{len(manifest['entries'])} entries -> {out_dir.resolve()}")
     return ExitCode.OK
 
 
 def _write_report(target: Path, text: str) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_bytes(target, text.encode("utf-8"), fsync=True)  # pequeño: el fsync es barato
+    atomic_write_bytes(target, text.encode("utf-8"), fsync=True)  # small: fsync is cheap
 
 
 def cmd_inventory(args: argparse.Namespace) -> ExitCode:
@@ -86,7 +84,7 @@ def cmd_inventory(args: argparse.Namespace) -> ExitCode:
         (args.json, render_json),
         (args.md, render_markdown),
     )
-    # Los destinos se validan antes de inventariar: uno prohibido no cuesta un recorrido.
+    # The destinations are validated before inventorying: a forbidden one costs no traversal.
     allowed = report_dirs()
     renderers = [
         (ensure_outside_repos(target, allow=allowed), render)
@@ -98,12 +96,12 @@ def cmd_inventory(args: argparse.Namespace) -> ExitCode:
         _write_report(target, render(inventory))
     totals = inventory["summary"]["totals"]
     print(
-        f"{totals['archives']} AFS, {totals['entries']} entradas, "
-        f"{totals['pct_named']} % con nombre, {totals['entry_bytes']} bytes en entradas"
+        f"{totals['archives']} AFS, {totals['entries']} entries, "
+        f"{totals['pct_named']} % named, {totals['entry_bytes']} bytes in entries"
     )
     with_issues = totals["archives"] - inventory["summary"]["invariants"]["archives_ok"]
     if with_issues:
-        print(f"{with_issues} AFS con incidencias (ver el informe)", file=sys.stderr)
+        print(f"{with_issues} AFS with issues (see the report)", file=sys.stderr)
         return ExitCode.FINDINGS
     return ExitCode.OK
 
@@ -114,33 +112,33 @@ _COMMANDS: Final = MappingProxyType(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=PROG, description="Contenedores AFS (CRI Middleware).")
+    parser = argparse.ArgumentParser(prog=PROG, description="AFS containers (CRI Middleware).")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("list", help="lista las entradas y sus incidencias")
+    p = sub.add_parser("list", help="list the entries and their issues")
     p.add_argument("afs", type=Path)
 
-    p = sub.add_parser("extract", help="extrae entradas (siempre fuera del repo)")
+    p = sub.add_parser("extract", help="extract entries (always outside the repo)")
     p.add_argument("afs", type=Path)
     p.add_argument(
         "out_dir",
         nargs="?",
         type=Path,
-        help=f"por defecto ${DATA_ENV_VAR}/extracted/<ruta del afs dentro de game/>",
+        help=f"default: ${DATA_ENV_VAR}/extracted/<afs path inside game/>",
     )
-    p.add_argument("--index", type=int, action="append", metavar="N", help="repetible")
+    p.add_argument("--index", type=int, action="append", metavar="N", help="repeatable")
 
-    p = sub.add_parser("inventory", help="inventario por streaming de todos los .afs")
+    p = sub.add_parser("inventory", help="streaming inventory of all the .afs files")
     p.add_argument("root", type=Path)
-    p.add_argument("--json", type=Path, metavar="RUTA", help="informe JSON")
-    p.add_argument("--md", type=Path, metavar="RUTA", help="informe Markdown")
+    p.add_argument("--json", type=Path, metavar="PATH", help="JSON report")
+    p.add_argument("--md", type=Path, metavar="PATH", help="Markdown report")
     return parser
 
 
 def tolerate_unencodable_output() -> None:
-    """Una consola que no sabe representar un carácter lo sustituye en vez de abortar.
+    """A console that cannot represent a character substitutes it instead of aborting.
 
-    Muta el `sys.stdout` del proceso, así que solo la llama el punto de entrada (`__main__`).
+    Mutates the process `sys.stdout`, so only the entry point (`__main__`) calls it.
     """
     if isinstance(sys.stdout, io.TextIOWrapper):
         sys.stdout.reconfigure(errors="replace")
@@ -160,10 +158,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def run() -> int:
-    """Entrada de consola (`ngb-afs` y `python -m ngb_tools.afs`).
+    """Console entry (`ngb-afs` and `python -m ngb_tools.afs`).
 
-    Tolera la salida no codificable de la consola y ejecuta `main`. `main` queda libre
-    de efectos sobre `sys.stdout` para los tests y para quien lo importe.
+    Tolerates console output that cannot be encoded and runs `main`. `main` stays free of
+    effects on `sys.stdout` for the tests and for whoever imports it.
     """
     tolerate_unencodable_output()
     return main()

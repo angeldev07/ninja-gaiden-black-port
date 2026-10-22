@@ -1,7 +1,8 @@
-"""texconv.c contra ngb_tools.xpr: el .h de vectores está al día y el test en C pasa.
+"""texconv.c against ngb_tools.xpr: the vectors .h is up to date and the C test passes.
 
-`port\\build.cmd` compila y ejecuta `build\\port\\texconv_test.exe` (no necesita GPU);
-`NGB_TEXCONV_TEST` puede apuntar a otro. Sin Windows o sin el ejecutable, esa parte se salta.
+`port\\build.cmd` builds and runs `build\\port\\texconv_test.exe` (no GPU needed);
+`NGB_TEXCONV_TEST` may point to another. Without Windows or without the executable, that
+part is skipped.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ class VectorsTest(unittest.TestCase):
         expected = texconv_vectors.render()
         actual = texconv_vectors.HEADER.read_text(encoding="ascii")
         self.assertEqual(
-            actual, expected, "regenera con: python tests/port/texconv_vectors.py --write"
+            actual, expected, "regenerate with: python tests/port/texconv_vectors.py --write"
         )
 
     def test_every_case_has_its_expected_size(self) -> None:
@@ -36,7 +37,7 @@ class VectorsTest(unittest.TestCase):
                 self.assertGreater(len(expected), 0)
 
 
-@unittest.skipUnless(os.name == "nt" and TEXCONV_TEST.is_file(), "requiere texconv_test.exe")
+@unittest.skipUnless(os.name == "nt" and TEXCONV_TEST.is_file(), "requires texconv_test.exe")
 class TexconvBinaryTest(unittest.TestCase):
     def test_c_suite_passes(self) -> None:
         result = subprocess.run(

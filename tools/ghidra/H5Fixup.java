@@ -1,6 +1,6 @@
-// H5: convierte en función cada símbolo de XbSymbolDatabase que cae en código ejecutable
-// y que el auto-análisis dejó como simple etiqueta. Después re-analiza los cambios.
-// Uso (postScript tras el import): -postScript H5Fixup.java
+// H5: turns into a function every XbSymbolDatabase symbol that falls in executable code
+// and that auto-analysis left as a plain label. Then re-analyzes the changes.
+// Usage (postScript after the import): -postScript H5Fixup.java
 //@category NGB
 import java.util.*;
 
@@ -14,12 +14,12 @@ import ghidra.program.model.symbol.*;
 
 public class H5Fixup extends GhidraScript {
 
-	// Prefijos de librería que emite XbSymbolDatabaseCLI (nombre "LIB__Simbolo").
+	// Library prefixes emitted by XbSymbolDatabaseCLI (name "LIB__Symbol").
 	static final Set<String> XBSDB_LIBS = new HashSet<>(Arrays.asList(
 		"XAPILIB", "D3D8", "D3D8LTCG", "D3DX8", "DSOUND", "XACTENG", "XGRAPHC", "XGRAPHCL",
 		"XNET", "XNETN", "XNETS", "XONLINE", "XONLINES", "XONLINLS", "JVS"));
 
-	// Los nombres de variables globales no son funciones aunque estén en un bloque ejecutable.
+	// Global variable names are not functions even if they sit in an executable block.
 	static boolean looksLikeData(String name) {
 		return name.contains("g_") || name.endsWith("_OFFSET") || name.startsWith("D3DRS_")
 			|| name.startsWith("D3DTSS_") || name.startsWith("IDirectSound") && name.contains("Vtbl");
@@ -56,7 +56,7 @@ public class H5Fixup extends GhidraScript {
 				Function f = getFunctionAt(a);
 				if (f != null) {
 					already++;
-					// Asegura que el nombre de la firma sea el principal.
+					// Make sure the signature name is the primary one.
 					if (!s.isPrimary()) {
 						s.setPrimary();
 					}
@@ -85,10 +85,10 @@ public class H5Fixup extends GhidraScript {
 		}
 		analyzeChanges(currentProgram);
 		long dt = System.currentTimeMillis() - t0;
-		println(String.format("H5Fixup: ya_funcion=%d desensamblados=%d funciones_creadas=%d datos_omitidos=%d fallos=%d (%.1f s)",
+		println(String.format("H5Fixup: already_function=%d disassembled=%d functions_created=%d data_skipped=%d failures=%d (%.1f s)",
 			already, disasm, created, skippedData, failed, dt / 1000.0));
 		for (String f : failures) {
-			println("H5Fixup fallo: " + f);
+			println("H5Fixup failure: " + f);
 		}
 	}
 }

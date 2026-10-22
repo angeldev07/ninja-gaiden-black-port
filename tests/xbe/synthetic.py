@@ -1,20 +1,20 @@
-"""XBE sintético construido en memoria para los tests.
+"""Synthetic XBE built in memory for the tests.
 
-Todo valor esperado sale de este archivo, escrito a mano: el builder no importa
-nada de `ngb_tools.xbe`, así un error del código bajo prueba no se cuela en
-las expectativas.
+Every expected value comes from this file, written by hand: the builder imports
+nothing from `ngb_tools.xbe`, so a bug in the code under test does not leak into
+the expectations.
 
-Layout (offsets de archivo; en la cabecera, VA = BASE + offset):
+Layout (file offsets; in the header, VA = BASE + offset):
 
-    0x000  cabecera de imagen (0x184 bytes: incluye el campo 0x180 de CodeView)
-    0x200  certificado (0x1EC bytes)
-    0x480  nombre ".text" / 0x488 nombre "$$XTIMAGE"
-    0x4A0  library version XAPILIB
-    0x4C0  ruta de depuración / 0x500 nombre / 0x510 nombre UTF-16
-    0x540  nombres de las secciones extra (8 bytes cada uno)
-    0x800  cabeceras de sección (0x38 bytes cada una): .text, $$XTIMAGE, extras
-    0x1000 .text: cadenas en 0x1010, thunk en 0x1100, registro RSDS en 0x1180
-    0x1200 $$XTIMAGE (solo con `inserted_file=True`)
+    0x000  image header (0x184 bytes: includes the CodeView field at 0x180)
+    0x200  certificate (0x1EC bytes)
+    0x480  ".text" name / 0x488 "$$XTIMAGE" name
+    0x4A0  XAPILIB library version
+    0x4C0  debug path / 0x500 name / 0x510 UTF-16 name
+    0x540  names of the extra sections (8 bytes each)
+    0x800  section headers (0x38 bytes each): .text, $$XTIMAGE, extras
+    0x1000 .text: strings at 0x1010, thunk at 0x1100, RSDS record at 0x1180
+    0x1200 $$XTIMAGE (only with `inserted_file=True`)
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ MAX_EXTRA_SECTIONS = 8
 SECTION_RAW = 0x1000
 SECTION_RAW_SIZE = 0x200
 SECTION_VA = 0x00011000
-SECTION_VSIZE = 0x400  # 0x200 de BSS sin respaldo en el archivo
+SECTION_VSIZE = 0x400  # 0x200 of BSS with no backing in the file
 SECTION_FLAGS = 0x06  # PRELOAD | EXECUTABLE
 ENTRY_VA = SECTION_VA
 THUNK_OFF = 0x1100
@@ -66,17 +66,17 @@ SECTION_STRINGS = (
     b"ADXT/XBOX Ver.9.50 Build:May 16 2005",
     b".?AVCPlayer@Game@@",
 )
-# Parece una ruta pero no acaba en NUL (le sigue 0x99): no debe clasificarse.
+# Looks like a path but does not end in NUL (0x99 follows): it must not be classified.
 UNTERMINATED_STRING = b"data\\junk\\file.cpp"
-STRINGS_END = 0x1100  # las cadenas no pueden pisar el thunk
+STRINGS_END = 0x1100  # the strings cannot overwrite the thunk
 
-# Registro CodeView RSDS apuntado por el campo 0x180 de la cabecera.
+# CodeView RSDS record pointed to by header field 0x180.
 CODEVIEW_OFF = 0x1180
 CODEVIEW_VA = SECTION_VA + 0x180
 CODEVIEW_GUID = bytes.fromhex("88a5afbabb838f4692500560d06ec3a6")
 CODEVIEW_PDB = b"c:\\Proj\\Game.pdb"
 
-# Claves XOR publicadas en xboxdevwiki.net/Xbe: (entry point, kernel thunk).
+# XOR keys published at xboxdevwiki.net/Xbe: (entry point, kernel thunk).
 XOR_KEYS = {
     "retail": (0xA8FC57AB, 0x5B6D40B6),
     "debug": (0x94859D4B, 0xEFB1F152),
@@ -85,15 +85,15 @@ ENTRY, THUNK = 0, 1
 
 
 def alias_under(kind: str, va: int, field: int) -> int:
-    """VA que obtiene la clave `kind` del campo codificado con la clave retail para `va`."""
+    """VA that key `kind` obtains from the field encoded with the retail key for `va`."""
     return va ^ XOR_KEYS["retail"][field] ^ XOR_KEYS[kind][field]
 
 
 @dataclass(frozen=True)
 class ExtraSection:
-    """Sección adicional; su digest se calcula sobre los bytes del archivo que existan."""
+    """Extra section; its digest is computed over whichever file bytes exist."""
 
-    name: bytes  # 7 caracteres como máximo
+    name: bytes  # 7 characters at most
     va: int
     vsize: int
     raw: int
@@ -104,7 +104,7 @@ class ExtraSection:
 def _section_header(
     data: bytes, *, flags: int, va: int, vsize: int, raw: int, raw_size: int, name: int
 ) -> bytes:
-    """Cabecera de sección de 0x38 bytes con el SHA-1 de `u32 raw_size || datos crudos`."""
+    """0x38-byte section header with the SHA-1 of `u32 raw_size || raw data`."""
     body = data[raw : raw + raw_size]
     digest = hashlib.sha1(struct.pack("<I", raw_size) + body).digest()
     return struct.pack("<9I", flags, va, vsize, raw, raw_size, name, 0, 0, 0) + digest
@@ -119,15 +119,15 @@ def build_synthetic_xbe(
     inserted_file: bool = False,
     extra_sections: tuple[ExtraSection, ...] = (),
 ) -> bytes:
-    """Cabecera + certificado + sección .text (thunk, cadenas, RSDS) + 1 library version.
+    """Header + certificate + .text section (thunk, strings, RSDS) + 1 library version.
 
-    `extra_strings` se añaden tras las cadenas fijas; `text_tail` ocupa los últimos
-    bytes de .text (antes de calcular el digest); `inserted_file` añade una sección
-    INSERTED_FILE ($$XTIMAGE) justo detrás de .text en el archivo; `extra_sections`
-    añade más secciones al final de la tabla.
+    `extra_strings` are appended after the fixed strings; `text_tail` takes the last
+    bytes of .text (before computing the digest); `inserted_file` adds an
+    INSERTED_FILE section ($$XTIMAGE) right after .text in the file; `extra_sections`
+    adds more sections at the end of the table.
     """
     if len(extra_sections) > MAX_EXTRA_SECTIONS:
-        raise ValueError("demasiadas secciones extra para el layout sintético")
+        raise ValueError("too many extra sections for the synthetic layout")
     entry_key, thunk_key = XOR_KEYS[kind]
     file_size = INSERTED_RAW + INSERTED_SIZE if inserted_file else SECTION_RAW + SECTION_RAW_SIZE
     data = bytearray(file_size)
@@ -139,7 +139,7 @@ def build_synthetic_xbe(
     def put(offset: int, raw: bytes) -> None:
         data[offset : offset + len(raw)] = raw
 
-    # Cabecera de imagen.
+    # Image header.
     put(0, b"XBEH")
     header_values = {
         0x104: BASE,
@@ -167,12 +167,12 @@ def build_synthetic_xbe(
     for offset, value in header_values.items():
         put32(offset, value)
 
-    # Cadenas de depuración de la cabecera.
+    # Debug strings of the header.
     put(DEBUG_PATH_OFF, DEBUG_PATH.encode("ascii"))
     put(DEBUG_FILE_OFF, b"Game.exe")
     put(DEBUG_UFILE_OFF, "Game.exe".encode("utf-16-le"))
 
-    # Certificado.
+    # Certificate.
     put32(CERT_OFF + 0x00, CERT_SIZE)
     put32(CERT_OFF + 0x08, TITLE_ID)
     put(CERT_OFF + 0x0C, "NINJA GAIDEN Test".encode("utf-16-le"))
@@ -182,7 +182,7 @@ def build_synthetic_xbe(
     put32(CERT_OFF + 0xA8, 1)  # disk number
     put32(CERT_OFF + 0xAC, 3)  # version
 
-    # Datos de .text: thunk + cadenas + registro CodeView.
+    # .text data: thunk + strings + CodeView record.
     for index, ordinal in enumerate(THUNK_ORDINALS):
         put32(THUNK_OFF + 4 * index, 0x80000000 | ordinal)
     cursor = SECTION_RAW + 0x10
@@ -191,13 +191,13 @@ def build_synthetic_xbe(
         cursor += len(text) + 2
     put(cursor, UNTERMINATED_STRING + b"\x99")
     if cursor + len(UNTERMINATED_STRING) + 1 > STRINGS_END:
-        raise ValueError("las cadenas sintéticas pisan el thunk")
+        raise ValueError("the synthetic strings overwrite the thunk")
     put(CODEVIEW_OFF, b"RSDS" + CODEVIEW_GUID + struct.pack("<I", 1) + CODEVIEW_PDB)
     put(SECTION_RAW + SECTION_RAW_SIZE - len(text_tail), text_tail)
     if inserted_file:
         put(INSERTED_RAW, INSERTED_TEXT)
 
-    # Tabla de secciones (digests sobre los datos ya escritos) y nombres.
+    # Section table (digests over the data already written) and names.
     sections = [
         (text_flags, SECTION_VA, SECTION_VSIZE, SECTION_RAW, SECTION_RAW_SIZE, SECTION_NAME_OFF),
     ]
@@ -231,14 +231,14 @@ def build_synthetic_xbe(
 
 
 def corrupt_text_section(data: bytes) -> bytes:
-    """Cambia un byte de .text sin actualizar su digest (simula un XBE alterado)."""
+    """Flip a byte of .text without updating its digest (simulates a tampered XBE)."""
     corrupted = bytearray(data)
     corrupted[SECTION_RAW + 0x1F0] ^= 0xFF
     return bytes(corrupted)
 
 
 def with_u32(data: bytes, offset: int, value: int) -> bytes:
-    """Copia de `data` con un u32 little-endian sobrescrito en `offset`."""
+    """Copy of `data` with a little-endian u32 overwritten at `offset`."""
     patched = bytearray(data)
     struct.pack_into("<I", patched, offset, value)
     return bytes(patched)

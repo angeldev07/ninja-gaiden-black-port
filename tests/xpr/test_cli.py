@@ -1,4 +1,4 @@
-"""Tests de la CLI: subcomandos, salida y códigos de salida (0 ok, 1 hallazgos, 2 uso/IO)."""
+"""CLI tests: subcommands, output and exit codes (0 ok, 1 findings, 2 usage/IO)."""
 
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ class ListCommandTests(CliTestCase):
     def test_unsupported_texture_is_a_finding(self) -> None:
         code, out, _ = self.run_cli("list", self.write("a.xpr", CUBE_XPR))
         self.assertEqual(code, ExitCode.FINDINGS)
-        self.assertRegex(out, r"! textura 1: cubemap")
+        self.assertRegex(out, r"! texture 1: cubemap")
 
     def test_kmd_flag_reads_the_xpr0_slot(self) -> None:
         kmd = build_chunk(b"KMD", [b"OBJINFO\0" + bytes(24), GOOD_XPR], table_pos=0x80)
@@ -127,9 +127,10 @@ class ExportCommandTests(CliTestCase):
 
 class ConsoleEntryTests(CliTestCase):
     def test_run_reads_sys_argv_and_tolerates_an_ascii_console(self) -> None:
-        # "almacén" y "tamaño" no caben en ASCII: run() hace que se sustituyan sin abortar.
+        # The file name has a non-ASCII character (it is echoed in the header): run() makes the
+        # console substitute it instead of aborting.
         console = io.TextIOWrapper(io.BytesIO(), encoding="ascii")
-        argv = ["ngb-xpr", "list", self.write("a.xpr", GOOD_XPR)]
+        argv = ["ngb-xpr", "list", self.write("téxture.xpr", GOOD_XPR)]
         with mock.patch("sys.argv", argv), mock.patch("sys.stdout", console):
             code = run()
         self.assertEqual(code, ExitCode.OK)

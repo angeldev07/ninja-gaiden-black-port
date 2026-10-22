@@ -1,13 +1,13 @@
-"""Escenarios de Team Ninja: KMD de zona con varias partes por objeto y colisión (HITMDL).
+"""Team Ninja stages: zone KMDs with several parts per object and collision (HITMDL).
 
-Usa `ngb_tools.kmd` como librería (OBJINFO, HIERARC, descriptor multiparte, FVF, push
-buffers, tiras) y añade lo que solo aparece en los escenarios. Módulos, de abajo arriba:
+Uses `ngb_tools.kmd` as a library (OBJINFO, HIERARC, multi-part descriptor, FVF, push
+buffers, strips) and adds what only appears in stages. Modules, bottom-up:
 
-- `collision`: HITMDL, la malla de colisión (registros `VHD`).
-- `model`: el KMD de escenario entero, emparejamiento de partes y buffers, invariantes.
-- `zone`: las partes `<zona>_NN` de los AFS de la zona, sin repetir variantes idénticas.
-- `textures`: los PNG de `ngb_tools.xpr` de cada parte (reutilizados o exportados).
-- `gltf`: la zona en una sola escena glTF (`.glb` o `.gltf` + `.bin`), parte a parte.
+- `collision`: HITMDL, the collision mesh (`VHD` records).
+- `model`: the whole stage KMD, pairing of parts and buffers, invariants.
+- `zone`: the `<zone>_NN` parts of the zone AFS files, without repeating identical variants.
+- `textures`: the `ngb_tools.xpr` PNGs of each part (reused or exported).
+- `gltf`: the zone as a single glTF scene (`.glb` or `.gltf` + `.bin`), part by part.
 - `cli`: `python -m ngb_tools.stage {info,export}`.
 """
 

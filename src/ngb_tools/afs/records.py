@@ -1,7 +1,7 @@
-"""Forma exacta de los documentos JSON del inventario (un TypedDict por objeto).
+"""Exact shape of the inventory JSON documents (one TypedDict per object).
 
-`inventory` los construye, `report` los presenta y el JSON en disco es su volcado tal
-cual, así que cambiar una clase de aquí cambia el formato del informe.
+`inventory` builds them, `report` presents them and the JSON on disk is their dump as is,
+so changing a class here changes the report format.
 """
 
 from __future__ import annotations
@@ -45,8 +45,8 @@ class EntryRecord(TypedDict):
 
 
 class ArchiveRecord(TypedDict):
-    """Ficha de un AFS. `count` es el de la TOC; `null_entries`, `entries_bytes` y
-    `first_data_offset` salen de las entradas listadas en `entries`."""
+    """Card for one AFS. `count` is the TOC's; `null_entries`, `entries_bytes` and
+    `first_data_offset` come from the entries listed in `entries`."""
 
     label: str
     size: int
@@ -62,7 +62,7 @@ class ArchiveRecord(TypedDict):
     entries: list[EntryRecord]
     file: NotRequired[str]
     error: NotRequired[str]
-    truncated: NotRequired[bool]  # solo presente (y True) si un presupuesto cortó el recorrido
+    truncated: NotRequired[bool]  # only present (and True) if a budget cut the traversal short
 
 
 class TotalsRecord(TypedDict):

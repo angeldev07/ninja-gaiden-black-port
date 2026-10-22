@@ -1,4 +1,4 @@
-"""Tests de la tabla de formatos de textura de Xbox (valores de Cxbx-Reloaded y xemu)."""
+"""Tests of the Xbox texture format table (values from Cxbx-Reloaded and xemu)."""
 
 from __future__ import annotations
 

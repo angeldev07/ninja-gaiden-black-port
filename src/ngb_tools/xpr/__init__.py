@@ -1,24 +1,24 @@
-"""Xbox Packed Resource (XPR0): parseo, decodificación de texturas y exportación a PNG.
+"""Xbox Packed Resource (XPR0): parsing, texture decoding and PNG export.
 
-Un XPR0 es el contenedor de recursos de GPU de la Xbox: texturas, paletas y buffers tal
-como los espera la NV2A. En Ninja Gaiden Black aparece suelto (`Media/*.xpr`, `menu.spr`)
-o dentro del chunk de un KMD (las texturas de un modelo).
+An XPR0 is the Xbox GPU resource container: textures, palettes and buffers exactly
+as the NV2A expects them. In Ninja Gaiden Black it appears standalone (`Media/*.xpr`,
+`menu.spr`) or inside a KMD chunk (a model's textures).
 
-Módulos, de abajo arriba:
+Modules, bottom-up:
 
-- `formats`: tabla de D3DFORMAT de Xbox (nombre, bpp, swizzled/linear/compressed, códec).
-- `swizzle`: orden Morton de la NV2A y des-swizzle.
-- `dxt`, `pixels`: decodificadores a RGBA8 (DXT1/3/5; ARGB, 565, 1555, 4444, A8, L8, P8...).
-- `bump`: relieve con signo (V8U8, L6V5U5) a RGBA8 con un mapeo de normal map documentado.
-- `resources`: cabecera XPR0 y recursos tipados (Texture, Palette, buffers, UserData).
-- `texture`: mips, validación y decodificación del nivel 0 de una textura.
-- `catalog`: qué texturas hay y cuáles se pueden exportar (lo comparten list y export).
-- `png`: escritor PNG con la stdlib.
-- `source`: apertura de un XPR0 suelto o del slot XPR0 de un KMD.
-- `export`: PNG y manifiesto, siempre fuera de cualquier repo (`ngb_tools._paths`).
+- `formats`: Xbox D3DFORMAT table (name, bpp, swizzled/linear/compressed, codec).
+- `swizzle`: NV2A Morton order and un-swizzling.
+- `dxt`, `pixels`: decoders to RGBA8 (DXT1/3/5; ARGB, 565, 1555, 4444, A8, L8, P8...).
+- `bump`: signed bump (V8U8, L6V5U5) to RGBA8 with a documented normal-map mapping.
+- `resources`: XPR0 header and typed resources (Texture, Palette, buffers, UserData).
+- `texture`: mips, validation and level-0 decoding of a texture.
+- `catalog`: which textures exist and which can be exported (shared by list and export).
+- `png`: PNG writer using only the stdlib.
+- `source`: opening a standalone XPR0 or the XPR0 slot of a KMD.
+- `export`: PNG and manifest, always outside any repo (`ngb_tools._paths`).
 - `cli`: `python -I -m ngb_tools.xpr {list,export}`.
 
-Aquí se reexporta la API de lectura y decodificación; el resto se importa de su módulo.
+The reading and decoding API is re-exported here; the rest is imported from its module.
 """
 
 from __future__ import annotations

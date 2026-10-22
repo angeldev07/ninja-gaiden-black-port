@@ -1,4 +1,4 @@
-"""Tabla de exports de xboxkrnl y resolución del thunk de imports del kernel."""
+"""xboxkrnl export table and resolution of the kernel import thunk."""
 
 from __future__ import annotations
 
@@ -34,9 +34,9 @@ from .synthetic import (
 )
 
 EXPORTS = bundled_kernel_exports()
-# SHA-256 del TSV incluido (texto con fin de línea LF). Si cambia, que sea a propósito:
-# la tabla deriva de nxdk 9e9c07f (lib/xboxkrnl/xboxkrnl.exe.def, CC0-1.0).
-BUNDLED_TSV_SHA256 = "47a03051a9665546da6cb7888db9eff7351bf32c4f9d453f16e40c7780c2ab05"
+# SHA-256 of the bundled TSV (text with LF line endings). If it changes, make it deliberate:
+# the table derives from nxdk 9e9c07f (lib/xboxkrnl/xboxkrnl.exe.def, CC0-1.0).
+BUNDLED_TSV_SHA256 = "0f4e6edb67d597ba0d12dfcc160ec8f1ce5ff61b167d32d2c0e8f2949d65761a"
 
 
 def thunk_bytes(*entries: int) -> bytes:
@@ -50,7 +50,7 @@ class ExportsTableTests(unittest.TestCase):
         self.assertGreater(len(EXPORTS), 360)
 
     def test_bundled_table_keeps_cc0_attribution(self) -> None:
-        # La tabla deriva de nxdk (CC0-1.0): la cabecera de procedencia debe viajar con ella.
+        # The table derives from nxdk (CC0-1.0): the provenance header must travel with it.
         text = files("ngb_tools").joinpath("data", "xboxkrnl_exports.tsv").read_text("utf-8")
         self.assertIn("CC0-1.0", text)
         self.assertIn("github.com/XboxDev/nxdk", text)
@@ -65,18 +65,18 @@ class ExportsTableTests(unittest.TestCase):
             EXPORTS[1] = EXPORTS[2]
 
     def test_comments_blank_lines_and_short_rows(self) -> None:
-        exports = parse_kernel_exports("# cabecera\n\n1\tFoo\n2\tBar\tdata\t-\t\n")
+        exports = parse_kernel_exports("# header\n\n1\tFoo\n2\tBar\tdata\t-\t\n")
         self.assertEqual(sorted(exports), [1, 2])
         self.assertIsNone(exports[1].kind)
         self.assertIsNone(exports[1].arg_bytes)
         self.assertEqual((exports[2].kind, exports[2].callconv), (ExportKind.DATA, CallConv.NONE))
 
     def test_malformed_ordinal_names_the_line(self) -> None:
-        with self.assertRaisesRegex(KernelExportsError, r"línea 2"):
+        with self.assertRaisesRegex(KernelExportsError, r"line 2"):
             parse_kernel_exports("1\tFoo\nx\tBar\n")
 
     def test_duplicate_ordinal_is_rejected(self) -> None:
-        with self.assertRaisesRegex(KernelExportsError, "duplicado"):
+        with self.assertRaisesRegex(KernelExportsError, "duplicate"):
             parse_kernel_exports("1\tFoo\n1\tBar\n")
 
     def test_ordinal_must_fit_in_31_bits(self) -> None:
@@ -118,25 +118,25 @@ class ThunkTableTests(unittest.TestCase):
 
     def test_unknown_ordinal(self) -> None:
         (imp,) = parse_thunk_table(thunk_bytes(0x80000000 | 370, 0), 0x1000, EXPORTS)
-        self.assertIn("desconocido", imp.name)
+        self.assertIn("unknown", imp.name)
         self.assertIsNone(imp.kind)
 
     def test_entry_without_ordinal_flag(self) -> None:
         (imp,) = parse_thunk_table(thunk_bytes(0x00012345, 0), 0x1000, EXPORTS)
         self.assertIsNone(imp.ordinal)
         self.assertEqual(imp.raw_entry, 0x00012345)
-        self.assertIn("no es import por ordinal", imp.name)
+        self.assertIn("not an ordinal import", imp.name)
 
     def test_table_without_terminator_raises(self) -> None:
         with self.assertRaises(ThunkTableError):
             parse_thunk_table(thunk_bytes(*[0x80000001] * 600), 0x1000, EXPORTS)
 
     def test_table_running_off_its_region_raises(self) -> None:
-        with self.assertRaisesRegex(ThunkTableError, "final"):
+        with self.assertRaisesRegex(ThunkTableError, "end of its region"):
             parse_thunk_table(thunk_bytes(0x80000001, 0x80000002), 0x1000, EXPORTS)
 
     def test_thunk_reads_stop_at_end_of_backed_region(self) -> None:
-        # Slots sin terminador hasta el final de .text; el archivo sigue con otra sección.
+        # Slots with no terminator up to the end of .text; the file continues with another section.
         tail = thunk_bytes(0x80000001, 0x80000008)
         thunk_va = SECTION_VA + SECTION_RAW_SIZE - len(tail)
         data = build_synthetic_xbe(text_tail=tail, inserted_file=True)

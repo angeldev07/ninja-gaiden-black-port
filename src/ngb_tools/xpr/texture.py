@@ -1,28 +1,28 @@
-"""De cabecera de textura a imagen: disposición de los mips y decodificación del nivel 0.
+"""From texture header to image: mip layout and level-0 decoding.
 
-**Mips.** Una textura con N niveles guarda la imagen base y sus reducciones a la mitad una
-tras otra, sin relleno: el nivel k mide `max(1, ancho >> k) x max(1, alto >> k)` y empieza
-donde acaba el k-1. Cada nivel ocupa:
+**Mips.** A texture with N levels stores the base image and its half-size reductions one
+after another, with no padding: level k measures `max(1, width >> k) x max(1, height >> k)`
+and starts where k-1 ends. Each level occupies:
 
-- swizzled: `ancho * alto * bytes_por_píxel` (y cada nivel se swizzlea por separado);
-- DXT: un bloque de 4x4 por cada trozo, aunque el nivel sea menor (2x2 y 1x1 gastan un
-  bloque entero): `ceil(ancho/4) * ceil(alto/4) * bytes_por_bloque`.
+- swizzled: `width * height * bytes_per_pixel` (and each level is swizzled separately);
+- DXT: one 4x4 block per chunk, even if the level is smaller (2x2 and 1x1 spend a whole
+  block): `ceil(width/4) * ceil(height/4) * bytes_per_block`.
 
-Como xemu, se descartan los niveles que bajarían de 1x1: como mucho `max(log2 ancho,
-log2 alto) + 1`. Las texturas lineales no tienen mips y miden `pitch * alto`.
+Like xemu, levels that would go below 1x1 are discarded: at most `max(log2 width,
+log2 height) + 1`. Linear textures have no mips and measure `pitch * height`.
 
-Si los mips pequeños se salen del XPR0 pero el nivel 0 está entero, se exporta el nivel 0
-y el manifiesto avisa. En el juego nunca pasa: 4280 texturas con mips (hasta 11 niveles)
-en 1413 XPR0, todas completas.
+If the small mips run past the XPR0 but level 0 is complete, level 0 is exported
+and the manifest warns. In the game this never happens: 4280 textures with mips (up to 11 levels)
+in 1413 XPR0s, all complete.
 
-**Decodificación.** Los datos del nivel 0 se des-swizzlean si hace falta (los índices en
-P8, los píxeles en el resto) y después pasan al decodificador del formato. Cubemaps (6 caras
-alineadas a 128 bytes) y texturas de volumen se detectan y se rechazan: no hay soporte.
+**Decoding.** Level-0 data is un-swizzled if needed (the indices in
+P8, the pixels in the rest) and then passed to the format's decoder. Cubemaps (6 faces
+aligned to 128 bytes) and volume textures are detected and rejected: unsupported.
 
-**Datos hostiles.** Todo se valida antes de leer o reservar: dimensiones (como mucho
-`MAX_TEXTURE_PIXELS`), rangos de la textura y de su paleta dentro del XPR0 y pitch.
+**Hostile data.** Everything is validated before reading or allocating: dimensions (at most
+`MAX_TEXTURE_PIXELS`), texture and palette ranges inside the XPR0, and pitch.
 
-Fuente de los tamaños: `pgraph_get_texture_length` y la subida de niveles de xemu,
+Source of the sizes: xemu's `pgraph_get_texture_length` and level upload,
 https://github.com/xemu-project/xemu/blob/master/hw/xbox/nv2a/pgraph/texture.c
 """
 
@@ -44,15 +44,15 @@ from ngb_tools.xpr.pixels import decode_packed, decode_palette
 from ngb_tools.xpr.resources import PaletteLink, Texture, XprFile
 from ngb_tools.xpr.swizzle import unswizzle
 
-# Tope de píxeles del nivel 0. Los campos log2 de `Format` llegan a 15 (32768x32768:
-# 4 GiB en RGBA); la mayor textura real es de 1024x512 (dlcustom.xpr). Se comprueba
-# antes de leer o reservar nada.
+# Cap on level-0 pixels. The log2 fields of `Format` reach 15 (32768x32768:
+# 4 GiB in RGBA); the largest real texture is 1024x512 (dlcustom.xpr). It is checked
+# before reading or allocating anything.
 MAX_TEXTURE_PIXELS: Final = 4096 * 4096
 
 
 @dataclass(frozen=True, slots=True)
 class MipLevel:
-    """Un nivel de mip: dimensiones y bytes `[offset, offset + size)` desde `Data`."""
+    """A mip level: dimensions and bytes `[offset, offset + size)` from `Data`."""
 
     level: int
     width: int
@@ -63,7 +63,7 @@ class MipLevel:
 
 @dataclass(frozen=True, slots=True)
 class TextureLayout:
-    """Formato, dimensiones y niveles de una textura 2D."""
+    """Format, dimensions and levels of a 2D texture."""
 
     format: TextureFormat
     width: int
@@ -73,14 +73,14 @@ class TextureLayout:
 
     @property
     def byte_size(self) -> int:
-        """Bytes de todos los niveles juntos (lo que se hashea en el manifiesto)."""
+        """Bytes of all the levels together (what is hashed in the manifest)."""
         last = self.levels[-1]
         return last.offset + last.size
 
 
 @dataclass(frozen=True, slots=True)
 class RgbaImage:
-    """Píxeles RGBA8 fila a fila, de arriba abajo."""
+    """RGBA8 pixels row by row, top to bottom."""
 
     width: int
     height: int
@@ -88,7 +88,7 @@ class RgbaImage:
 
     def __post_init__(self) -> None:
         if len(self.pixels) != 4 * self.width * self.height:
-            raise ValueError(f"{len(self.pixels)} bytes para {self.width}x{self.height} RGBA")
+            raise ValueError(f"{len(self.pixels)} bytes for {self.width}x{self.height} RGBA")
 
 
 def _level_size(fmt: TextureFormat, width: int, height: int) -> int:
@@ -98,7 +98,7 @@ def _level_size(fmt: TextureFormat, width: int, height: int) -> int:
 
 
 def mip_chain(fmt: TextureFormat, width: int, height: int, levels: int) -> tuple[MipLevel, ...]:
-    """Los `levels` niveles de una textura swizzled o DXT, ya recortados a 1x1."""
+    """The `levels` levels of a swizzled or DXT texture, already clipped to 1x1."""
     fitting = max(width.bit_length(), height.bit_length())  # = max(log2) + 1
     chain: list[MipLevel] = []
     offset = 0
@@ -113,32 +113,32 @@ def mip_chain(fmt: TextureFormat, width: int, height: int, levels: int) -> tuple
 def _check_pixels(fmt: TextureFormat, width: int, height: int) -> None:
     if width * height > MAX_TEXTURE_PIXELS:
         raise TextureTooLargeError(
-            f"{fmt.name} {width}x{height}: más de {MAX_TEXTURE_PIXELS} píxeles (tope defensivo)"
+            f"{fmt.name} {width}x{height}: more than {MAX_TEXTURE_PIXELS} pixels (defensive cap)"
         )
 
 
 def texture_layout(texture: Texture) -> TextureLayout:
-    """Disposición de una textura 2D; cubemaps, volúmenes y formatos desconocidos fallan."""
+    """Layout of a 2D texture; cubemaps, volumes and unknown formats fail."""
     word = texture.format
     fmt = lookup_format(word.code)
     if fmt is None:
-        raise UnsupportedTextureError(f"formato desconocido {word.code:#04x}")
+        raise UnsupportedTextureError(f"unknown format {word.code:#04x}")
     if word.cubemap:
-        raise UnsupportedTextureError(f"cubemap {fmt.name} {word.width}x{word.height}: sin soporte")
+        raise UnsupportedTextureError(f"cubemap {fmt.name} {word.width}x{word.height}: unsupported")
     if word.dimensions == 3:
         raise UnsupportedTextureError(
-            f"volumen {fmt.name} {word.width}x{word.height}x{word.depth}: sin soporte"
+            f"volume {fmt.name} {word.width}x{word.height}x{word.depth}: unsupported"
         )
     if word.dimensions != 2:
-        raise UnsupportedTextureError(f"{word.dimensions} dimensiones: se esperaban 2 o 3")
+        raise UnsupportedTextureError(f"{word.dimensions} dimensions: expected 2 or 3")
     if fmt.storage is Storage.LINEAR:
         size = texture.size
         if not size.is_set:
-            raise UnsupportedTextureError(f"{fmt.name} lineal sin campo Size")
+            raise UnsupportedTextureError(f"linear {fmt.name} without a Size field")
         _check_pixels(fmt, size.width, size.height)
         if size.pitch < size.width * fmt.bytes_per_element:
             raise UnsupportedTextureError(
-                f"{fmt.name} {size.width}x{size.height}: pitch {size.pitch} menor que una fila"
+                f"{fmt.name} {size.width}x{size.height}: pitch {size.pitch} smaller than a row"
             )
         level = MipLevel(0, size.width, size.height, 0, size.pitch * size.height)
         return TextureLayout(fmt, size.width, size.height, size.pitch, (level,))
@@ -149,7 +149,7 @@ def texture_layout(texture: Texture) -> TextureLayout:
 
 @dataclass(frozen=True, slots=True)
 class TextureCheck:
-    """Resultado de `check_texture`: disposición, niveles completos y paleta (si es P8)."""
+    """Result of `check_texture`: layout, complete levels and palette (if P8)."""
 
     layout: TextureLayout
     present_levels: int
@@ -161,7 +161,7 @@ class TextureCheck:
 
     @property
     def present_bytes(self) -> int:
-        """Bytes de los niveles presentes (lo que se hashea en el manifiesto)."""
+        """Bytes of the present levels (what is hashed in the manifest)."""
         last = self.layout.levels[self.present_levels - 1]
         return last.offset + last.size
 
@@ -170,13 +170,14 @@ def _palette_link(xpr: XprFile, texture: Texture) -> PaletteLink:
     link = xpr.palette_link(texture)
     if link is None:
         raise UnsupportedTextureError(
-            f"P8 sin paleta asociada (cabecera {texture.index}, {len(xpr.palettes)} paletas)"
+            f"P8 without an associated palette (header {texture.index}, "
+            f"{len(xpr.palettes)} palettes)"
         )
     return link
 
 
 def _present_levels(xpr: XprFile, texture: Texture, layout: TextureLayout) -> int:
-    """Niveles completos dentro de la región de datos, contando desde el 0."""
+    """Complete levels inside the data region, counting from 0."""
     present = 0
     for level in layout.levels:
         if texture.data + level.offset + level.size > xpr.data_size:
@@ -186,18 +187,19 @@ def _present_levels(xpr: XprFile, texture: Texture, layout: TextureLayout) -> in
 
 
 def check_texture(xpr: XprFile, texture: Texture) -> TextureCheck:
-    """Comprueba, sin decodificar, que el nivel 0 de la textura se puede exportar.
+    """Check, without decoding, that level 0 of the texture can be exported.
 
-    Falla con `UnsupportedTextureError` (cubemap, volumen, tamaño, formato o paleta) o con
-    `XprTruncatedError` si el nivel 0 o la paleta se salen del XPR0. Si faltan mips más
-    pequeños, no falla: `present_levels` dice cuántos hay (en el juego nunca faltan).
+    Fails with `UnsupportedTextureError` (cubemap, volume, size, format or palette) or with
+    `XprTruncatedError` if level 0 or the palette run past the XPR0. If smaller mips are
+    missing, it does not fail: `present_levels` says how many there are (in the game they are
+    never missing).
     """
     layout = texture_layout(texture)
     if not layout.format.is_decodable:
-        raise UnsupportedTextureError(f"formato {layout.format.name} sin decodificador")
+        raise UnsupportedTextureError(f"format {layout.format.name} has no decoder")
     present = _present_levels(xpr, texture, layout)
     if present == 0:
-        xpr.require_data(texture.data, layout.levels[0].size)  # lanza XprTruncatedError
+        xpr.require_data(texture.data, layout.levels[0].size)  # raises XprTruncatedError
     link = None
     if layout.format.codec is Codec.PALETTE:
         link = _palette_link(xpr, texture)
@@ -224,14 +226,14 @@ def _decode(
         case Codec.V8U8 | Codec.L6V5U5:
             return decode_bump(raw, width, height, fmt, pitch=pitch)
         case Codec.UNSUPPORTED:
-            raise UnsupportedTextureError(f"formato {fmt.name} sin decodificador")
+            raise UnsupportedTextureError(f"format {fmt.name} has no decoder")
 
 
 def decode_texture(xpr: XprFile, texture: Texture) -> RgbaImage:
-    """El nivel 0 de la textura como RGBA8.
+    """Level 0 of the texture as RGBA8.
 
-    Es la API pública: solo lanza errores tipados. Un `ValueError` de los decodificadores
-    (swizzle, DXT, píxeles) se envuelve en `XprFormatError`.
+    This is the public API: it only raises typed errors. A `ValueError` from the decoders
+    (swizzle, DXT, pixels) is wrapped in `XprFormatError`.
     """
     check = check_texture(xpr, texture)
     layout = check.layout
@@ -246,25 +248,25 @@ def decode_texture(xpr: XprFile, texture: Texture) -> RgbaImage:
         pixels = _decode(fmt, raw, base.width, base.height, pitch=layout.pitch, palette=palette)
         return RgbaImage(base.width, base.height, pixels)
     except ValueError as error:
-        raise XprFormatError(f"textura {texture.index} ({fmt.name}): {error}") from error
+        raise XprFormatError(f"texture {texture.index} ({fmt.name}): {error}") from error
 
 
 class AlphaMode(StrEnum):
-    """Qué se sabe del alfa de una textura exportada (el PNG siempre es alfa recto)."""
+    """What is known about the alpha of an exported texture (the PNG is always straight alpha)."""
 
-    STRAIGHT = "straight"  # el formato no tiene gemelo premultiplicado
-    STRAIGHT_PROVEN = "straight-proven"  # DXT2-5: los píxeles descartan el premultiplicado
-    STRAIGHT_ASSUMED = "straight-assumed"  # DXT2-5: no se puede distinguir; se supone recto
-    LUMINANCE = "luminance"  # L6V5U5: A es la luminancia L, no transparencia (ver `bump`)
+    STRAIGHT = "straight"  # the format has no premultiplied twin
+    STRAIGHT_PROVEN = "straight-proven"  # DXT2-5: the pixels rule out premultiplied
+    STRAIGHT_ASSUMED = "straight-assumed"  # DXT2-5: cannot be told apart; straight is assumed
+    LUMINANCE = "luminance"  # L6V5U5: A is the luminance L, not transparency (see `bump`)
 
 
 def alpha_mode(fmt: TextureFormat, rgba: bytes) -> AlphaMode:
-    """Para DXT2/3 y DXT4/5 (mismo código en Xbox), si los píxeles prueban el alfa recto.
+    """For DXT2/3 and DXT4/5 (same code on Xbox), whether the pixels prove straight alpha.
 
-    Un color premultiplicado cumple R, G, B <= A en todos los píxeles. Si algún canal supera
-    a su alfa, el premultiplicado queda descartado; si todo es opaco, los dos coinciden. Si
-    no, no se puede saber y se supone recto (DXT3/DXT5), que es lo que hacen xemu y Cxbx.
-    En L6V5U5 el canal A lleva la luminancia (`LUMINANCE`).
+    A premultiplied color satisfies R, G, B <= A at every pixel. If some channel exceeds
+    its alpha, premultiplied is ruled out; if everything is opaque, the two coincide. Otherwise,
+    it cannot be known and straight is assumed (DXT3/DXT5), which is what xemu and Cxbx do.
+    In L6V5U5 the A channel carries luminance (`LUMINANCE`).
     """
     if fmt.codec is Codec.L6V5U5:
         return AlphaMode.LUMINANCE

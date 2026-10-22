@@ -1,4 +1,4 @@
-"""Punto de entrada de `python -m ngb_tools.xpr`."""
+"""Entry point for `python -m ngb_tools.xpr`."""
 
 from __future__ import annotations
 

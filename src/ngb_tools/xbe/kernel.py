@@ -1,11 +1,11 @@
-"""Imports del kernel: tabla de exports de xboxkrnl.exe y resolución del thunk.
+"""Kernel imports: xboxkrnl.exe export table and thunk resolution.
 
-Un XBE no importa el kernel por nombre, sino por ordinal. La tabla de thunks
-(cuya VA está ofuscada en la cabecera) es un array de u32
-`0x80000000 | ordinal` terminado en 0. Al cargar, el kernel sobrescribe cada
-slot con la dirección real de la función y el código del juego llama con
-`call [slot]`. Para poner nombre a cada ordinal se usa la tabla de exports
-`ngb_tools/data/xboxkrnl_exports.tsv`, derivada del `.def` de nxdk (CC0-1.0).
+An XBE does not import the kernel by name, but by ordinal. The thunk table
+(whose VA is obfuscated in the header) is a u32 array of
+`0x80000000 | ordinal` terminated by 0. On load, the kernel overwrites each
+slot with the real address of the function and the game code calls with
+`call [slot]`. To name each ordinal, the export table
+`ngb_tools/data/xboxkrnl_exports.tsv` is used, derived from the nxdk `.def` (CC0-1.0).
 """
 
 from __future__ import annotations
@@ -22,32 +22,32 @@ from ngb_tools.xbe.binary import read_u32
 from ngb_tools.xbe.errors import KernelExportsError, ThunkTableError, UnmappedAddressError
 from ngb_tools.xbe.image import XbeImage
 
-BUNDLED_EXPORTS = ("data", "xboxkrnl_exports.tsv")  # ruta dentro del paquete ngb_tools
+BUNDLED_EXPORTS = ("data", "xboxkrnl_exports.tsv")  # path inside the ngb_tools package
 ORDINAL_FLAG = 0x80000000
 MAX_ORDINAL = ORDINAL_FLAG - 1
-MAX_KERNEL_IMPORTS = 512  # cota de seguridad: el kernel exporta menos de 400 símbolos
+MAX_KERNEL_IMPORTS = 512  # safety bound: the kernel exports fewer than 400 symbols
 _TSV_COLUMNS = 5
 
 
 class ExportKind(StrEnum):
-    """Qué exporta el kernel en un ordinal."""
+    """What the kernel exports at an ordinal."""
 
     FUNC = "func"
-    DATA = "data"  # variable exportada: el slot recibe su dirección
+    DATA = "data"  # exported variable: the slot receives its address
 
 
 class CallConv(StrEnum):
-    """Convención de llamada, deducida de la decoración del `.def` de nxdk."""
+    """Calling convention, deduced from the decoration in the nxdk `.def`."""
 
-    STDCALL = "stdcall"  # sufijo '@N': el llamado limpia N bytes de argumentos
-    FASTCALL = "fastcall"  # prefijo '@': dos primeros argumentos en ECX y EDX
-    CDECL = "cdecl"  # sin decoración: el llamador limpia la pila (variádicas)
-    NONE = "-"  # no aplica (variable exportada)
+    STDCALL = "stdcall"  # '@N' suffix: the callee cleans N bytes of arguments
+    FASTCALL = "fastcall"  # '@' prefix: first two arguments in ECX and EDX
+    CDECL = "cdecl"  # no decoration: the caller cleans the stack (variadics)
+    NONE = "-"  # not applicable (exported variable)
 
 
 @dataclass(frozen=True, slots=True)
 class KernelExport:
-    """Una fila de la tabla: `ordinal<TAB>name[<TAB>kind<TAB>callconv<TAB>arg_bytes]`."""
+    """One table row: `ordinal<TAB>name[<TAB>kind<TAB>callconv<TAB>arg_bytes]`."""
 
     ordinal: int
     name: str
@@ -59,17 +59,15 @@ class KernelExport:
 type KernelExports = Mapping[int, KernelExport]
 
 
-def parse_kernel_exports(text: str, source: str = "<texto>") -> dict[int, KernelExport]:
-    """Parsea el TSV; ignora líneas vacías y comentarios (`#`)."""
+def parse_kernel_exports(text: str, source: str = "<text>") -> dict[int, KernelExport]:
+    """Parse the TSV; ignores blank lines and comments (`#`)."""
     exports: dict[int, KernelExport] = {}
     for number, line in enumerate(text.splitlines(), start=1):
         if not line.strip() or line.startswith("#"):
             continue
-        export = _parse_export_line(line, f"{source}, línea {number}")
+        export = _parse_export_line(line, f"{source}, line {number}")
         if export.ordinal in exports:
-            raise KernelExportsError(
-                f"{source}, línea {number}: ordinal {export.ordinal} duplicado"
-            )
+            raise KernelExportsError(f"{source}, line {number}: duplicate ordinal {export.ordinal}")
         exports[export.ordinal] = export
     return exports
 
@@ -77,7 +75,7 @@ def parse_kernel_exports(text: str, source: str = "<texto>") -> dict[int, Kernel
 def _parse_export_line(line: str, where: str) -> KernelExport:
     columns = line.split("\t")
     if not 2 <= len(columns) <= _TSV_COLUMNS or not columns[1]:
-        raise KernelExportsError(f"{where}: se esperaban 2 a 5 columnas con nombre")
+        raise KernelExportsError(f"{where}: expected 2 to 5 columns including a name")
     ordinal, name, kind, callconv, arg_bytes = columns + [""] * (_TSV_COLUMNS - len(columns))
     try:
         export = KernelExport(
@@ -89,48 +87,48 @@ def _parse_export_line(line: str, where: str) -> KernelExport:
         )
     except ValueError as exc:
         raise KernelExportsError(f"{where}: {exc}") from exc
-    # El ordinal comparte el u32 del slot con el bit 31 (ORDINAL_FLAG): caben 31 bits.
+    # The ordinal shares the slot's u32 with bit 31 (ORDINAL_FLAG): 31 bits fit.
     if not 0 <= export.ordinal <= MAX_ORDINAL:
-        raise KernelExportsError(f"{where}: ordinal {export.ordinal} fuera de 0..0x{MAX_ORDINAL:X}")
+        raise KernelExportsError(f"{where}: ordinal {export.ordinal} outside 0..0x{MAX_ORDINAL:X}")
     if export.arg_bytes is not None and export.arg_bytes < 0:
-        raise KernelExportsError(f"{where}: arg_bytes negativo ({export.arg_bytes})")
+        raise KernelExportsError(f"{where}: negative arg_bytes ({export.arg_bytes})")
     return export
 
 
 @cache
 def bundled_kernel_exports() -> KernelExports:
-    """Tabla incluida en el paquete; se parsea una vez y es de solo lectura."""
+    """Table bundled in the package; parsed once and read-only."""
     resource = files("ngb_tools").joinpath(*BUNDLED_EXPORTS)
     text = resource.read_text(encoding="utf-8")
     return MappingProxyType(parse_kernel_exports(text, BUNDLED_EXPORTS[-1]))
 
 
 def load_kernel_exports(path: Path | None = None) -> KernelExports:
-    """Tabla de `path` (mismo formato TSV) o, sin ruta, la incluida en el paquete."""
+    """Table from `path` (same TSV format) or, with no path, the one bundled in the package."""
     if path is None:
         return bundled_kernel_exports()
     try:
         text = path.read_text(encoding="utf-8")
     except UnicodeDecodeError as exc:
-        raise KernelExportsError(f"{path}: no es UTF-8 ({exc})") from exc
+        raise KernelExportsError(f"{path}: not UTF-8 ({exc})") from exc
     return MappingProxyType(parse_kernel_exports(text, str(path)))
 
 
 @dataclass(frozen=True, slots=True)
 class KernelImport:
-    """Un slot de la tabla de thunks y el export que lo resuelve (si se conoce)."""
+    """A slot of the thunk table and the export that resolves it (if known)."""
 
     slot_va: int
     raw_entry: int
-    ordinal: int | None  # None si el slot no lleva el bit de import por ordinal
+    ordinal: int | None  # None if the slot does not carry the import-by-ordinal bit
     export: KernelExport | None
 
     @property
     def name(self) -> str:
         if self.ordinal is None:
-            return "<no es import por ordinal>"
+            return "<not an ordinal import>"
         if self.export is None:
-            return f"<ordinal {self.ordinal} desconocido>"
+            return f"<unknown ordinal {self.ordinal}>"
         return self.export.name
 
     @property
@@ -148,7 +146,7 @@ class KernelImport:
 
 @dataclass(frozen=True, slots=True)
 class KernelImportTable:
-    """Tabla de thunks localizada: dónde está y qué importa."""
+    """Located thunk table: where it is and what it imports."""
 
     va: int
     file_offset: int
@@ -159,18 +157,19 @@ class KernelImportTable:
 def parse_thunk_table(
     table: bytes, thunk_va: int, exports: KernelExports
 ) -> tuple[KernelImport, ...]:
-    """Lee slots u32 de `table` (los bytes respaldados desde `thunk_va`) hasta el 0.
+    """Read u32 slots from `table` (the bytes backed from `thunk_va`) up to the 0.
 
-    `table` acaba donde acaba la región que respalda el thunk: una tabla que llega
-    ahí sin terminador seguiría en memoria por BSS o por otra sección, y eso no es
-    una tabla de imports real.
+    `table` ends where the region backing the thunk ends: a table that reaches
+    that point without a terminator would continue in memory through BSS or another
+    section, and that is not a real import table.
     """
     imports: list[KernelImport] = []
     for index in range(MAX_KERNEL_IMPORTS):
         offset = 4 * index
         if offset + 4 > len(table):
             raise ThunkTableError(
-                f"la tabla de thunks llega al final de su región sin terminador ({index} slots)"
+                f"the thunk table reaches the end of its region without a terminator "
+                f"({index} slots)"
             )
         entry = read_u32(table, offset)
         if entry == 0:
@@ -178,11 +177,11 @@ def parse_thunk_table(
         ordinal = entry & MAX_ORDINAL if entry & ORDINAL_FLAG else None
         export = exports.get(ordinal) if ordinal is not None else None
         imports.append(KernelImport(thunk_va + offset, entry, ordinal, export))
-    raise ThunkTableError(f"tabla de thunks sin terminador tras {MAX_KERNEL_IMPORTS} entradas")
+    raise ThunkTableError(f"thunk table without a terminator after {MAX_KERNEL_IMPORTS} entries")
 
 
 def read_kernel_imports(image: XbeImage, exports: KernelExports) -> KernelImportTable | None:
-    """Tabla de thunks de `image`, o None si ninguna clave XOR dio su dirección."""
+    """Thunk table of `image`, or None if no XOR key yielded its address."""
     thunk_va = image.xor.kernel_thunk_addr
     if thunk_va is None:
         return None

@@ -1,20 +1,20 @@
-"""Inspector de ejecutables XBE (Xbox original).
+"""Inspector for XBE executables (original Xbox).
 
-Flujo típico::
+Typical flow::
 
-    image = XbeImage.load(path)                 # cabecera, secciones, claves XOR
+    image = XbeImage.load(path)                 # header, sections, XOR keys
     analysis = analyze(image, with_strings=True)
     render_json(analysis), render_markdown(analysis)
 
-Módulos, de lo más bajo a lo más alto:
+Modules, from lowest to highest level:
 
-- `binary`: enteros little-endian y texto, con límites.
-- `structs`: cada estructura del formato, parseada desde un offset de archivo.
-- `image`: `XbeImage`, mapa VA -> archivo, claves XOR, digests y validación.
-- `kernel`: tabla de exports de xboxkrnl y thunk de imports.
-- `strings`: extracción y clasificación heurística de cadenas.
-- `analysis`: sigue los punteros de la cabecera y reúne todo en `XbeAnalysis`.
-- `report` / `markdown`: informes JSON (TypedDict) y Markdown.
+- `binary`: little-endian integers and text, with bounds checks.
+- `structs`: every structure of the format, parsed from a file offset.
+- `image`: `XbeImage`, VA -> file map, XOR keys, digests and validation.
+- `kernel`: xboxkrnl export table and import thunk table.
+- `strings`: extraction and heuristic classification of strings.
+- `analysis`: follows the header pointers and gathers everything into `XbeAnalysis`.
+- `report` / `markdown`: JSON (TypedDict) and Markdown reports.
 - `cli`: `python -m ngb_tools.xbe`.
 """
 

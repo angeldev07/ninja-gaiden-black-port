@@ -1,4 +1,4 @@
-"""Punto de entrada de `python -m ngb_tools.stage`."""
+"""Entry point for `python -m ngb_tools.stage`."""
 
 from __future__ import annotations
 

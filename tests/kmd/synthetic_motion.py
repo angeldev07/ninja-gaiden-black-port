@@ -1,8 +1,9 @@
-"""Constructores sintéticos de bancos de motions y de un KMD humanoide: nunca datos del juego.
+"""Synthetic builders of motion banks and of a humanoid KMD: never game data.
 
-Reproducen lo observado en `ryu.mtn`: tabla de ids terminada en 0, datos de cada pista justo
-antes de la cabecera de su motion (offsets terminados en 0) y claves con un u16 de control
-(tipo en los bits 0-1, frames en los bits 2-11 y bits altos de un valor de 20 bits en 12-15).
+They reproduce what was observed in `ryu.mtn`: id table terminated by 0, the data of each
+track right before the header of its motion (offsets terminated by 0) and keys with a u16
+control word (kind in bits 0-1, frames in bits 2-11 and the high bits of a 20-bit value in
+bits 12-15).
 """
 
 from __future__ import annotations
@@ -24,12 +25,12 @@ def key(kind: int, frames: int, value: int, *slopes: int) -> bytes:
 
 
 def constant(value: int, frames: int) -> bytes:
-    """Pista constante: una clave de valor y la de fin."""
+    """Constant track: one value key and the end key."""
     return key(1, frames, value) + key(0, 0, value)
 
 
 def build_bank(motions: Sequence[Sequence[bytes]], table: Sequence[int]) -> bytes:
-    """Cuerpo de banco (como un `.mot`): `table[id]` = índice de la motion de ese id."""
+    """Bank body (like a `.mot`): `table[id]` = index of the motion for that id."""
     body = bytearray(4 * (len(table) + 1))
     body += bytes(-len(body) % 16)
     headers: list[int] = []
@@ -47,13 +48,13 @@ def build_bank(motions: Sequence[Sequence[bytes]], table: Sequence[int]) -> byte
 
 
 def chr_dat(body: bytes) -> bytes:
-    """El mismo banco envuelto en un `chr_dat` de 3 slots, como un `.mtn`."""
+    """The same bank wrapped in a 3-slot `chr_dat`, like a `.mtn`."""
     return build_chunk(b"chr_dat", [body, bytes(16), struct.pack("<4I", 8, 0, 0x100, 0)])
 
 
 def humanoid() -> list[SynthObject]:
-    """15 huesos como Ryu: 0 cadera, 1 pecho, 2 cabeza, brazos 3-5 (-x) y 6-8 (+x), piernas
-    9-11 (-x) y 12-14 (+x). Brazos de 0,25 + 0,25 m en pose T y piernas de 0,4 + 0,4 m."""
+    """15 bones like Ryu: 0 hip, 1 chest, 2 head, arms 3-5 (-x) and 6-8 (+x), legs
+    9-11 (-x) and 12-14 (+x). Arms of 0.25 + 0.25 m in T-pose and legs of 0.4 + 0.4 m."""
     t = [
         (0.0, 0.0, 0.0), (0.0, 0.2, 0.0), (0.0, 0.3, 0.0),
         (-0.2, 0.25, 0.0), (-0.25, 0.0, 0.0), (-0.25, 0.0, 0.0),
@@ -67,19 +68,19 @@ def humanoid() -> list[SynthObject]:
 
 
 def standing_values() -> list[int]:
-    """Pose con valores calculados a mano (unidades de 1e-4).
+    """Pose with hand-computed values (units of 1e-4).
 
-    Cadera en (0, 0,9, 0) sin rotaciones. Brazos estirados en pose T: el objetivo está a
-    0,5 m del hombro, justo el alcance. Piernas con el tobillo 0,48 m por debajo de la
-    cadera y H = ±90° (rodilla hacia +z). Por la ley de los cosenos: cos a = 0,6 y
-    sin a = 0,8, así que la rodilla queda en cadera + (0, -0,24, 0,32).
+    Hip at (0, 0.9, 0) with no rotations. Arms stretched in T-pose: the target is 0.5 m
+    from the shoulder, exactly the reach. Legs with the ankle 0.48 m below the hip and
+    H = ±90° (knee toward +z). By the law of cosines: cos a = 0.6 and sin a = 0.8, so the
+    knee ends up at hip + (0, -0.24, 0.32).
     """
     v = [0] * TRACKS
     v[1] = 9000
-    v[12:15] = [-7000, 13500, 0]  # brazo -x: hombro (-0,2, 1,35, 0) + 0,5 en -x
+    v[12:15] = [-7000, 13500, 0]  # -x arm: shoulder (-0.2, 1.35, 0) + 0.5 along -x
     v[20:23] = [7000, 13500, 0]
-    v[28:31] = [-1000, 3700, 0]  # pierna -x: cadera (-0,1, 0,85, 0) - 0,48 en y
-    v[35] = 15708  # H = +90°: el lado -x rota (-1, 0, 0) hasta +z
+    v[28:31] = [-1000, 3700, 0]  # -x leg: hip (-0.1, 0.85, 0) - 0.48 in y
+    v[35] = 15708  # H = +90°: the -x side rotates (-1, 0, 0) to +z
     v[36:39] = [1000, 3700, 0]
     v[43] = -15708
     return v

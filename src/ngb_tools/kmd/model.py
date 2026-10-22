@@ -1,42 +1,42 @@
-"""Un KMD entero: objetos, jerarquía, buffers de GPU y comprobación de invariantes.
+"""A whole KMD: objects, hierarchy, GPU buffers and invariant checking.
 
-Un KMD es un chunk de Team Ninja cuyos slots son subchunks (OBJINFO, HIERARC, MORPH...) y
-un XPR0. Se buscan por su etiqueta o su magia, no por número de slot. El objeto k usa:
+A KMD is a Team Ninja chunk whose slots are subchunks (OBJINFO, HIERARC, MORPH...) and an
+XPR0. They are looked up by tag or magic, not by slot number. Object k uses:
 
-- la entrada k de OBJINFO (transformación local, grupo);
-- el nodo k de HIERARC (padre e hijos); sin HIERARC (`do_face.kmd`) todos son raíces;
-- el USERDATA k+1 del XPR0 (descriptor de malla: partes, FVF, submallas, materiales);
-- un par VB/IB por parte, en el orden de las cabeceras del XPR0: cada VB con el IB que lo
-  sigue, si lo hay (una parte cuyas submallas leen todas de push buffer no tiene IB,
-  `do_face.kmd`). Casi todos los objetos tienen una parte; con varias (`doku.kmd` obj1,
-  ver `ngb_tools.kmd.mesh`), el objeto k consume tantos pares como partes.
+- entry k of OBJINFO (local transform, group);
+- node k of HIERARC (parent and children); without HIERARC (`do_face.kmd`) all are roots;
+- USERDATA k+1 of the XPR0 (mesh descriptor: parts, FVF, submeshes, materials);
+- one VB/IB pair per part, in the order of the XPR0 headers: each VB with the IB that
+  follows it, if any (a part whose submeshes all read from a push buffer has no IB,
+  `do_face.kmd`). Almost all objects have one part; with several (`doku.kmd` obj1, see
+  `ngb_tools.kmd.mesh`), object k consumes as many pairs as it has parts.
 
-Las submallas con origen "push buffer" consumen los push buffers del XPR0 en orden: la
-k-ésima submalla de ese tipo, contando todos los objetos y en el orden del descriptor, usa
-el k-ésimo push buffer (verificado con 1 en `ryu.kmd` y 2 en `r_ryu.kmd`, que cubren justo
-los vértices que el IB del objeto no toca, y con 1886 en los escenarios). `push_buffer_of`
-va por (objeto, parte, posición en la parte).
+Submeshes whose source is "push buffer" consume the XPR0 push buffers in order: the k-th
+submesh of that kind, counting across all objects and in descriptor order, uses the k-th
+push buffer (verified with 1 in `ryu.kmd` and 2 in `r_ryu.kmd`, which cover exactly the
+vertices the object's IB does not touch, and with 1886 in the stages). `push_buffer_of` is
+keyed by (object, part, position within the part).
 
-**Varias partes, una malla.** Los exportadores ven un objeto como una malla con un único
-juego de vértices, así que un objeto de varias partes se presenta unido: `vertices(obj)`
-concatena los vértices de sus partes en orden y `submesh_indices` suma a cada índice el
-primer vértice de su parte. Los atributos que una parte no trae se rellenan: UV (0, 0),
-color blanco (neutro al multiplicar) y normales suavizadas a partir de sus triángulos
-(INFERRED: aproximación, no dato del juego). Un objeto de varias partes va rígido: los
-pesos de mezcla se descartan (no hay ninguno en el juego). Con una parte todo es como
-siempre, byte a byte.
+**Several parts, one mesh.** The exporters see an object as a mesh with a single vertex
+set, so a multi-part object is presented merged: `vertices(obj)` concatenates the vertices
+of its parts in order and `submesh_indices` adds the first vertex of its part to each
+index. Attributes a part does not carry are filled in: UV (0, 0), white color (neutral when
+multiplied) and normals smoothed from its triangles (INFERRED: an approximation, not game
+data). A multi-part object is rigid: blend weights are dropped (the game has none). With one
+part everything is as usual, byte for byte.
 
-**Errores e incidencias.** Lo que impide emparejar objetos y buffers (subchunks ausentes,
-recuentos distintos, descriptores ilegibles) lanza `KmdFormatError`. Lo demás se anota como
-`Issue` y la exportación sigue sin la parte afectada: VB o IB más cortos de lo que declaran,
-rangos de submalla fuera del IB o del push buffer, índices fuera de los vértices, texturas
-inexistentes, FVF no admitido, rotaciones (se ignoran) o una jerarquía incoherente.
+**Errors and issues.** What prevents pairing objects with buffers (missing subchunks,
+mismatched counts, unreadable descriptors) raises `KmdFormatError`. Everything else is
+recorded as an `Issue` and the export continues without the affected part: VB or IB shorter
+than declared, submesh ranges outside the IB or the push buffer, indices outside the
+vertices, nonexistent textures, unsupported FVF, rotations (ignored) or an inconsistent
+hierarchy.
 
-**Colocación.** No hay rotaciones (0 en todo lo observado) ni más escala que 1 o 0, así que
-la posición de un objeto en el modelo es la suma de las traslaciones de OBJINFO a lo largo
-de su cadena de padres. Las piezas con peso de mezcla (FVF XYZB1, grupo skin) se colocan
-en su nodo padre ignorando su propia traslación: en `ryu.kmd` los codos llevan
-T = -mundo(padre), y aplicarla los manda al origen (VERIFIED visualmente).
+**Placement.** There are no rotations (0 in everything observed) and no scale other than 1
+or 0, so the position of an object in the model is the sum of the OBJINFO translations along
+its chain of parents. Pieces with a blend weight (FVF XYZB1, skin group) are placed at their
+parent node, ignoring their own translation: in `ryu.kmd` the elbows carry
+T = -world(parent), and applying it sends them to the origin (VERIFIED visually).
 """
 
 from __future__ import annotations
@@ -77,15 +77,15 @@ from ngb_tools.xpr.resources import (
 
 ORIGIN: Final[Vec3] = (0.0, 0.0, 0.0)
 FILL_UV: Final = (0.0, 0.0)
-FILL_COLOR: Final = 0xFFFFFFFF  # D3DCOLOR blanco opaco
+FILL_COLOR: Final = 0xFFFFFFFF  # D3DCOLOR opaque white
 FALLBACK_NORMAL: Final[Vec3] = (0.0, 1.0, 0.0)
 
-type PartRef = tuple[int, int, int]  # (objeto, parte, posición de la submalla en la parte)
+type PartRef = tuple[int, int, int]  # (object, part, submesh position in the part)
 
 
 @dataclass(frozen=True, slots=True)
 class Issue:
-    """Invariante incumplida; `obj` es el objeto afectado, si lo hay."""
+    """A violated invariant; `obj` is the affected object, if any."""
 
     obj: int | None
     message: str
@@ -96,9 +96,9 @@ class Issue:
 
 @dataclass(frozen=True, slots=True)
 class KmdPart:
-    """Una parte de un objeto: su descriptor, su par VB/IB y su disposición de vértices.
+    """A part of an object: its descriptor, its VB/IB pair and its vertex layout.
 
-    `base` es su primer vértice en `KmdModel.vertices(obj)` (0 en la primera parte).
+    `base` is its first vertex in `KmdModel.vertices(obj)` (0 in the first part).
     """
 
     part: int
@@ -111,13 +111,13 @@ class KmdPart:
 
 @dataclass(frozen=True, slots=True)
 class KmdObject:
-    """Un objeto del modelo y sus recursos de GPU.
+    """A model object and its GPU resources.
 
-    Con una parte, `mesh`, `vertex_buffer`, `index_buffer` y `layout` son los suyos. Con
-    varias, `mesh` es la vista unida (submallas en el orden del descriptor, vértices e
-    índices sumados), `vertex_buffer` e `index_buffer` los de la parte 0 y `layout` el de la
-    parte 0 sin pesos, o None si alguna parte tiene un FVF no admitido. `order[k]` es
-    (parte, posición en la parte) de la submalla k.
+    With one part, `mesh`, `vertex_buffer`, `index_buffer` and `layout` are its own. With
+    several, `mesh` is the merged view (submeshes in descriptor order, vertices and indices
+    summed), `vertex_buffer` and `index_buffer` are those of part 0 and `layout` is that of
+    part 0 without weights, or None if any part has an unsupported FVF. `order[k]` is
+    (part, position within the part) of submesh k.
     """
 
     index: int
@@ -153,7 +153,7 @@ def _slot_tag(data: bytes, offset: int) -> str | None:
 
 
 def _find_slots(data: bytes, chunk: TeamNinjaChunk) -> dict[str, SlotRef]:
-    """Slots por etiqueta de subchunk (o `XPR0` por su magia); una etiqueta repetida falla."""
+    """Slots by subchunk tag (or `XPR0` by its magic); a repeated tag fails."""
     found: dict[str, SlotRef] = {}
     for slot in chunk.slots:
         if data[slot.offset : slot.offset + len(XPR_MAGIC)] == XPR_MAGIC:
@@ -163,20 +163,20 @@ def _find_slots(data: bytes, chunk: TeamNinjaChunk) -> dict[str, SlotRef]:
         if tag is None:
             continue
         if tag in found:
-            raise KmdFormatError(f"slot '{tag}' repetido ({found[tag].index} y {slot.index})")
+            raise KmdFormatError(f"slot '{tag}' repeated ({found[tag].index} and {slot.index})")
         found[tag] = SlotRef(slot.index, slot.offset, slot.end)
     return found
 
 
 def _require(slots: dict[str, SlotRef], tag: str) -> SlotRef:
     if tag not in slots:
-        raise KmdFormatError(f"el KMD no tiene el slot {tag}")
+        raise KmdFormatError(f"the KMD has no {tag} slot")
     return slots[tag]
 
 
 @dataclass(frozen=True)
 class KmdModel:
-    """Un KMD parseado. `issues` son las invariantes incumplidas (ver el docstring del módulo)."""
+    """A parsed KMD. `issues` are the violated invariants (see the module docstring)."""
 
     tag: str
     header: ModelHeader
@@ -192,7 +192,7 @@ class KmdModel:
     unusable: Mapping[int, frozenset[int]] = field(default_factory=dict)
 
     def exportable(self, obj: int, submesh: int) -> bool:
-        """La submalla se puede convertir: FVF admitido e índices dentro de rango."""
+        """The submesh can be converted: supported FVF and indices within range."""
         return self.objects[obj].layout is not None and submesh not in self.unusable.get(obj, ())
 
     @cached_property
@@ -206,31 +206,31 @@ class KmdModel:
         return tuple(sorted(k for k, p in self.parents.items() if p == obj))
 
     def vertices(self, obj: int) -> VertexData:
-        """Vértices del objeto; con varias partes, los de todas unidos (ver el módulo)."""
+        """Vertices of the object; with several parts, those of all merged (see the module)."""
         item = self.objects[obj]
         if item.layout is None:
-            raise UnsupportedVertexFormatError(f"obj{obj}: FVF {item.mesh.fvf:#x} no admitido")
+            raise UnsupportedVertexFormatError(f"obj{obj}: FVF {item.mesh.fvf:#x} not supported")
         if len(item.parts) > 1:
             return self._merged_vertices(item)
         if item.vertex_buffer is None:
-            raise KmdFormatError(f"obj{obj}: sin VB")
+            raise KmdFormatError(f"obj{obj}: no VB")
         size = item.mesh.vertex_count * item.layout.stride
         raw = self.xpr.data_bytes(item.vertex_buffer.data, size)
         return decode_vertices(raw, item.layout, item.mesh.vertex_count)
 
     def part_vertices(self, obj: int, part: int) -> VertexData:
-        """Los vértices de una parte tal cual, con sus índices locales."""
+        """The vertices of a part as they are, with their local indices."""
         item = self.objects[obj].parts[part]
         if item.layout is None:
             raise UnsupportedVertexFormatError(
-                f"obj{obj} parte {part}: FVF {item.mesh.fvf:#x} no admitido"
+                f"obj{obj} part {part}: FVF {item.mesh.fvf:#x} not supported"
             )
         size = item.mesh.vertex_count * item.layout.stride
         raw = self.xpr.data_bytes(item.vertex_buffer.data, size)
         return decode_vertices(raw, item.layout, item.mesh.vertex_count)
 
     def part_indices(self, obj: int, submesh: int) -> tuple[int, ...]:
-        """Índices de la tira de una submalla, locales a su parte (del IB o del push buffer)."""
+        """Strip indices of a submesh, local to its part (from the IB or the push buffer)."""
         item = self.objects[obj]
         part_index, position = item.order[submesh]
         part = item.parts[part_index]
@@ -239,19 +239,21 @@ class KmdModel:
             source = self.push_buffers[self.push_buffer_of[(obj, part_index, position)]]
             return source[sub.first_index : sub.first_index + sub.index_count]
         if part.index_buffer is None:
-            raise KmdFormatError(f"obj{obj}: submalla {submesh} lee de un IB que no existe")
+            raise KmdFormatError(
+                f"obj{obj}: submesh {submesh} reads from an IB that does not exist"
+            )
         raw = self.xpr.data_bytes(part.index_buffer.data + sub.start, sub.size)
         return tuple(int.from_bytes(raw[i : i + 2], "little") for i in range(0, len(raw), 2))
 
     def submesh_indices(self, obj: int, submesh: int) -> tuple[int, ...]:
-        """Índices de la tira de una submalla en `vertices(obj)` (del IB o de su push buffer)."""
+        """Strip indices of a submesh in `vertices(obj)` (from the IB or its push buffer)."""
         indices = self.part_indices(obj, submesh)
         item = self.objects[obj]
         base = item.parts[item.order[submesh][0]].base
         return tuple(i + base for i in indices) if base else indices
 
     def _part_normals(self, item: KmdObject, part: int, positions: Sequence[Vec3]) -> list[Vec3]:
-        """Normales suavizadas (media de las caras, por área) de una parte que no las trae."""
+        """Smoothed normals (area-weighted average of the faces) for a part that has none."""
         sums = [[0.0, 0.0, 0.0] for _ in positions]
         for k, (p, _) in enumerate(item.order):
             if p != part or not self.exportable(item.index, k):
@@ -289,7 +291,7 @@ class KmdModel:
         return strip_to_triangles(self.submesh_indices(obj, submesh))
 
     def local_translation(self, obj: int) -> Vec3:
-        """Traslación del nodo respecto a su padre (las piezas con skin, en el padre)."""
+        """Translation of the node relative to its parent (skinned pieces sit at the parent)."""
         item = self.objects[obj]
         return ORIGIN if item.skinned else item.info.translation
 
@@ -313,10 +315,10 @@ class KmdModel:
         return out
 
     def skin_joints(self, obj: int) -> tuple[int, int] | None:
-        """Nodos (peso w, peso 1-w) de una pieza XYZB1: abuelo y padre (INFERRED).
+        """Nodes (weight w, weight 1-w) of an XYZB1 piece: grandparent and parent (INFERRED).
 
-        En las 12 piezas de `ryu.kmd` los vértices de peso 1 quedan del lado del abuelo
-        (pecho, brazo, cadera, espinilla) y los de peso 0 del lado del padre.
+        In the 12 pieces of `ryu.kmd` the weight-1 vertices lie on the grandparent side
+        (chest, arm, hip, shin) and the weight-0 ones on the parent side.
         """
         parent = self.parent(obj)
         if parent is None:
@@ -326,7 +328,7 @@ class KmdModel:
 
 
 def _fill[T](columns: Iterable[tuple[Sequence[T] | None, int]], fill: T) -> list[T]:
-    """Concatena columnas de atributos; una columna ausente pone `fill` en sus vértices."""
+    """Concatenate attribute columns; an absent column puts `fill` in its vertices."""
     out: list[T] = []
     for column, count in columns:
         out += column if column is not None else [fill] * count
@@ -334,7 +336,7 @@ def _fill[T](columns: Iterable[tuple[Sequence[T] | None, int]], fill: T) -> list
 
 
 def _face_normal(a: Vec3, b: Vec3, c: Vec3) -> Vec3:
-    """(b - a) x (c - a): perpendicular a la cara, con módulo = 2 x área."""
+    """(b - a) x (c - a): perpendicular to the face, with magnitude = 2 x area."""
     u = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
     v = (c[0] - a[0], c[1] - a[1], c[2] - a[2])
     return (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
@@ -348,7 +350,7 @@ def _unit(vector: Sequence[float]) -> Vec3:
 
 
 def _extents(xpr: XprFile) -> dict[int, int]:
-    """Bytes disponibles desde el `Data` de cada buffer hasta el siguiente dato o el final."""
+    """Bytes available from each buffer's `Data` up to the next data or the end."""
     starts = sorted(
         {
             r.data
@@ -369,60 +371,60 @@ class _Checker:
 
 
 def _check_buffers(check: _Checker, obj: KmdObject, part: KmdPart, extents: dict[int, int]) -> None:
-    """VB e IB de una parte; con varias partes, los mensajes dicen cuál."""
+    """VB and IB of a part; with several parts, the messages say which one."""
     mesh = part.mesh
-    where = f"parte {part.part}: " if len(obj.parts) > 1 else ""
+    where = f"part {part.part}: " if len(obj.parts) > 1 else ""
     if part.layout is not None:
         need = mesh.vertex_count * part.layout.stride
         have = extents.get(part.vertex_buffer.data, 0)
         if need > have:
-            check.add(obj.index, f"{where}VB de {have:#x} bytes, el descriptor pide {need:#x}")
+            check.add(obj.index, f"{where}VB of {have:#x} bytes, the descriptor asks for {need:#x}")
     need_ib = 2 * mesh.index_count
     ib_size = 0 if part.index_buffer is None else extents.get(part.index_buffer.data, 0)
     if need_ib > ib_size:
-        check.add(obj.index, f"{where}IB de {ib_size:#x} bytes para {mesh.index_count} índices")
+        check.add(obj.index, f"{where}IB of {ib_size:#x} bytes for {mesh.index_count} indices")
     in_ib = [s for s in mesh.submeshes if s.source is IndexSource.INDEX_BUFFER]
     if sum(s.size for s in in_ib) != need_ib:
         total = sum(s.size for s in in_ib)
-        check.add(obj.index, f"{where}las submallas del IB suman {total} bytes")
+        check.add(obj.index, f"{where}the IB submeshes add up to {total} bytes")
     for sub in in_ib:
         if sub.start + sub.size > need_ib:
-            check.add(obj.index, f"submalla {sub.index}: rango fuera del IB")
+            check.add(obj.index, f"submesh {sub.index}: range outside the IB")
 
 
 def _check_object(
     check: _Checker, model: KmdModel, obj: KmdObject, texture_count: int, extents: dict[int, int]
 ) -> set[int]:
-    """Invariantes de un objeto; devuelve las submallas que no se pueden exportar."""
+    """Invariants of one object; returns the submeshes that cannot be exported."""
     bad: set[int] = set()
     info, mesh = obj.info, obj.mesh
     if info.submesh_count != len(mesh.submeshes):
         check.add(
-            obj.index, f"OBJINFO dice {info.submesh_count} submallas, hay {len(mesh.submeshes)}"
+            obj.index, f"OBJINFO says {info.submesh_count} submeshes, found {len(mesh.submeshes)}"
         )
     if any(abs(v) > 1e-6 for v in info.rotation):
-        check.add(obj.index, f"rotación {info.rotation} ignorada (orden desconocido)")
+        check.add(obj.index, f"rotation {info.rotation} ignored (unknown order)")
     for part in obj.parts:
         _check_buffers(check, obj, part, extents)
     for position, sub in enumerate(mesh.submeshes):
         for stage in sub.stages:
             if not -1 <= stage.texture < texture_count:
-                check.add(obj.index, f"submalla {sub.index}: textura {stage.texture} inexistente")
+                check.add(obj.index, f"submesh {sub.index}: texture {stage.texture} does not exist")
         if obj.layout is None:
             continue
         try:
             indices = model.submesh_indices(obj.index, position)
         except (KeyError, IndexError, XprError, KmdFormatError):
-            check.add(obj.index, f"submalla {sub.index}: rango de índices ilegible")
+            check.add(obj.index, f"submesh {sub.index}: unreadable index range")
             bad.add(position)
             continue
         part = obj.parts[obj.order[position][0]]
         limit = part.base + part.mesh.vertex_count
         if len(indices) != sub.index_count:
-            check.add(obj.index, f"submalla {sub.index}: rango fuera de su origen de índices")
+            check.add(obj.index, f"submesh {sub.index}: range outside its index source")
             bad.add(position)
         elif indices and max(indices) >= limit:
-            check.add(obj.index, f"submalla {sub.index}: índice {max(indices)} >= {limit}")
+            check.add(obj.index, f"submesh {sub.index}: index {max(indices)} >= {limit}")
             bad.add(position)
     return bad
 
@@ -430,30 +432,30 @@ def _check_object(
 def _check_hierarchy(check: _Checker, model: KmdModel) -> None:
     hierarchy, count = model.hierarchy, len(model.objects)
     if hierarchy is None:
-        check.add(None, "sin HIERARC: todos los objetos quedan en la raíz")
+        check.add(None, "no HIERARC: all objects stay at the root")
         return
     if hierarchy.slot_count != count:
-        check.add(None, f"HIERARC tiene {hierarchy.slot_count} slots y hay {count} objetos")
+        check.add(None, f"HIERARC has {hierarchy.slot_count} slots and there are {count} objects")
     parents = model.parents
     for node in hierarchy.nodes.values():
         if node.parent != parents.get(node.index):
             check.add(
                 node.index,
-                f"HIERARC: padre {node.parent}, las listas dicen {parents.get(node.index)}",
+                f"HIERARC: parent {node.parent}, the lists say {parents.get(node.index)}",
             )
     roots = [k for k in range(count) if k not in parents]
     if roots != [hierarchy.root]:
-        check.add(None, f"raíces {roots}, la cabecera de HIERARC declara {hierarchy.root}")
+        check.add(None, f"roots {roots}, the HIERARC header declares {hierarchy.root}")
     for node in hierarchy.nodes.values():
         subtree = 1 + sum(1 for k in range(count) if node.index in model.ancestors(k))
         if subtree != node.subtree_size:
-            check.add(node.index, f"HIERARC: subtree {node.subtree_size}, el árbol da {subtree}")
+            check.add(node.index, f"HIERARC: subtree {node.subtree_size}, the tree gives {subtree}")
 
 
 def _layout(
     k: int, part: int, multi: bool, mesh: MeshDescriptor, check: _Checker
 ) -> VertexLayout | None:
-    where = f"parte {part}: " if multi else ""
+    where = f"part {part}: " if multi else ""
     try:
         layout = vertex_layout(mesh.fvf)
     except UnsupportedVertexFormatError as error:
@@ -461,14 +463,14 @@ def _layout(
         return None
     if layout.stride != mesh.stride:
         check.add(
-            k, f"{where}FVF {mesh.fvf:#x} mide {layout.stride} bytes, el descriptor {mesh.stride}"
+            k, f"{where}FVF {mesh.fvf:#x} is {layout.stride} bytes, the descriptor {mesh.stride}"
         )
         return None
     return layout
 
 
 def _merged_mesh(descriptor: MultipartDescriptor, parts: Sequence[KmdPart]) -> MeshDescriptor:
-    """La vista unida de un objeto de varias partes (o vacía, sin partes)."""
+    """The merged view of a multi-part object (or empty, with no parts)."""
     first = parts[0].mesh if parts else None
     return MeshDescriptor(
         fvf=first.fvf if first is not None else 0,
@@ -481,13 +483,13 @@ def _merged_mesh(descriptor: MultipartDescriptor, parts: Sequence[KmdPart]) -> M
 
 
 def _merged_layout(k: int, parts: Sequence[KmdPart], check: _Checker) -> VertexLayout | None:
-    """La de la parte 0 sin pesos; None si no hay partes o alguna no se sabe leer."""
+    """That of part 0 without weights; None if there are no parts or any cannot be read."""
     layouts = [p.layout for p in parts]
     first = layouts[0] if layouts else None
     if first is None or any(item is None for item in layouts):
         return None
     if any(item is not None and item.weight_count for item in layouts):
-        check.add(k, "objeto de varias partes con pesos de mezcla: se exporta rígido")
+        check.add(k, "multi-part object with blend weights: exported rigid")
     return replace(first, weight_count=0)
 
 
@@ -528,7 +530,7 @@ def _build_objects(
     buffers: Sequence[tuple[VertexBuffer, IndexBuffer | None]],
     check: _Checker,
 ) -> tuple[KmdObject, ...]:
-    """Reparte los pares VB/IB entre las partes de cada objeto, en orden."""
+    """Distribute the VB/IB pairs among the parts of each object, in order."""
     objects: list[KmdObject] = []
     cursor = 0
     for k, (info, descriptor) in enumerate(zip(infos, descriptors, strict=True)):
@@ -540,9 +542,9 @@ def _build_objects(
             cursor += 1
             uses_ib = any(s.source is IndexSource.INDEX_BUFFER for s in mesh.submeshes)
             if ib is None and (uses_ib or mesh.index_count):
-                where = f" (parte {p})" if multi else ""
+                where = f" (part {p})" if multi else ""
                 raise KmdFormatError(
-                    f"obj{k}: su VB{where} no va seguido de un IB y el descriptor lo usa"
+                    f"obj{k}: its VB{where} is not followed by an IB and the descriptor uses it"
                 )
             parts.append(KmdPart(p, mesh, vb, ib, _layout(k, p, multi, mesh, check), base))
             base += mesh.vertex_count
@@ -560,19 +562,22 @@ def _map_push_buffers(
         if obj.parts[part].mesh.submeshes[position].source is IndexSource.PUSH_BUFFER
     ]
     if len(users) != count:
-        check.add(None, f"{len(users)} submallas leen de push buffer y hay {count} push buffers")
+        check.add(
+            None,
+            f"{len(users)} submeshes read from a push buffer and there are {count} push buffers",
+        )
     return {user: k for k, user in enumerate(users) if k < count}
 
 
 def _buffer_pairs(xpr: XprFile) -> list[tuple[VertexBuffer, IndexBuffer | None]]:
-    """Cada VB con el IB que lo sigue en las cabeceras (antes del siguiente VB), si lo hay."""
+    """Each VB with the IB that follows it in the headers (before the next VB), if any."""
     pairs: list[tuple[VertexBuffer, IndexBuffer | None]] = []
     for resource in xpr.resources:
         if isinstance(resource, VertexBuffer):
             pairs.append((resource, None))
         elif isinstance(resource, IndexBuffer):
             if not pairs or pairs[-1][1] is not None:
-                raise KmdFormatError(f"IB res{resource.index} sin un VB delante")
+                raise KmdFormatError(f"IB res{resource.index} without a VB before it")
             pairs[-1] = (pairs[-1][0], resource)
     return pairs
 
@@ -585,7 +590,7 @@ def _parse_xpr(data: bytes, slot: SlotRef) -> XprFile:
 
 
 def parse_kmd(data: bytes) -> KmdModel:
-    """Parsea un KMD completo y comprueba sus invariantes."""
+    """Parse a whole KMD and check its invariants."""
     try:
         chunk = parse_chunk(data)
     except TeamNinjaError as error:
@@ -605,8 +610,8 @@ def parse_kmd(data: bytes) -> KmdModel:
     pbs = [r for r in resources if isinstance(r, PushBuffer)]
     if not userdata or len(infos) != len(userdata) - 1:
         raise KmdFormatError(
-            f"no se pueden emparejar los objetos: {len(infos)} en OBJINFO, "
-            f"{len(userdata) - 1} descriptores y {len(buffers)} VB"
+            f"cannot pair the objects: {len(infos)} in OBJINFO, "
+            f"{len(userdata) - 1} descriptors and {len(buffers)} VB"
         )
     header = parse_model_header(userdata[0].payload)
     descriptors: list[MultipartDescriptor] = []
@@ -618,8 +623,8 @@ def parse_kmd(data: bytes) -> KmdModel:
     parts = sum(len(d.parts) for d in descriptors)
     if parts != len(buffers):
         raise KmdFormatError(
-            f"no se pueden emparejar los objetos: {len(infos)} objetos con {parts} partes "
-            f"y {len(buffers)} VB"
+            f"cannot pair the objects: {len(infos)} objects with {parts} parts "
+            f"and {len(buffers)} VB"
         )
     check = _Checker()
     objects = _build_objects(infos, descriptors, buffers, check)
@@ -649,11 +654,11 @@ def _with_checks(model: KmdModel, check: _Checker) -> KmdModel:
     header = model.header
     if header.texture_count != len(model.textures):
         check.add(
-            None, f"la cabecera dice {header.texture_count} texturas, hay {len(model.textures)}"
+            None, f"the header says {header.texture_count} textures, found {len(model.textures)}"
         )
     vb_count = sum(len(obj.parts) for obj in model.objects)
     if header.vertex_buffer_count != vb_count:
-        check.add(None, f"la cabecera dice {header.vertex_buffer_count} VB, hay {vb_count}")
+        check.add(None, f"the header says {header.vertex_buffer_count} VB, found {vb_count}")
     extents = _extents(model.xpr)
     unusable = {
         obj.index: frozenset(_check_object(check, model, obj, len(model.textures), extents))

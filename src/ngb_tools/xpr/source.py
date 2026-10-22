@@ -1,12 +1,13 @@
-"""Apertura de un XPR0: suelto (`.xpr`, `.spr`) o dentro del chunk de un KMD (`--kmd`).
+"""Opening an XPR0: standalone (`.xpr`, `.spr`) or inside a KMD chunk (`--kmd`).
 
-En un KMD el XPR0 es uno de los slots del chunk de Team Ninja (ver `ngb_tools.teamninja`).
-Lo que importa para el manifiesto es dónde empieza dentro del archivo (`offset`): los
-campos `Data` son relativos a la región de datos del XPR0, no al archivo.
+In a KMD the XPR0 is one of the slots of the Team Ninja chunk (see `ngb_tools.teamninja`).
+What matters for the manifest is where it starts inside the file (`offset`): the
+`Data` fields are relative to the XPR0 data region, not to the file.
 
-El archivo se lee una vez; el XPR0 es una vista (`memoryview`) sobre esos bytes, sin copia.
-Si el archivo no es lo pedido (sin magia XPR0, o un chunk sin slot XPR0), el error es de
-entrada (`XprInputError`); si es un XPR0 pero está roto, de formato (`XprFormatError`).
+The file is read once; the XPR0 is a view (`memoryview`) over those bytes, with no copy.
+If the file is not what was asked for (no XPR0 magic, or a chunk without an XPR0 slot), the
+error is an input error (`XprInputError`); if it is an XPR0 but broken, a format error
+(`XprFormatError`).
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from ngb_tools.xpr.resources import XPR_MAGIC, XprFile, parse_xpr
 
 
 class Container(StrEnum):
-    """Dónde venía el XPR0."""
+    """Where the XPR0 came from."""
 
     XPR = "xpr"
     KMD = "kmd"
@@ -29,7 +30,7 @@ class Container(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class XprSource:
-    """Un XPR0 ya parseado y su posición en el archivo de origen."""
+    """A parsed XPR0 and its position in the source file."""
 
     path: Path
     container: Container
@@ -39,12 +40,12 @@ class XprSource:
 
 
 def _chunk_hint(data: bytes) -> str:
-    """Si los bytes parecen un chunk de Team Ninja, sugiere `--kmd`."""
+    """If the bytes look like a Team Ninja chunk, suggest `--kmd`."""
     try:
         chunk = parse_chunk(data)
     except TeamNinjaError:
         return ""
-    return f"; parece un chunk de Team Ninja '{chunk.tag}': prueba con --kmd"
+    return f"; looks like a Team Ninja chunk '{chunk.tag}': try --kmd"
 
 
 def _open_kmd(path: Path, data: bytes) -> XprSource:
@@ -57,10 +58,10 @@ def _open_kmd(path: Path, data: bytes) -> XprSource:
 
 
 def open_source(path: Path, *, kmd: bool) -> XprSource:
-    """Lee `path` y parsea su XPR0; con `kmd`, lo busca entre los slots del chunk."""
+    """Read `path` and parse its XPR0; with `kmd`, look for it among the chunk slots."""
     data = path.read_bytes()
     if kmd:
         return _open_kmd(path, data)
     if not data.startswith(XPR_MAGIC):
-        raise XprInputError(f"{path.name}: no empieza por {XPR_MAGIC!r}{_chunk_hint(data)}")
+        raise XprInputError(f"{path.name}: does not start with {XPR_MAGIC!r}{_chunk_hint(data)}")
     return XprSource(path, Container.XPR, 0, None, parse_xpr(data))

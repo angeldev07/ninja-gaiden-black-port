@@ -1,33 +1,34 @@
-"""Un KMD de escenario: objetos con varias partes, push buffers, colisión e invariantes.
+"""A stage KMD: multi-part objects, push buffers, collision and invariants.
 
-Un KMD de escenario (`boff_01.kmd`) es un KMD como el de un personaje (`ngb_tools.kmd`) con
-estas diferencias (VERIFIED en los 111 KMD `<zona>_NN` del juego y en `stage00`/`stage02`
-de `debug.afs`):
+A stage KMD (`boff_01.kmd`) is a KMD like a character's (`ngb_tools.kmd`) with these
+differences (VERIFIED on the 111 `<zone>_NN` KMDs of the game and on `stage00`/`stage02` of
+`debug.afs`):
 
-- **Partes.** Un objeto puede tener hasta 4 pares VB/IB, uno por FVF (`ngb_tools.kmd.mesh`). Las
-  cabeceras del XPR0 van objeto a objeto: los VB (cada uno seguido de su IB, si lo hay) de
-  sus partes y después sus push buffers. `boff_01.kmd`: 36 objetos, 43 VB y 42 IB.
-- **El USERDATA 0** dice (63, texturas, VB, IB, push buffers): su tercer campo cuenta VB,
-  no objetos (en los personajes coinciden). `boff_01.kmd`: (63, 98, 43, 42, 22).
-- **Sin jerarquía y sin transformaciones.** Ningún escenario trae HIERARC. En OBJINFO, T y
-  R valen 0 y S = (0, 0, 0) en todos los objetos: los vértices ya están en el espacio del
-  escenario (la caja de OBJINFO `+0x60` cuadra con ellos). Aquí S = 0 no significa "oculto"
-  como en los efectos de `ryu.kmd`: se ignora.
-- **Grupos 0 y 6** en vez de 1-5: 2299 objetos de grupo 0 (geometría) y 847 de grupo 6
-  (INFERRED: billboards y efectos; muchos miden 1 unidad y están en el origen, el juego los
-  coloca en ejecución).
-- **FVF:** 0x142 (XYZ|DIFFUSE|TEX1, el más común: luz precalculada en el color de vértice),
-  0x152 (con normal), 0x112, 0x012 (sin UV), 0x052 y 0x042. No hay TEX2 (sin lightmaps).
-- **HITMDL** con la colisión (`collision`), TEXANM y a veces MISCDATA o MORPH.
+- **Parts.** An object can have up to 4 VB/IB pairs, one per FVF (`ngb_tools.kmd.mesh`). The
+  XPR0 headers go object by object: the VBs (each followed by its IB, if any) of its parts
+  and then its push buffers. `boff_01.kmd`: 36 objects, 43 VBs and 42 IBs.
+- **USERDATA 0** says (63, textures, VB, IB, push buffers): its third field counts VBs, not
+  objects (in characters they coincide). `boff_01.kmd`: (63, 98, 43, 42, 22).
+- **No hierarchy and no transforms.** No stage carries HIERARC. In OBJINFO, T and R are 0
+  and S = (0, 0, 0) in every object: the vertices are already in stage space (the OBJINFO
+  box at `+0x60` matches them). Here S = 0 does not mean "hidden" as in the effects of
+  `ryu.kmd`: it is ignored.
+- **Groups 0 and 6** instead of 1-5: 2299 group-0 objects (geometry) and 847 group-6 objects
+  (INFERRED: billboards and effects; many measure 1 unit and sit at the origin, the game
+  places them at runtime).
+- **FVF:** 0x142 (XYZ|DIFFUSE|TEX1, the most common: light baked into the vertex color),
+  0x152 (with normal), 0x112, 0x012 (no UV), 0x052 and 0x042. There is no TEX2 (no
+  lightmaps).
+- **HITMDL** with the collision (`collision`), TEXANM and sometimes MISCDATA or MORPH.
 
-Las submallas se identifican con `SubmeshRef` = (objeto, parte, posición en la parte). Las
-de origen "push buffer" consumen los push buffers del XPR0 en orden de objeto y de
-submalla, igual que en `ngb_tools.kmd.model` (VERIFIED: en las 111 escenas el recuento
-coincide y cada push buffer tiene justo los índices que declara su submalla).
+Submeshes are identified by `SubmeshRef` = (object, part, position within the part). Those
+whose source is "push buffer" consume the XPR0 push buffers in object and submesh order, as
+in `ngb_tools.kmd.model` (VERIFIED: in all 111 scenes the count matches and each push buffer
+has exactly the indices its submesh declares).
 
-Errores: lo que impide emparejar objetos, partes y buffers lanza `StageFormatError` (o el
-`KmdFormatError` de los parsers de `ngb_tools.kmd`). El resto se anota como `Issue` y la
-exportación sigue sin la parte afectada.
+Errors: what prevents pairing objects, parts and buffers raises `StageFormatError` (or the
+`KmdFormatError` of the `ngb_tools.kmd` parsers). The rest is recorded as an `Issue` and the
+export continues without the affected part.
 """
 
 from __future__ import annotations
@@ -76,7 +77,7 @@ type SubmeshRef = tuple[int, int, int]
 
 @dataclass(frozen=True, slots=True)
 class StagePart:
-    """Una parte de un objeto: su descriptor de una parte y su par VB/IB."""
+    """A part of an object: its single-part descriptor and its VB/IB pair."""
 
     obj: int
     part: int
@@ -88,7 +89,7 @@ class StagePart:
 
 @dataclass(frozen=True, slots=True)
 class StageObject:
-    """Un objeto del escenario: su entrada de OBJINFO y sus partes."""
+    """A stage object: its OBJINFO entry and its parts."""
 
     index: int
     info: ObjectInfo
@@ -100,14 +101,14 @@ class StageObject:
         return self.info.group
 
     def submeshes(self) -> Iterator[tuple[SubmeshRef, Submesh]]:
-        """Las submallas en el orden del descriptor."""
+        """The submeshes in descriptor order."""
         for part, position in self.descriptor.order:
             yield (self.index, part, position), self.parts[part].mesh.submeshes[position]
 
 
 @dataclass(frozen=True)
 class StageModel:
-    """Un KMD de escenario parseado; `issues` son las invariantes incumplidas."""
+    """A parsed stage KMD; `issues` are the violated invariants."""
 
     name: str
     header: ModelHeader
@@ -138,28 +139,30 @@ class StageModel:
         return self.part(obj, part).mesh.submeshes[position]
 
     def exportable(self, ref: SubmeshRef) -> bool:
-        """FVF admitido e índices dentro de rango."""
+        """Supported FVF and indices within range."""
         return self.part(ref[0], ref[1]).layout is not None and ref not in self.unusable
 
     def vertices(self, obj: int, part: int) -> VertexData:
         item = self.part(obj, part)
         if item.layout is None:
             raise UnsupportedVertexFormatError(
-                f"obj{obj} parte {part}: FVF {item.mesh.fvf:#x} no admitido"
+                f"obj{obj} part {part}: FVF {item.mesh.fvf:#x} not supported"
             )
         size = item.mesh.vertex_count * item.layout.stride
         raw = self.xpr.data_bytes(item.vertex_buffer.data, size)
         return decode_vertices(raw, item.layout, item.mesh.vertex_count)
 
     def submesh_indices(self, ref: SubmeshRef) -> tuple[int, ...]:
-        """Índices de la tira de una submalla (del IB de su parte o de su push buffer)."""
+        """Strip indices of a submesh (from the IB of its part or from its push buffer)."""
         item = self.part(ref[0], ref[1])
         sub = self.submesh(ref)
         if sub.source is IndexSource.PUSH_BUFFER:
             source = self.push_buffers[self.push_buffer_of[ref]]
             return source[sub.first_index : sub.first_index + sub.index_count]
         if item.index_buffer is None:
-            raise StageFormatError(f"obj{ref[0]} parte {ref[1]}: submalla lee de un IB que no hay")
+            raise StageFormatError(
+                f"obj{ref[0]} part {ref[1]}: submesh reads from an IB that does not exist"
+            )
         raw = self.xpr.data_bytes(item.index_buffer.data + sub.start, sub.size)
         return tuple(int.from_bytes(raw[i : i + 2], "little") for i in range(0, len(raw), 2))
 
@@ -171,7 +174,7 @@ class StageModel:
         return {} if self.hierarchy is None else self.hierarchy.parent_map()
 
     def world_translation(self, obj: int) -> Vec3:
-        """Suma de las T de OBJINFO por la cadena de padres (0 en todos los escenarios)."""
+        """Sum of the OBJINFO Ts along the parent chain (0 in every stage)."""
         x = y = z = 0.0
         node: int | None = obj
         seen: set[int] = set()
@@ -191,9 +194,9 @@ class _Slot:
 
 
 def _find_slots(data: bytes, chunk: TeamNinjaChunk) -> dict[str, _Slot]:
-    """Slots por etiqueta de subchunk (o `XPR0` por su magia); una etiqueta repetida falla.
+    """Slots by subchunk tag (or `XPR0` by its magic); a repeated tag fails.
 
-    TODO(kmd): es `ngb_tools.kmd.model._find_slots`, que es privada.
+    TODO(kmd): this is `ngb_tools.kmd.model._find_slots`, which is private.
     """
     found: dict[str, _Slot] = {}
     for slot in chunk.slots:
@@ -206,26 +209,26 @@ def _find_slots(data: bytes, chunk: TeamNinjaChunk) -> dict[str, _Slot]:
                 continue
             tag = raw.decode("ascii")
         if tag in found:
-            raise StageFormatError(f"slot '{tag}' repetido ({found[tag].index} y {slot.index})")
+            raise StageFormatError(f"slot '{tag}' repeated ({found[tag].index} and {slot.index})")
         found[tag] = _Slot(slot.index, slot.offset, slot.end)
     return found
 
 
 def _buffer_pairs(xpr: XprFile) -> list[tuple[VertexBuffer, IndexBuffer | None]]:
-    """Cada VB con el IB que lo sigue en las cabeceras (antes del siguiente VB), si lo hay."""
+    """Each VB with the IB that follows it in the headers (before the next VB), if any."""
     pairs: list[tuple[VertexBuffer, IndexBuffer | None]] = []
     for resource in xpr.resources:
         if isinstance(resource, VertexBuffer):
             pairs.append((resource, None))
         elif isinstance(resource, IndexBuffer):
             if not pairs or pairs[-1][1] is not None:
-                raise StageFormatError(f"IB res{resource.index} sin un VB delante")
+                raise StageFormatError(f"IB res{resource.index} without a VB before it")
             pairs[-1] = (pairs[-1][0], resource)
     return pairs
 
 
 def _extents(xpr: XprFile) -> dict[int, int]:
-    """Bytes disponibles desde el `Data` de cada buffer hasta el siguiente dato o el final."""
+    """Bytes available from each buffer's `Data` up to the next data or the end."""
     starts = sorted(
         {
             r.data
@@ -241,13 +244,11 @@ def _layout(obj: int, part: int, mesh: MeshDescriptor, issues: list[Issue]) -> V
     try:
         layout = vertex_layout(mesh.fvf)
     except UnsupportedVertexFormatError as error:
-        issues.append(Issue(obj, f"parte {part}: {error}"))
+        issues.append(Issue(obj, f"part {part}: {error}"))
         return None
     if layout.stride != mesh.stride:
         issues.append(
-            Issue(
-                obj, f"parte {part}: FVF {mesh.fvf:#x} mide {layout.stride}, stride {mesh.stride}"
-            )
+            Issue(obj, f"part {part}: FVF {mesh.fvf:#x} is {layout.stride}, stride {mesh.stride}")
         )
         return None
     return layout
@@ -261,7 +262,7 @@ def _build_objects(
 ) -> tuple[StageObject, ...]:
     total = sum(len(d.parts) for d in descriptors)
     if total != len(pairs):
-        raise StageFormatError(f"los descriptores tienen {total} partes y hay {len(pairs)} VB")
+        raise StageFormatError(f"the descriptors have {total} parts and there are {len(pairs)} VB")
     objects: list[StageObject] = []
     cursor = 0
     for k, (info, descriptor) in enumerate(zip(infos, descriptors, strict=True)):
@@ -271,7 +272,7 @@ def _build_objects(
             cursor += 1
             uses_ib = any(s.source is IndexSource.INDEX_BUFFER for s in mesh.submeshes)
             if ib is None and (uses_ib or mesh.index_count):
-                raise StageFormatError(f"obj{k} parte {p}: su VB no va seguido de un IB")
+                raise StageFormatError(f"obj{k} part {p}: its VB is not followed by an IB")
             parts.append(StagePart(k, p, mesh, vb, ib, _layout(k, p, mesh, issues)))
         objects.append(StageObject(k, info, descriptor, tuple(parts)))
     return tuple(objects)
@@ -298,7 +299,9 @@ def _map_push_buffers(
         if sub.source is IndexSource.PUSH_BUFFER
     ]
     if len(users) != count:
-        issues.append(Issue(None, f"{len(users)} submallas leen de push buffer y hay {count}"))
+        issues.append(
+            Issue(None, f"{len(users)} submeshes read from a push buffer and there are {count}")
+        )
     return {ref: k for k, ref in enumerate(users) if k < count}
 
 
@@ -308,36 +311,38 @@ def _check_part(item: StagePart, extents: Mapping[int, int], issues: list[Issue]
         need = mesh.vertex_count * item.layout.stride
         have = extents.get(item.vertex_buffer.data, 0)
         if need > have:
-            issues.append(Issue(obj, f"parte {p}: VB de {have:#x} bytes, se piden {need:#x}"))
+            issues.append(Issue(obj, f"part {p}: VB of {have:#x} bytes, {need:#x} requested"))
     need_ib = 2 * mesh.index_count
     have_ib = 0 if item.index_buffer is None else extents.get(item.index_buffer.data, 0)
     if need_ib > have_ib:
-        issues.append(Issue(obj, f"parte {p}: IB de {have_ib:#x} bytes para {need_ib:#x}"))
+        issues.append(Issue(obj, f"part {p}: IB of {have_ib:#x} bytes for {need_ib:#x}"))
     in_ib = sum(s.size for s in mesh.submeshes if s.source is IndexSource.INDEX_BUFFER)
     if in_ib != need_ib:
-        issues.append(Issue(obj, f"parte {p}: las submallas del IB suman {in_ib} bytes"))
+        issues.append(Issue(obj, f"part {p}: the IB submeshes add up to {in_ib} bytes"))
 
 
 def _check_submesh(model: StageModel, ref: SubmeshRef, sub: Submesh, issues: list[Issue]) -> bool:
-    """Invariantes de una submalla; False si no se puede exportar."""
+    """Invariants of one submesh; False if it cannot be exported."""
     obj = ref[0]
     for stage in sub.stages:
         if not -1 <= stage.texture < len(model.textures):
-            issues.append(Issue(obj, f"submalla {sub.index}: textura {stage.texture} inexistente"))
+            issues.append(
+                Issue(obj, f"submesh {sub.index}: texture {stage.texture} does not exist")
+            )
     item = model.part(obj, ref[1])
     if item.layout is None:
         return False
     try:
         indices = model.submesh_indices(ref)
     except (KeyError, IndexError, XprError, StageFormatError):
-        issues.append(Issue(obj, f"submalla {sub.index}: rango de índices ilegible"))
+        issues.append(Issue(obj, f"submesh {sub.index}: unreadable index range"))
         return False
     if len(indices) != sub.index_count:
-        issues.append(Issue(obj, f"submalla {sub.index}: rango fuera de su origen de índices"))
+        issues.append(Issue(obj, f"submesh {sub.index}: range outside its index source"))
         return False
     if indices and max(indices) >= item.mesh.vertex_count:
         issues.append(
-            Issue(obj, f"submalla {sub.index}: índice {max(indices)} >= {item.mesh.vertex_count}")
+            Issue(obj, f"submesh {sub.index}: index {max(indices)} >= {item.mesh.vertex_count}")
         )
         return False
     return True
@@ -346,10 +351,10 @@ def _check_submesh(model: StageModel, ref: SubmeshRef, sub: Submesh, issues: lis
 def _with_checks(model: StageModel, issues: list[Issue]) -> StageModel:
     header, vb_count = model.header, model.part_count
     if header.texture_count != len(model.textures):
-        issues.append(Issue(None, f"la cabecera dice {header.texture_count} texturas"))
+        issues.append(Issue(None, f"the header says {header.texture_count} textures"))
     if header.vertex_buffer_count != vb_count:
         issues.append(
-            Issue(None, f"la cabecera dice {header.vertex_buffer_count} VB, hay {vb_count}")
+            Issue(None, f"the header says {header.vertex_buffer_count} VB, found {vb_count}")
         )
     extents = _extents(model.xpr)
     unusable: set[SubmeshRef] = set()
@@ -357,10 +362,13 @@ def _with_checks(model: StageModel, issues: list[Issue]) -> StageModel:
         info = obj.info
         if info.submesh_count != obj.descriptor.submesh_count:
             issues.append(
-                Issue(obj.index, f"OBJINFO dice {info.submesh_count} submallas, hay otras")
+                Issue(
+                    obj.index,
+                    f"OBJINFO says {info.submesh_count} submeshes, found a different number",
+                )
             )
         if any(abs(v) > 1e-6 for v in info.rotation):
-            issues.append(Issue(obj.index, f"rotación {info.rotation} ignorada"))
+            issues.append(Issue(obj.index, f"rotation {info.rotation} ignored"))
         for item in obj.parts:
             _check_part(item, extents, issues)
         for ref, sub in obj.submeshes():
@@ -378,12 +386,12 @@ def _collision(
     try:
         return parse_hitmdl(data[slot.offset : slot.end], count)
     except StageFormatError as error:
-        issues.append(Issue(None, f"colisión descartada: {error}"))
+        issues.append(Issue(None, f"collision discarded: {error}"))
         return {}
 
 
 def parse_stage_kmd(data: bytes, name: str = "") -> StageModel:
-    """Parsea un KMD de escenario (o cualquier KMD) y comprueba sus invariantes."""
+    """Parse a stage KMD (or any KMD) and check its invariants."""
     try:
         chunk = parse_chunk(data)
     except TeamNinjaError as error:
@@ -391,7 +399,7 @@ def parse_stage_kmd(data: bytes, name: str = "") -> StageModel:
     slots = _find_slots(data, chunk)
     for tag in (OBJINFO_TAG, XPR_TAG):
         if tag not in slots:
-            raise StageFormatError(f"{name}: el KMD no tiene el slot {tag}")
+            raise StageFormatError(f"{name}: the KMD has no {tag} slot")
     info_slot, xpr_slot = slots[OBJINFO_TAG], slots[XPR_TAG]
     infos = parse_objinfo(data[info_slot.offset : info_slot.end])
     hier = slots.get(HIERARC_TAG)
@@ -403,7 +411,7 @@ def parse_stage_kmd(data: bytes, name: str = "") -> StageModel:
     userdata = [r for r in xpr.resources if isinstance(r, UserData)]
     if len(userdata) != len(infos) + 1:
         raise StageFormatError(
-            f"{name}: {len(infos)} objetos en OBJINFO y {len(userdata) - 1} descriptores"
+            f"{name}: {len(infos)} objects in OBJINFO and {len(userdata) - 1} descriptors"
         )
     descriptors = []
     for k, ud in enumerate(userdata[1:]):

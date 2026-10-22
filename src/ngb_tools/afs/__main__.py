@@ -1,4 +1,4 @@
-"""Punto de entrada de `python -m ngb_tools.afs`."""
+"""Entry point of `python -m ngb_tools.afs`."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Análisis completo: estructuras localizadas por VA a partir de la cabecera."""
+"""Full analysis: structures located by VA starting from the header."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from .synthetic import (
     with_u32,
 )
 
-END_OF_TEXT = SECTION_VA + SECTION_RAW_SIZE  # .text acaba justo en el final del archivo
+END_OF_TEXT = SECTION_VA + SECTION_RAW_SIZE  # .text ends exactly at the end of the file
 
 
 def analyze_bytes(data: bytes, *, with_strings: bool = False) -> XbeAnalysis:
@@ -83,7 +83,7 @@ class HeaderPointerTests(unittest.TestCase):
 
 class CertificateLayoutTests(unittest.TestCase):
     def test_certificate_outside_headers_raises(self) -> None:
-        # Una VA respaldada no basta: el certificado vive en la región de cabeceras.
+        # A backed VA is not enough: the certificate lives in the headers region.
         data = with_u32(build_synthetic_xbe(), 0x118, SECTION_VA)
         with self.assertRaises(ImageLayoutError):
             analyze_bytes(data)
@@ -101,11 +101,11 @@ class CertificateLayoutTests(unittest.TestCase):
 
 class OptionalPointerTests(unittest.TestCase):
     def test_tls_near_end_of_file_is_absent(self) -> None:
-        data = with_u32(build_synthetic_xbe(), 0x12C, END_OF_TEXT - 8)  # faltan 16 bytes
+        data = with_u32(build_synthetic_xbe(), 0x12C, END_OF_TEXT - 8)  # 16 bytes short
         self.assertIsNone(analyze_bytes(data).tls)
 
     def test_library_version_near_end_of_file_is_absent(self) -> None:
-        data = with_u32(build_synthetic_xbe(), 0x168, END_OF_TEXT - 8)  # necesita 16
+        data = with_u32(build_synthetic_xbe(), 0x168, END_OF_TEXT - 8)  # needs 16
         self.assertIsNone(analyze_bytes(data).kernel_library_version)
 
     def test_codeview_near_end_of_file_is_absent(self) -> None:
@@ -114,8 +114,8 @@ class OptionalPointerTests(unittest.TestCase):
         self.assertIsNone(analyze_bytes(bytes(data)).codeview)
 
     def test_codeview_path_stops_at_end_of_region(self) -> None:
-        tail = b"RSDS" + bytes(16) + bytes(4) + b"c:\\cut.pdb"  # sin NUL: acaba con la sección
-        data = build_synthetic_xbe(text_tail=tail, inserted_file=True)  # el archivo sigue
+        tail = b"RSDS" + bytes(16) + bytes(4) + b"c:\\cut.pdb"  # no NUL: ends with the section
+        data = build_synthetic_xbe(text_tail=tail, inserted_file=True)  # the file continues
         data = with_u32(data, 0x180, END_OF_TEXT - len(tail))
         codeview = analyze_bytes(data).codeview
         assert codeview is not None

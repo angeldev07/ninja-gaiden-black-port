@@ -1,16 +1,15 @@
-"""Wave banks de XACT (`WBND`) de las versiones 2 y 3 (XACT 1.x, Xbox original).
+"""XACT wave banks (`WBND`), versions 2 and 3 (XACT 1.x, original Xbox).
 
-Disposición contrastada con vgmstream (`meta/xwb.c`); todo little endian:
+Layout cross-checked against vgmstream (`meta/xwb.c`); everything little endian:
 
-- 0x00 `WBND`, 0x04 u32 versión, 0x08 cuatro segmentos `(offset, tamaño)`: datos del
-  banco, metadatos de las entradas, nombres y datos de onda.
-- Datos del banco: u32 flags (0x00020000 = formato compacto, no soportado), u32 entradas,
-  nombre de 16 bytes, u32 tamaño de cada metadato, u32 tamaño de cada nombre (0x40),
-  u32 alineación.
-- Cada metadato: u32 flags, u32 formato, u32 offset (relativo a los datos de onda),
-  u32 tamaño, u32 inicio y u32 longitud del loop (en bytes).
-- Formato (versión ≤ 3): bits 0-1 códec (0 PCM, 1 Xbox ADPCM, 2 WMA), 2-4 canales,
-  5-30 frecuencia y 31 bits por muestra (1 = 16, 0 = 8).
+- 0x00 `WBND`, 0x04 u32 version, 0x08 four `(offset, size)` segments: bank data, entry
+  metadata, names and wave data.
+- Bank data: u32 flags (0x00020000 = compact format, unsupported), u32 entries, 16-byte
+  name, u32 size of each metadata, u32 size of each name (0x40), u32 alignment.
+- Each metadata: u32 flags, u32 format, u32 offset (relative to the wave data), u32 size,
+  u32 loop start and u32 loop length (in bytes).
+- Format (version <= 3): bits 0-1 codec (0 PCM, 1 Xbox ADPCM, 2 WMA), 2-4 channels, 5-30
+  sample rate and 31 bits per sample (1 = 16, 0 = 8).
 """
 
 from __future__ import annotations
@@ -39,7 +38,7 @@ _ENTRY: Final = struct.Struct("<6I")
 
 @dataclass(frozen=True, slots=True)
 class XwbEntry:
-    """Entrada del banco; `offset` es absoluto dentro del `.xwb`."""
+    """Bank entry; `offset` is absolute inside the `.xwb`."""
 
     index: int
     flags: int
@@ -68,22 +67,22 @@ class XwbBank:
 
 def _segment(data: bytes, offset: int, size: int, what: str) -> None:
     if offset + size > len(data):
-        raise AudioTruncatedError(f"segmento {what} ({offset:#x}+{size:#x}) fuera del archivo")
+        raise AudioTruncatedError(f"segment {what} ({offset:#x}+{size:#x}) outside the file")
 
 
 def _decode_format(fmt: int) -> tuple[int, int, int, int]:
-    """(códec, canales, frecuencia, bits) del dword de formato de la versión ≤ 3."""
+    """(codec, channels, sample rate, bits) of the format dword for version <= 3."""
     return fmt & 0x3, (fmt >> 2) & 0x7, (fmt >> 5) & 0x3FF_FFFF, 16 if fmt >> 31 else 8
 
 
 def parse_xwb(data: bytes) -> XwbBank:
     if len(data) < _SEGMENTS.size:
-        raise AudioTruncatedError("cabecera XWB truncada")
+        raise AudioTruncatedError("truncated XWB header")
     magic, version, *segments = _SEGMENTS.unpack_from(data)
     if magic != MAGIC:
-        raise AudioFormatError(f"magia XWB inválida {magic!r}")
+        raise AudioFormatError(f"invalid XWB magic {magic!r}")
     if version not in VERSIONS:
-        raise UnsupportedCodecError(f"versión XWB {version} no soportada (solo 2 y 3)")
+        raise UnsupportedCodecError(f"XWB version {version} not supported (only 2 and 3)")
     bank_off, bank_size, meta_off, meta_size, names_off, names_size, wave_off, wave_size = segments
     for off, size, what in (
         (bank_off, bank_size, "bank"),
@@ -93,12 +92,12 @@ def parse_xwb(data: bytes) -> XwbBank:
     ):
         _segment(data, off, size, what)
     if bank_size < _BANK.size:
-        raise AudioFormatError(f"datos del banco de {bank_size} bytes")
+        raise AudioFormatError(f"bank data of {bank_size} bytes")
     flags, count, raw_name, elem_size, name_size, _align = _BANK.unpack_from(data, bank_off)
     if flags & COMPACT_FLAG:
-        raise UnsupportedCodecError("XWB en formato compacto no soportado")
+        raise UnsupportedCodecError("compact-format XWB not supported")
     if elem_size < _ENTRY.size or count * elem_size > meta_size:
-        raise AudioFormatError(f"{count} entradas de {elem_size} bytes no caben en {meta_size}")
+        raise AudioFormatError(f"{count} entries of {elem_size} bytes do not fit in {meta_size}")
     entries = []
     for index in range(count):
         entry_flags, fmt, offset, size, loop_start, loop_length = _ENTRY.unpack_from(
@@ -106,7 +105,7 @@ def parse_xwb(data: bytes) -> XwbBank:
         )
         codec, channels, rate, bits = _decode_format(fmt)
         if offset + size > wave_size:
-            raise AudioTruncatedError(f"entrada {index} más allá de los datos de onda")
+            raise AudioTruncatedError(f"entry {index} past the wave data")
         name = None
         if names_size and name_size and (index + 1) * name_size <= names_size:
             at = names_off + index * name_size
@@ -131,14 +130,14 @@ def parse_xwb(data: bytes) -> XwbBank:
 
 
 def decode_entry(data: bytes, entry: XwbEntry) -> array[int]:
-    """PCM16 intercalado de la entrada (PCM de 8/16 bits o Xbox ADPCM)."""
+    """Interleaved PCM16 of the entry (8/16-bit PCM or Xbox ADPCM)."""
     if not 1 <= entry.channels <= 8 or entry.sample_rate == 0:
-        raise AudioFormatError(f"entrada {entry.index}: {entry.channels} canales imposibles")
+        raise AudioFormatError(f"entry {entry.index}: {entry.channels} channels impossible")
     payload = data[entry.offset : entry.offset + entry.size]
     if entry.codec == CODEC_XBOX_ADPCM:
         return xbox_adpcm.decode(payload, entry.channels)
     if entry.codec != CODEC_PCM:
-        raise UnsupportedCodecError(f"entrada {entry.index}: códec {entry.codec_name}")
+        raise UnsupportedCodecError(f"entry {entry.index}: codec {entry.codec_name}")
     samples = from_le_bytes(payload) if entry.bits == 16 else from_u8(payload)
     usable = len(samples) - len(samples) % entry.channels
     return samples[:usable]

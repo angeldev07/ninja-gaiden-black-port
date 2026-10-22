@@ -1,7 +1,7 @@
-"""HLE de la entrada de XAPI (H8): el loader parchea XAPI y el XBE sintético la llama.
+"""XAPI input HLE (H8): the loader patches XAPI and the synthetic XBE calls it.
 
-Necesita Windows y el loader compilado (ver test_loader). `--no-host-input` deja solo el
-guion de `--input-script`: la prueba no depende del teclado ni de un mando conectado.
+Needs Windows and the compiled loader (see test_loader). `--no-host-input` leaves only the
+`--input-script` script: the test does not depend on the keyboard or on a connected pad.
 """
 
 from __future__ import annotations
@@ -20,7 +20,9 @@ ERROR_IO_PENDING = 0x3E5
 ERROR_DEVICE_NOT_CONNECTED = 0x48F
 
 
-@unittest.skipUnless(os.name == "nt" and LOADER.is_file(), "requiere Windows y el loader compilado")
+@unittest.skipUnless(
+    os.name == "nt" and LOADER.is_file(), "requires Windows and the compiled loader"
+)
 class InputHleTest(unittest.TestCase):
     def run_xbe(self, xbe: bytes, *extra_args: str) -> tuple[int, str]:
         with tempfile.TemporaryDirectory() as tmp:
@@ -49,12 +51,12 @@ class InputHleTest(unittest.TestCase):
         self.assertIn("keyboard: disabled; script: 1 presses", log)
         for name, (va, _, ret_va, ret_n) in SIGNATURES.items():
             self.assertIn(f"input: {name} 0x{va:08X} (ret {ret_n} at 0x{ret_va:08X};", log)
-        # La primera consulta de cambios notifica la inserción; XGetDevices ve el puerto 0.
+        # The first changes query reports the insertion; XGetDevices sees port 0.
         self.assertIn("DbgPrint: changes=1 ins=1 rem=0", log)
         self.assertIn("DbgPrint: devices=1", log)
-        # XINPUT_STATE de Xbox: START en wButtons; A y el gatillo izquierdo, analógicos.
+        # Xbox XINPUT_STATE: START in wButtons; A and the left trigger, analog.
         self.assertIn("DbgPrint: state=0 pkt=2 btn=0010 a=255 b=0 lt=255", log)
-        # SetState: ERROR_IO_PENDING como la XAPI real, completado al momento (dwStatus 0).
+        # SetState: ERROR_IO_PENDING like the real XAPI, completed immediately (dwStatus 0).
         self.assertIn(f"DbgPrint: feedback={ERROR_IO_PENDING:x} status=0", log)
         self.assertRegex(log, r"input: T1 @0001[0-9A-F]{4} XInputGetState\(0x[0-9A-F]+\)")
 
@@ -66,11 +68,11 @@ class InputHleTest(unittest.TestCase):
     def test_signature_mismatch_skips_only_that_function(self) -> None:
         signatures = dict(SIGNATURES)
         va, prologue, ret_va, _ = signatures["XInputSetState"]
-        signatures["XInputSetState"] = (va, prologue, ret_va, 12)  # ret 12, no ret 8
+        signatures["XInputSetState"] = (va, prologue, ret_va, 12)  # ret 12, not ret 8
         code, log = self.run_xbe(
             build_input_xbe(input_code(), xpp_section(signatures)), "--no-host-input"
         )
-        # Sin parche, la llamada cae en los int3 de la sección: el loader lo para.
+        # Without the patch, the call lands on the section's int3s: the loader stops it.
         self.assertNotEqual(code, EXIT_OK, log)
         self.assertIn("input: 7 of 8 XAPI functions patched", log)
         self.assertIn(

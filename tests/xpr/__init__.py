@@ -1,1 +1,1 @@
-"""Tests de `ngb_tools.xpr` con recursos XPR0 sintéticos construidos en memoria."""
+"""Tests of `ngb_tools.xpr` with synthetic XPR0 resources built in memory."""

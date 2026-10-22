@@ -1,69 +1,69 @@
-"""Errores tipados de `ngb_tools.xbe`.
+"""Typed errors of `ngb_tools.xbe`.
 
-Jerarquía:
+Hierarchy:
 
-    XbeError                    base de todo el paquete
-    ├── XbeFormatError          el archivo no es un XBE válido o es incoherente
-    │   ├── TruncatedDataError  una estructura se sale del archivo
-    │   ├── BadMagicError       no empieza por 'XBEH'
-    │   ├── UnmappedAddressError  una VA no apunta a datos del archivo
-    │   ├── ImageLayoutError    estructura fuera de su región, desborde de 32 bits o cota
-    │   └── ThunkTableError     tabla de imports del kernel sin terminador
-    └── KernelExportsError      la tabla TSV de exports está mal formada
+    XbeError                    base of the whole package
+    ├── XbeFormatError          the file is not a valid XBE or is inconsistent
+    │   ├── TruncatedDataError  a structure runs past the end of the file
+    │   ├── BadMagicError       does not start with 'XBEH'
+    │   ├── UnmappedAddressError  a VA does not point to file data
+    │   ├── ImageLayoutError    structure outside its region, 32-bit overflow or bound exceeded
+    │   └── ThunkTableError     kernel import table without a terminator
+    └── KernelExportsError      the TSV exports table is malformed
 
-La CLI traduce `XbeFormatError` a fallo de validación (código 1) y
-`KernelExportsError` a error de uso (código 2): el XBE no tiene la culpa.
+The CLI maps `XbeFormatError` to a validation failure (code 1) and
+`KernelExportsError` to a usage error (code 2): the XBE is not at fault.
 """
 
 from __future__ import annotations
 
 
 class XbeError(Exception):
-    """Base de los errores del inspector de XBE."""
+    """Base of the XBE inspector errors."""
 
 
 class XbeFormatError(XbeError):
-    """El archivo no es un XBE válido, está truncado o es incoherente."""
+    """The file is not a valid XBE, is truncated or is inconsistent."""
 
 
 class TruncatedDataError(XbeFormatError):
-    """Lectura de `size` bytes en `offset` fuera de los límites del archivo."""
+    """Read of `size` bytes at `offset` falls outside the file bounds."""
 
     def __init__(self, offset: int, size: int) -> None:
-        super().__init__(f"lectura de {size} bytes fuera del archivo en offset 0x{offset:X}")
+        super().__init__(f"read of {size} bytes outside the file at offset 0x{offset:X}")
         self.offset = offset
         self.size = size
 
 
 class BadMagicError(XbeFormatError):
-    """La firma de los 4 primeros bytes no es 'XBEH'."""
+    """The signature in the first 4 bytes is not 'XBEH'."""
 
 
 class UnmappedAddressError(XbeFormatError):
-    """Una dirección virtual (VA) no está respaldada por bytes del archivo.
+    """A virtual address (VA) is not backed by bytes of the file.
 
-    Pasa con punteros a BSS (memoria que el cargador rellena con ceros) o fuera
-    de la imagen.
+    Happens with pointers into BSS (memory the loader fills with zeros) or
+    outside the image.
     """
 
     def __init__(self, va: int, what: str) -> None:
-        super().__init__(f"{what}: VA 0x{va:08X} no está respaldada por el archivo")
+        super().__init__(f"{what}: VA 0x{va:08X} is not backed by the file")
         self.va = va
         self.what = what
 
 
 class ImageLayoutError(XbeFormatError):
-    """El layout declarado es imposible: una estructura fuera de su región, un rango que
-    desborda los 32 bits o se sale de la imagen, o un contador por encima de su cota.
+    """The declared layout is impossible: a structure outside its region, a range that
+    overflows 32 bits or runs past the image, or a counter above its bound.
 
-    Comprobarlo antes de recorrer nada es lo que impide que un XBE hostil cuelgue el
-    análisis con un `section_count` de miles de millones.
+    Checking this before walking anything is what stops a hostile XBE from hanging
+    the analysis with a `section_count` of billions.
     """
 
 
 class ThunkTableError(XbeFormatError):
-    """La tabla de thunks del kernel no termina en 0 dentro de la cota."""
+    """The kernel thunk table does not end in 0 within the bound."""
 
 
 class KernelExportsError(XbeError):
-    """Una línea de la tabla de exports de xboxkrnl no se puede interpretar."""
+    """A line of the xboxkrnl exports table cannot be parsed."""

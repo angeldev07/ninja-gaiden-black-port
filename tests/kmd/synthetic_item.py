@@ -1,8 +1,8 @@
-"""Constructor de `.itm` sintéticos (chunk `itm_dat2`): nunca se usan datos del juego.
+"""Builder of synthetic `.itm` files (`itm_dat2` chunk): game data is never used.
 
-Reproduce lo observado en `katana.itm`: el slot 0 son volúmenes (aquí, relleno) y el slot 1
-es la tabla de anclajes, con una cabecera cuyo primer u32 es el offset de los registros
-(0x40), registros de 0x20 bytes y un terminador 0xFFFFFF00.
+It reproduces what was observed in `katana.itm`: slot 0 holds volumes (padding here) and
+slot 1 is the anchor table, with a header whose first u32 is the offset of the records
+(0x40), 0x20-byte records and a 0xFFFFFF00 terminator.
 """
 
 from __future__ import annotations
@@ -31,8 +31,8 @@ def build_item(records: Sequence[Record], *, terminated: bool = True) -> bytes:
     return build_chunk(b"itm_dat2", [bytes(0x20), anchor_table(records, terminated=terminated)])
 
 
-# Como la katana: guardada a la espalda (estado 1), en la mano -x (estados 2 y 3) y una
-# variante 0x3b del estado 3.
+# Like the katana: stowed on the back (state 1), in the -x hand (states 2 and 3) and a
+# 0x3b variant of state 3.
 KATANA_LIKE: tuple[Record, ...] = (
     (0x2, 11, (-0.058, 0.0, -0.025), (0.0, -13.0, 0.0)),
     (0x3, 11, (-0.058, 0.0, -0.025), (0.0, -13.0, 0.0)),

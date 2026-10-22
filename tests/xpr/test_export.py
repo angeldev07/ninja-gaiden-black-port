@@ -1,4 +1,4 @@
-"""Tests del catálogo de texturas y de la exportación a PNG con manifiesto."""
+"""Tests of the texture catalog and of the PNG export with a manifest."""
 
 from __future__ import annotations
 
@@ -31,15 +31,15 @@ from .synthetic import (
 )
 
 DXT1, P8 = 0x0C, 0x0B
-DXT1_DATA = solid_dxt1_block(0xF800) + solid_dxt1_block(0x001F)  # 8x4: rojo | azul
-P8_DATA = bytes(16)  # 4x4, todo índice 0
-PALETTE_DATA = d3dcolor(0, 255, 0) + bytes(1020)  # entrada 0 verde
+DXT1_DATA = solid_dxt1_block(0xF800) + solid_dxt1_block(0x001F)  # 8x4: red | blue
+P8_DATA = bytes(16)  # 4x4, all index 0
+PALETTE_DATA = d3dcolor(0, 255, 0) + bytes(1020)  # entry 0 green
 CUBE_DATA = bytes(6 * 128)
 HEADER_SIZE = 0x800
 
 
 def sample_xpr() -> bytes:
-    """DXT1 8x4, P8 4x4 con su paleta y un cubemap que no se puede exportar."""
+    """DXT1 8x4, P8 4x4 with its palette and a cubemap that cannot be exported."""
     return build_xpr(
         [
             texture_header(0, format_word(DXT1, 3, 2)),
@@ -127,22 +127,22 @@ class ExportTests(ExportTestCase):
 
     def test_missing_mips_export_level_zero_with_a_warning(self) -> None:
         header = texture_header(0, format_word(DXT1, 3, 3, levels=3))
-        level0 = solid_dxt1_block(0xF800) * 4  # 8x8 = 4 bloques; faltan los niveles 1 y 2
+        level0 = solid_dxt1_block(0xF800) * 4  # 8x8 = 4 blocks; levels 1 and 2 are missing
         manifest = self.export("mips.xpr", build_xpr([header], level0))
         record = manifest["textures"][0]
         self.assertEqual(record["status"], "exported")
         self.assertEqual([level["present"] for level in record["levels"]], [True, False, False])
         self.assertEqual((record["byte_length"], record["sha256"]), (32, sha256(level0)))
-        self.assertRegex(record["warnings"][0], "2 de 3 niveles de mip")
+        self.assertRegex(record["warnings"][0], "2 of 3 mip levels")
 
     def test_decoder_failure_skips_only_that_texture(self) -> None:
         failure = mock.patch(
-            "ngb_tools.xpr.export.decode_texture", side_effect=XprFormatError("decodificador roto")
+            "ngb_tools.xpr.export.decode_texture", side_effect=XprFormatError("broken decoder")
         )
         with failure:
             manifest = self.export("sample.xpr", sample_xpr())
         self.assertEqual(manifest["exported"], 0)
-        self.assertIn("decodificador roto", manifest["textures"][0]["issue"])
+        self.assertIn("broken decoder", manifest["textures"][0]["issue"])
 
     def test_unsupported_texture_is_listed_as_skipped(self) -> None:
         manifest = self.export("sample.xpr", sample_xpr())
@@ -165,13 +165,13 @@ class ExportTests(ExportTestCase):
         self.assertEqual(kmd[xpr_offset : xpr_offset + 4], b"XPR0")
 
     def test_textures_beyond_the_pixel_budget_are_skipped(self) -> None:
-        # Varias cabeceras pueden apuntar a los mismos datos: el presupuesto acota el trabajo.
+        # Several headers can point to the same data: the budget bounds the work.
         path = self.root / "sample.xpr"
         path.write_bytes(sample_xpr())
         manifest = export_textures(open_source(path, kmd=False), self.out, pixel_budget=8 * 4)
         statuses = [t["status"] for t in manifest["textures"]]
         self.assertEqual(statuses, ["exported", "skipped", "skipped"])
-        self.assertIn("presupuesto", manifest["textures"][1]["issue"] or "")
+        self.assertIn("budget", manifest["textures"][1]["issue"] or "")
         self.assertFalse((self.out / "0001_P8_4x4.png").exists())
 
     def test_no_partial_files_are_left(self) -> None:
@@ -181,8 +181,8 @@ class ExportTests(ExportTestCase):
 
 class UnsafeExportTests(ExportTestCase):
     def test_output_inside_a_repo_is_refused_before_writing(self) -> None:
-        # La guarda es la de `_paths` (probada en tests/test_paths.py); aquí solo se comprueba
-        # que `export` la usa antes de crear nada.
+        # The guard is the one in `_paths` (tested in tests/test_paths.py); here we only check
+        # that `export` uses it before creating anything.
         repo = self.root / "repo"
         (repo / ".git").mkdir(parents=True)
         path = self.root / "sample.xpr"
@@ -195,8 +195,8 @@ class UnsafeExportTests(ExportTestCase):
 
 class DefaultOutputDirTests(unittest.TestCase):
     def test_uses_ngb_data_and_the_source_stem(self) -> None:
-        out = default_output_dir(Path("x/0000_ryu.kmd"), {"NGB_DATA": "D:/datos"})
-        self.assertEqual(out, Path("D:/datos") / "extracted" / "textures" / "0000_ryu")
+        out = default_output_dir(Path("x/0000_ryu.kmd"), {"NGB_DATA": "D:/data"})
+        self.assertEqual(out, Path("D:/data") / "extracted" / "textures" / "0000_ryu")
 
     def test_falls_back_to_home_ngb_data(self) -> None:
         out = default_output_dir(Path("font.xpr"), {})
@@ -205,13 +205,13 @@ class DefaultOutputDirTests(unittest.TestCase):
     def test_dot_only_stems_cannot_climb_or_collapse(self) -> None:
         for name in ("..", "..kmd", ". "):
             with self.subTest(name=name):
-                out = default_output_dir(Path(name), {"NGB_DATA": "D:/datos"})
-                self.assertEqual(out.parent, Path("D:/datos") / "extracted" / "textures")
+                out = default_output_dir(Path(name), {"NGB_DATA": "D:/data"})
+                self.assertEqual(out.parent, Path("D:/data") / "extracted" / "textures")
                 self.assertNotIn(out.name, ("", ".", ".."))
 
 
 class OutputNameTests(unittest.TestCase):
-    """Los nombres de salida salen del índice y de la tabla de formatos, nunca del archivo."""
+    """Output names come from the index and the format table, never from the file."""
 
     SAFE_NAME = re.compile(r"^\d{4}_[A-Z0-9_]+_\d+x\d+\.png$")
 

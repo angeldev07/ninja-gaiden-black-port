@@ -1,4 +1,4 @@
-"""ADX: coeficientes, bloques calculados a mano, cabecera, loops y cifrado."""
+"""ADX: coefficients, hand-computed blocks, header, loops and encryption."""
 
 from __future__ import annotations
 
@@ -21,12 +21,12 @@ def decode_one(frame: bytes, coefs: tuple[int, int], *, split_shift: bool = True
 
 class CoefficientTests(unittest.TestCase):
     def test_cutoff_500_at_44100(self) -> None:
-        # A mano: cos(2π·500/44100) = 0.9974631, a = 0.4167505, b = 0.4142136,
-        # c = (a − √(a² − b²))/b = 0.8952898; 2c·4096 = 7334.21 y −c²·4096 = −3283.12.
+        # By hand: cos(2π·500/44100) = 0.9974631, a = 0.4167505, b = 0.4142136,
+        # c = (a − √(a² − b²))/b = 0.8952898; 2c·4096 = 7334.21 and −c²·4096 = −3283.12.
         self.assertEqual(adx.compute_coefficients(500, 44100), (7334, -3283))
 
     def test_cutoff_500_at_22050_truncates_towards_zero(self) -> None:
-        # c = 0.8019254: 2c·4096 = 6569.37 y −c²·4096 = −2634.07 (se trunca hacia cero).
+        # c = 0.8019254: 2c·4096 = 6569.37 and −c²·4096 = −2634.07 (truncated toward zero).
         self.assertEqual(adx.compute_coefficients(500, 22050), (6569, -2634))
 
     def test_impossible_cutoff_is_rejected(self) -> None:
@@ -36,32 +36,32 @@ class CoefficientTests(unittest.TestCase):
 
 class FrameDecodeTests(unittest.TestCase):
     def test_without_prediction_each_sample_is_nibble_times_scale_plus_one(self) -> None:
-        # Escala 1 → 2. Bytes 0x12 0x7F 0x88 0xF0: nibbles 1, 2, 7, −1, −8, −8, −1, 0.
+        # Scale 1 -> 2. Bytes 0x12 0x7F 0x88 0xF0: nibbles 1, 2, 7, −1, −8, −8, −1, 0.
         frame = adx_frame(1, [1, 2, 7, -1, -8, -8, -1, 0])
         self.assertEqual(frame[2:6], b"\x12\x7f\x88\xf0")
         expected = [2, 4, 14, -2, -16, -16, -2, 0] + [0] * 24
         self.assertEqual(decode_one(frame, (0, 0)), expected)
 
     def test_coef1_of_one_integrates(self) -> None:
-        # coef1 = 4096 (1.0): cada muestra es la anterior más nibble·2.
+        # coef1 = 4096 (1.0): each sample is the previous one plus nibble·2.
         frame = adx_frame(1, [1, 2, 7, -1, -8, -8, -1, 0])
         expected = [2, 6, 20, 18, 2, -14, -16, -16] + [-16] * 24
         self.assertEqual(decode_one(frame, (4096, 0)), expected)
 
     def test_real_coefficients_with_version_3_shifts(self) -> None:
-        # Escala 16 → 17, primer nibble 7, coefs (7334, −3283), cada producto >> 12:
+        # Scale 16 -> 17, first nibble 7, coefs (7334, −3283), each product >> 12:
         # s0 = 119; s1 = 872746>>12 = 213; s2 = (1562142>>12) + (−390677>>12) = 381 − 96
         # = 285; s3 = (2090190>>12) + (−699279>>12) = 510 − 171 = 339.
         samples = decode_one(adx_frame(16, [7]), (7334, -3283))
         self.assertEqual(samples[:4], [119, 213, 285, 339])
 
     def test_real_coefficients_with_version_4_shift_of_the_sum(self) -> None:
-        # Igual, pero desplazando la suma: s2 = 1171465>>12 = 286; s3 = 1398245>>12 = 341.
+        # Same, but shifting the sum: s2 = 1171465>>12 = 286; s3 = 1398245>>12 = 341.
         samples = decode_one(adx_frame(16, [7]), (7334, -3283), split_shift=False)
         self.assertEqual(samples[:4], [119, 213, 286, 341])
 
     def test_output_saturates_to_16_bits(self) -> None:
-        # Escala 0xFFFF → 65536: 7·65536 y −8·65536 se saturan.
+        # Scale 0xFFFF -> 65536: 7·65536 and −8·65536 saturate.
         self.assertEqual(decode_one(adx_frame(0xFFFF, [7, -8]), (0, 0))[:2], [32767, -32768])
 
 
@@ -102,7 +102,7 @@ class HeaderTests(unittest.TestCase):
 
 class StreamDecodeTests(unittest.TestCase):
     def test_stereo_frames_interleave_and_trim_to_total(self) -> None:
-        # Bloques c0, c1, c0, c1. Escala 3 → 4: c0 empieza en 2·4 = 8 y c1 en −3·4 = −12.
+        # Blocks c0, c1, c0, c1. Scale 3 -> 4: c0 starts at 2·4 = 8 and c1 at −3·4 = −12.
         raw = adx_header(channels=2, total=40) + b"".join(
             (adx_frame(3, [2]), adx_frame(3, [-3]), adx_frame(0, []), adx_frame(0, []))
         )

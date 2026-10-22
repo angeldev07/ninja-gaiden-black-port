@@ -1,4 +1,4 @@
-"""Tests de la apertura de un XPR0: suelto o dentro del chunk de un KMD."""
+"""Tests of opening an XPR0: standalone or inside a KMD chunk."""
 
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ class OpenSourceTests(unittest.TestCase):
 
     def test_broken_xpr0_is_a_format_error_not_an_input_error(self) -> None:
         broken = bytearray(XPR)
-        broken[8:12] = (0xFFFFFFFF).to_bytes(4, "little")  # header_size imposible
+        broken[8:12] = (0xFFFFFFFF).to_bytes(4, "little")  # impossible header_size
         with self.assertRaises(XprFormatError) as raised:
             open_source(self.write("a.xpr", bytes(broken)), kmd=False)
         self.assertNotIsInstance(raised.exception, XprInputError)

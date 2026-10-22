@@ -1,35 +1,35 @@
-"""Tabla de formatos de textura de Xbox: código D3DFORMAT -> nombre, bpp, almacenamiento y códec.
+"""Xbox texture format table: D3DFORMAT code -> name, bpp, storage and codec.
 
-En la Xbox, el D3DFORMAT de una textura es directamente el código de color de la NV2A
-(`NV097_SET_TEXTURE_FORMAT_COLOR_*`) y viaja en los bits 8-15 del campo `Format`. Por eso
-los valores no coinciden con los de D3D8 de PC. Cada formato se guarda de una de tres
-maneras:
+On the Xbox, a texture's D3DFORMAT is directly the NV2A color code
+(`NV097_SET_TEXTURE_FORMAT_COLOR_*`) and travels in bits 8-15 of the `Format` field. That is why
+the values do not match those of PC D3D8. Each format is stored in one of three
+ways:
 
-- **swizzled** (`SZ_*` en la NV2A): dimensiones potencia de dos, píxeles en orden Morton
-  (ver `swizzle`). Admiten mipmaps.
-- **linear** (`LU_IMAGE_*`, los `LIN_*` de D3D): filas consecutivas con un *pitch* (bytes
-  por fila, múltiplo de 64) y dimensiones libres, que vienen en el campo `Size`. Sin mips.
-- **compressed** (`L_DXT*`): bloques S3TC de 4x4 píxeles en orden lineal, sin swizzle.
-  DXT2 y DXT3 comparten código (0x0E), igual que DXT4 y DXT5 (0x0F): la NV2A no distingue
-  el alfa premultiplicado, así que se decodifican como DXT3 y DXT5.
+- **swizzled** (`SZ_*` on the NV2A): power-of-two dimensions, pixels in Morton order
+  (see `swizzle`). They support mipmaps.
+- **linear** (`LU_IMAGE_*`, D3D's `LIN_*`): consecutive rows with a *pitch* (bytes
+  per row, a multiple of 64) and free dimensions, which come in the `Size` field. No mips.
+- **compressed** (`L_DXT*`): 4x4-pixel S3TC blocks in linear order, not swizzled.
+  DXT2 and DXT3 share a code (0x0E), as do DXT4 and DXT5 (0x0F): the NV2A does not tell
+  premultiplied alpha apart, so they are decoded as DXT3 and DXT5.
 
-V8U8 y L6V5U5 (y su variante lineal) son mapas de relieve con signo y se exportan con el
-mapeo de `bump`. Los demás formatos con signo (V16U16), de profundidad (D16, D24S8...) y
-YUV (YUY2, UYVY) se conocen pero no se decodifican: no aparecen en el juego.
+V8U8 and L6V5U5 (and their linear variant) are signed bump maps and are exported with the
+mapping of `bump`. The other signed formats (V16U16), depth formats (D16, D24S8...) and
+YUV (YUY2, UYVY) are known but not decoded: they do not appear in the game.
 
-Los canales de los formatos empaquetados se describen sobre la palabra little endian del
-píxel, con la convención de D3D de nombrar del bit más alto al más bajo: en A1R5G5B5, A es
-el bit 15 y B los bits 0-4. Cuando el formato no trae un canal, se usa una constante: A8
-deja el color en blanco (como Cxbx) y L8 repite la luminancia en R, G y B.
+The channels of packed formats are described over the pixel's little-endian word,
+with the D3D convention of naming from the highest bit to the lowest: in A1R5G5B5, A is
+bit 15 and B is bits 0-4. When the format has no channel, a constant is used: A8
+leaves the color white (like Cxbx) and L8 repeats luminance in R, G and B.
 
-Fuentes (enum y semántica verificados; sin usar el XDK):
-- Cxbx-Reloaded, enum `X_D3DFMT_*` y máscaras de `Format`/`Size`:
+Sources (enum and semantics verified; without using the XDK):
+- Cxbx-Reloaded, `X_D3DFMT_*` enum and `Format`/`Size` masks:
   https://github.com/Cxbx-Reloaded/Cxbx-Reloaded/blob/master/src/core/hle/D3D8/XbD3D8Types.h
-- Cxbx-Reloaded, tabla `FormatInfos` (bpp, Swzzld/Linear/Cmprsd) y orden de canales:
+- Cxbx-Reloaded, `FormatInfos` table (bpp, Swzzld/Linear/Cmprsd) and channel order:
   https://github.com/Cxbx-Reloaded/Cxbx-Reloaded/blob/master/src/core/hle/D3D8/XbConvert.cpp
-- xemu, códigos `NV097_SET_TEXTURE_FORMAT_COLOR_*`:
+- xemu, `NV097_SET_TEXTURE_FORMAT_COLOR_*` codes:
   https://github.com/xemu-project/xemu/blob/master/hw/xbox/nv2a/nv2a_regs.h
-- xemu, bytes por píxel y tamaño de cada nivel (lineal, swizzled y DXT):
+- xemu, bytes per pixel and size of each level (linear, swizzled and DXT):
   https://github.com/xemu-project/xemu/blob/master/hw/xbox/nv2a/pgraph/texture.c
 """
 
@@ -43,7 +43,7 @@ from typing import Final
 
 
 class Storage(StrEnum):
-    """Cómo están colocados los datos de la textura en memoria."""
+    """How the texture data is laid out in memory."""
 
     SWIZZLED = "swizzled"
     LINEAR = "linear"
@@ -51,33 +51,33 @@ class Storage(StrEnum):
 
 
 class Codec(StrEnum):
-    """Qué decodificador convierte los datos (ya en orden lineal) a RGBA8."""
+    """Which decoder converts the data (already in linear order) to RGBA8."""
 
     PACKED = "packed"
     PALETTE = "palette"
     BC1 = "bc1"
     BC2 = "bc2"
     BC3 = "bc3"
-    V8U8 = "v8u8"  # relieve con signo, ver `bump`
+    V8U8 = "v8u8"  # signed bump, see `bump`
     L6V5U5 = "l6v5u5"
     UNSUPPORTED = "unsupported"
 
 
 @dataclass(frozen=True, slots=True)
 class Field:
-    """Un canal dentro de la palabra del píxel: `bits` bits a partir del bit `shift`."""
+    """A channel within the pixel word: `bits` bits starting at bit `shift`."""
 
     shift: int
     bits: int
 
 
-# Un canal es un campo de la palabra o una constante 0-255 si el formato no lo trae.
+# A channel is a field of the word, or a constant 0-255 if the format has none.
 type Channel = Field | int
 
 
 @dataclass(frozen=True, slots=True)
 class PackedLayout:
-    """Dónde está cada canal RGBA en la palabra little endian de un píxel."""
+    """Where each RGBA channel sits in a pixel's little-endian word."""
 
     red: Channel
     green: Channel
@@ -87,7 +87,7 @@ class PackedLayout:
 
 @dataclass(frozen=True, slots=True)
 class TextureFormat:
-    """Un D3DFORMAT de Xbox y lo necesario para decodificarlo."""
+    """An Xbox D3DFORMAT and what is needed to decode it."""
 
     code: int
     name: str
@@ -103,7 +103,7 @@ class TextureFormat:
 
     @property
     def is_signed_bump(self) -> bool:
-        """V8U8 o L6V5U5: el PNG es un mapa de relieve, no un color (ver `bump`)."""
+        """V8U8 or L6V5U5: the PNG is a bump map, not a color (see `bump`)."""
         return self.codec in (Codec.V8U8, Codec.L6V5U5)
 
     @property
@@ -112,16 +112,16 @@ class TextureFormat:
 
     @property
     def bytes_per_element(self) -> int:
-        """Bytes por píxel (o por índice de paleta) de un formato sin comprimir."""
+        """Bytes per pixel (or per palette index) of an uncompressed format."""
         return self.bits_per_pixel // 8
 
     @property
     def block_bytes(self) -> int:
-        """Bytes de un bloque de 4x4 píxeles: 8 en DXT1 y 16 en DXT3/DXT5."""
+        """Bytes of a 4x4-pixel block: 8 for DXT1 and 16 for DXT3/DXT5."""
         return 16 * self.bits_per_pixel // 8
 
 
-# --- Disposiciones de canales -------------------------------------------------------------
+# --- Channel layouts -------------------------------------------------------------
 
 _OPAQUE: Final = 255
 _WHITE: Final = 255
@@ -149,13 +149,13 @@ def _luminance(lum: Field, alpha: Channel = _OPAQUE) -> PackedLayout:
 
 
 _L8: Final = _luminance(Field(0, 8))
-_AL8: Final = _luminance(Field(0, 8), Field(0, 8))  # alfa y luminancia del mismo byte
+_AL8: Final = _luminance(Field(0, 8), Field(0, 8))  # alpha and luminance from the same byte
 _A8L8: Final = _luminance(Field(0, 8), Field(8, 8))
 _L16: Final = _luminance(Field(0, 16))
 _A8: Final = PackedLayout(red=_WHITE, green=_WHITE, blue=_WHITE, alpha=Field(0, 8))
 
 
-# --- Tabla --------------------------------------------------------------------------------
+# --- Table --------------------------------------------------------------------------------
 
 _SZ: Final = Storage.SWIZZLED
 _LIN: Final = Storage.LINEAR
@@ -230,5 +230,5 @@ FORMATS: Final[Mapping[int, TextureFormat]] = MappingProxyType({f.code: f for f 
 
 
 def lookup_format(code: int) -> TextureFormat | None:
-    """El formato con ese código D3DFORMAT de Xbox, o `None` si no está en la tabla."""
+    """The format with that Xbox D3DFORMAT code, or `None` if it is not in the table."""
     return FORMATS.get(code)

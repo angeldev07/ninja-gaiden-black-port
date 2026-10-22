@@ -1,30 +1,30 @@
-"""Exportación de las texturas de un XPR0 a PNG, con un `_manifest.json` para trazarlas.
+"""Export of the textures of an XPR0 to PNG, with a `_manifest.json` to trace them.
 
-Se exporta el nivel 0 de cada textura exportable, un PNG por textura. El manifiesto lista
-todas, también las que se saltan y el motivo, con lo necesario para volver a los bytes de
-origen: offset del campo `Data`, offset absoluto en el archivo, niveles de mip y el sha256
-de los bytes de la textura (todos sus mips) y de su paleta.
+Level 0 of each exportable texture is exported, one PNG per texture. The manifest lists
+all of them, including the skipped ones and the reason, with what is needed to get back to
+the source bytes: offset of the `Data` field, absolute offset in the file, mip levels and the
+sha256 of the texture bytes (all its mips) and of its palette.
 
-Las texturas son datos del juego (con copyright): la salida pasa por
-`ngb_tools._paths.ensure_outside_repos` sin excepciones (ni `build/`) y por defecto va a
-`$NGB_DATA/extracted/textures/<archivo sin extensión>`.
+Textures are game data (copyrighted): the output goes through
+`ngb_tools._paths.ensure_outside_repos` with no exceptions (not even `build/`) and by default
+goes to `$NGB_DATA/extracted/textures/<file without extension>`.
 
-Orden de trabajo: la guarda de "fuera del repo" va primero y después se valida el
-catálogo entero sin decodificar. Luego cada textura se decodifica y se escribe de forma
-atómica, de una en una (en memoria solo hay una), y el manifiesto va el último, con fsync:
-es lo que da por buena la exportación. Un fallo a medias no deja PNG truncados ni un
-manifiesto que describa archivos que no existen.
+Order of work: the "outside the repo" guard goes first and then the whole catalog is
+validated without decoding. Then each texture is decoded and written atomically, one at a
+time (only one is in memory), and the manifest goes last, with fsync: it is what makes
+the export count as good. A mid-way failure leaves neither truncated PNGs nor a manifest
+describing files that do not exist.
 
-Cada textura exportada lleva `encoding`: `color`, o `signed-bump` si el PNG es un mapa de
-relieve con signo (V8U8, L6V5U5) pasado a RGBA con el mapeo de `ngb_tools.xpr.bump`. En
-L6V5U5, `alpha` vale `luminance`: el canal A es la luminancia, no transparencia.
+Each exported texture carries `encoding`: `color`, or `signed-bump` if the PNG is a signed
+bump map (V8U8, L6V5U5) converted to RGBA with the mapping of `ngb_tools.xpr.bump`. In
+L6V5U5, `alpha` is `luminance`: the A channel is luminance, not transparency.
 
-Varias cabeceras pueden apuntar a los mismos datos, así que un archivo pequeño podría pedir
-miles de texturas de 4096x4096. `pixel_budget` (por defecto `MAX_EXPORT_PIXELS`) acota los
-píxeles decodificados por exportación; las texturas que no caben se saltan con su motivo.
+Several headers can point to the same data, so a small file could request thousands of
+4096x4096 textures. `pixel_budget` (by default `MAX_EXPORT_PIXELS`) bounds the pixels
+decoded per export; textures that do not fit are skipped with their reason.
 
-Los nombres de los PNG salen solo del número de orden, de la tabla de formatos y de las
-dimensiones (`0004_DXT1_256x256.png`): ningún byte del archivo llega a una ruta.
+PNG names come only from the sequence number, the format table and the dimensions
+(`0004_DXT1_256x256.png`): no byte of the file reaches a path.
 """
 
 from __future__ import annotations
@@ -47,14 +47,14 @@ from ngb_tools.xpr.texture import AlphaMode, alpha_mode, decode_texture
 MANIFEST_NAME: Final = "_manifest.json"
 TEXTURES_SUBDIR: Final = "textures"
 TOOL: Final = "ngb_tools.xpr"
-UNNAMED: Final = "sin_nombre"
+UNNAMED: Final = "unnamed"
 COLOR: Final = "color"
 SIGNED_BUMP: Final = "signed-bump"
-# Píxeles de nivel 0 decodificados por exportación: una textura de 4096x4096. Coste medido
-# (Python 3.13, un núcleo): DXT1 2,8 Mpx/s, DXT5 1,6, ARGB 6,5, P8 y A8 9; el PNG nivel 9
-# cuesta de 0,15 a 4 s por Mpx según los datos. 16 Mpx son 10 s de DXT5 y, en el peor PNG,
-# poco más de un minuto (64 Mpx serían unos 4 min). Lo real: 873 728 px en ryu.kmd,
-# 1,57 Mpx en dlcustom.xpr y 5,9 Mpx en el XPR0 mayor del juego (suiro_21.afs #0).
+# Level-0 pixels decoded per export: one 4096x4096 texture. Measured cost
+# (Python 3.13, one core): DXT1 2.8 Mpx/s, DXT5 1.6, ARGB 6.5, P8 and A8 9; level-9 PNG
+# costs 0.15 to 4 s per Mpx depending on the data. 16 Mpx is 10 s of DXT5 and, with the
+# worst PNG, a little over a minute (64 Mpx would be about 4 min). Real data: 873,728 px in
+# ryu.kmd, 1.57 Mpx in dlcustom.xpr and 5.9 Mpx in the game's largest XPR0 (suiro_21.afs #0).
 MAX_EXPORT_PIXELS: Final = 4096 * 4096
 
 
@@ -115,10 +115,10 @@ class ExportManifest(TypedDict):
 
 
 def default_output_dir(source: Path, environ: Mapping[str, str] | None = None) -> Path:
-    """`<datos>/extracted/textures/<nombre del origen sin extensión>`.
+    """`<data>/extracted/textures/<source name without extension>`.
 
-    Un nombre hecho solo de puntos o espacios (`..`, `..kmd`) se sustituye: con él la
-    carpeta subiría un nivel o se colapsaría en `textures/`.
+    A name made only of dots or spaces (`..`, `..kmd`) is replaced: with it the
+    folder would go up a level or collapse into `textures/`.
     """
     stem = source.stem if source.stem.strip(" .") else UNNAMED
     return data_root(environ) / EXTRACTED_SUBDIR / TEXTURES_SUBDIR / stem
@@ -129,7 +129,7 @@ def _sha256(data: bytes) -> str:
 
 
 def _file_offset(source: XprSource, data_offset: int) -> int:
-    """De un campo `Data` (relativo a header_size) a un offset absoluto en el archivo."""
+    """From a `Data` field (relative to header_size) to an absolute offset in the file."""
     return source.offset + source.xpr.header_size + data_offset
 
 
@@ -166,14 +166,14 @@ def _levels(entry: CatalogEntry) -> list[LevelRecord]:
 
 
 def _encoding(fmt: TextureFormat | None) -> str:
-    """Qué significa el PNG: color, o un mapa de relieve con signo (`ngb_tools.xpr.bump`)."""
+    """What the PNG means: color, or a signed bump map (`ngb_tools.xpr.bump`)."""
     return SIGNED_BUMP if fmt is not None and fmt.is_signed_bump else COLOR
 
 
 def _record(
     source: XprSource, entry: CatalogEntry, issue: str | None, alpha: AlphaMode | None = None
 ) -> TextureRecord:
-    """Registro de una textura; `issue` es el motivo por el que no se exporta, si lo hay."""
+    """Record of one texture; `issue` is the reason it is not exported, if any."""
     texture, check = entry.texture, entry.check
     fmt = lookup_format(texture.format.code)
     exported = issue is None and check is not None
@@ -208,9 +208,9 @@ def _record(
 
 
 def _render(source: XprSource, entry: CatalogEntry) -> tuple[TextureRecord, bytes | None]:
-    """Registro del manifiesto y PNG (si se exporta) de una entrada del catálogo.
+    """Manifest record and PNG (if exported) for a catalog entry.
 
-    Un fallo al decodificar o al codificar el PNG salta solo esa textura, con su motivo.
+    A failure while decoding or encoding the PNG skips only that texture, with its reason.
     """
     if entry.issue is not None or entry.layout is None:
         return _record(source, entry, entry.issue), None
@@ -219,7 +219,7 @@ def _render(source: XprSource, entry: CatalogEntry) -> tuple[TextureRecord, byte
         png = encode_png(image.width, image.height, image.pixels)
     except (UnsupportedTextureError, XprFormatError) as error:
         return _record(source, entry, str(error)), None
-    except ValueError as error:  # encode_png: no debería ocurrir con una imagen validada
+    except ValueError as error:  # encode_png: should not happen with a validated image
         return _record(source, entry, f"PNG: {error}"), None
     mode = alpha_mode(entry.layout.format, image.pixels)
     return _record(source, entry, None, mode), png
@@ -228,10 +228,10 @@ def _render(source: XprSource, entry: CatalogEntry) -> tuple[TextureRecord, byte
 def export_textures(
     source: XprSource, out_dir: Path, *, pixel_budget: int = MAX_EXPORT_PIXELS
 ) -> ExportManifest:
-    """Escribe un PNG por textura exportable y el manifiesto en `out_dir`.
+    """Write one PNG per exportable texture and the manifest in `out_dir`.
 
-    Lanza `UnsafeOutputError` (de `_paths`) antes de crear nada si `out_dir` cae dentro de
-    un repo git.
+    Raises `UnsafeOutputError` (from `_paths`) before creating anything if `out_dir` falls
+    inside a git repo.
     """
     out = ensure_outside_repos(out_dir)
     entries = catalog(source.xpr)
@@ -242,7 +242,7 @@ def export_textures(
         entry = listed
         pixels = entry.width * entry.height
         if entry.issue is None and pixels > remaining:
-            issue = f"presupuesto de {pixel_budget} píxeles por exportación agotado"
+            issue = f"budget of {pixel_budget} pixels per export exhausted"
             entry = replace(entry, issue=issue)
         record, png = _render(source, entry)
         records.append(record)
@@ -263,6 +263,6 @@ def export_textures(
         textures=records,
     )
     text = json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
-    # El manifiesto da por buena la exportación: va el último y con fsync.
+    # The manifest makes the export count as good: it goes last and with fsync.
     atomic_write_bytes(out / MANIFEST_NAME, text.encode("utf-8"), fsync=True)
     return manifest

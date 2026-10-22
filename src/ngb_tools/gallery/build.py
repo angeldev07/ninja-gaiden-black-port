@@ -1,19 +1,20 @@
-"""Galería: cada `chr_*.afs` a un GLB, con su idle si hay banco de motions y rig humanoide.
+"""Gallery: each `chr_*.afs` to a GLB, with its idle if there is a motion bank and a humanoid rig.
 
-Por personaje (`chr_<nombre>.afs`):
+Per character (`chr_<name>.afs`):
 
-1. KMD principal (`ngb_tools.gallery.sources.main_kmd`), parseado con `ngb_tools.kmd`.
-2. Texturas a PNG en `<salida>/textures/<nombre>` (`ngb_tools.kmd.textures`).
-3. Animación: banco `<nombre>.mtn` (o `.mot`) del propio AFS o de los comunes, rig humanoide
-   (`ngb_tools.kmd.rig`) y motion idle: el id 1 si no es la de relleno (en `ryu.mtn` es el
-   idle VERIFIED visualmente) o, si no, el primer id con una motion distinta del id 0
-   (INFERRED). Si algo de esto falla, el GLB sale sin animación y se anota el motivo.
-4. `<salida>/<nombre>.glb` con skin, y un render de frente para la hoja de contactos.
+1. Main KMD (`ngb_tools.gallery.sources.main_kmd`), parsed with `ngb_tools.kmd`.
+2. Textures to PNG in `<out>/textures/<name>` (`ngb_tools.kmd.textures`).
+3. Animation: bank `<name>.mtn` (or `.mot`) from the AFS itself or from the common ones,
+   humanoid rig (`ngb_tools.kmd.rig`) and idle motion: id 1 if it is not the filler one (in
+   `ryu.mtn` it is the idle, VERIFIED visually) or, failing that, the first id with a motion
+   different from id 0 (INFERRED). If any of this fails, the GLB comes out without animation
+   and the reason is noted.
+4. `<out>/<name>.glb` with skin, and a front render for the contact sheet.
 
-Un personaje que no se puede exportar (sin KMD, KMD ilegible, como el cuerpo multiparte de
-Doku) queda registrado con su motivo y la galería sigue. Los errores conocidos (AFS, KMD,
-XPR, E/S) se describen tal cual. Cualquier otra excepción se anota como "error interno":
-es un bug, pero no tumba el resto.
+A character that cannot be exported (no KMD, unreadable KMD, like Doku's multipart body) is
+recorded with its reason and the gallery goes on. The known errors (AFS, KMD, XPR, I/O) are
+described as they are. Any other exception is noted as an "internal error": it is a bug, but
+it does not bring down the rest.
 """
 
 from __future__ import annotations
@@ -53,12 +54,12 @@ KNOWN_ERRORS: Final = (AfsError, KmdError, XprError, OSError, struct.error, Valu
 
 class Status(StrEnum):
     OK = "ok"
-    FAILED = "fallo"
+    FAILED = "failed"
 
 
 @dataclass(frozen=True, slots=True)
 class GalleryEntry:
-    """Una fila de la galería."""
+    """A row of the gallery."""
 
     character: str
     archive: str
@@ -80,7 +81,7 @@ class CharacterResult:
 
 
 def idle_id(bank: MotionBank) -> int:
-    """El id 1 si no apunta a la motion de relleno del id 0; si no, el primero distinto."""
+    """Id 1 if it does not point to the filler motion of id 0; otherwise the first different one."""
     filler = bank.table[0]
     if len(bank.table) > IDLE_ID and bank.table[IDLE_ID] != filler:
         return IDLE_ID
@@ -90,16 +91,16 @@ def idle_id(bank: MotionBank) -> int:
 def _idle_clip(
     model: KmdModel, bank_ref: EntryRef | None
 ) -> tuple[AnimationClip | None, str | None, str | None]:
-    """(clip, descripción de la motion, motivo si no hay animación)."""
+    """(clip, motion description, reason if there is no animation)."""
     if bank_ref is None:
-        return None, None, "sin banco de motions"
+        return None, None, "no motion bank"
     try:
         bank = parse_motion_bank(bank_ref.read())
         rig = find_rig(model)
         motion_id = idle_id(bank)
         clip = motion_clip(rig, bank.motion(motion_id), f"{bank_ref.stem}#{motion_id}")
     except (KmdError, OSError) as error:
-        return None, str(bank_ref), f"sin animación: {error}"
+        return None, str(bank_ref), f"no animation: {error}"
     return clip, f"{bank_ref} id {motion_id}", None
 
 
@@ -149,7 +150,7 @@ def _export(
 def build_character(
     path: Path, motions: MotionIndex, out_dir: Path, tile_size: tuple[int, int]
 ) -> CharacterResult:
-    """Exporta un personaje; nunca lanza: los fallos vuelven como entrada con motivo."""
+    """Export one character; never raises: failures come back as an entry with a reason."""
     name = character_name(path)
 
     def failed(reason: str, kmd: str | None = None) -> CharacterResult:
@@ -158,10 +159,10 @@ def build_character(
     try:
         entries = list_entries(path)
     except (AfsError, OSError) as error:
-        return failed(f"AFS ilegible: {error}")
+        return failed(f"unreadable AFS: {error}")
     kmd_ref = main_kmd(entries, name)
     if kmd_ref is None:
-        return failed("sin KMD en el AFS")
+        return failed("no KMD in the AFS")
     kmd = f"{kmd_ref.name} (#{kmd_ref.index})"
     try:
         return _export(
@@ -170,7 +171,7 @@ def build_character(
     except KNOWN_ERRORS as error:
         return failed(f"{type(error).__name__}: {error}", kmd)
     except Exception as error:
-        return failed(f"error interno {type(error).__name__}: {error}", kmd)
+        return failed(f"internal error {type(error).__name__}: {error}", kmd)
 
 
 def build_gallery(
@@ -180,7 +181,7 @@ def build_gallery(
     tile_size: tuple[int, int],
     progress: Callable[[GalleryEntry], None] | None = None,
 ) -> list[CharacterResult]:
-    """Un resultado por AFS, en orden. `out_dir` ya tiene que estar comprobada."""
+    """One result per AFS, in order. `out_dir` must already be checked."""
     out_dir.mkdir(parents=True, exist_ok=True)
     results: list[CharacterResult] = []
     for path in archives:

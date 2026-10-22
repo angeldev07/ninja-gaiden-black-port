@@ -1,24 +1,24 @@
-"""Modelos KMD de Team Ninja: parseo estricto y exportación a glTF 2.0 u OBJ (hito H3).
+"""Team Ninja KMD models: strict parsing and export to glTF 2.0 or OBJ (milestone H3).
 
-Un KMD es un chunk de Team Ninja con un XPR0 (texturas y buffers de GPU) y subchunks
-propios. Módulos, de abajo arriba:
+A KMD is a Team Ninja chunk holding an XPR0 (textures and GPU buffers) plus its own
+subchunks. Modules, bottom-up:
 
-- `objinfo`: OBJINFO, transformación local, volúmenes y grupo de cada objeto.
-- `hierarchy`: HIERARC, el árbol de objetos (padre, hijos y raíz).
-- `mesh`: descriptor de malla (USERDATA del XPR0): FVF, submallas, material y etapas.
-- `vertices`: decodificación de los VB según el FVF de D3D8.
-- `pushbuffer`: los push buffers NV2A, que solo pueden ser una tira de triángulos.
-- `topology`: de tiras a triángulos CCW.
-- `model`: el KMD entero, emparejamiento de objetos y buffers, invariantes y colocación.
-- `textures`: los PNG de `ngb_tools.xpr` que usan los materiales.
-- `motion`: bancos de motions `.mtn`/`.mot` (pistas con claves de 20 bits, Hermite).
-- `rig`: rig humanoide (FK del tronco + IK de los miembros) y clips de animación.
-- `animation`: clips TRS por nodo para el glTF.
-- `attach`: anclajes de armas de los `.itm` y modelos montados en un hueso.
-- `gltf`, `obj`: exportadores (`gltf` también GLB).
+- `objinfo`: OBJINFO, the local transform, volumes and group of each object.
+- `hierarchy`: HIERARC, the object tree (parent, children and root).
+- `mesh`: mesh descriptor (XPR0 USERDATA): FVF, submeshes, material and stages.
+- `vertices`: VB decoding according to the D3D8 FVF.
+- `pushbuffer`: the NV2A push buffers, which can only be a triangle strip.
+- `topology`: from strips to CCW triangles.
+- `model`: the whole KMD, object/buffer pairing, invariants and placement.
+- `textures`: the `ngb_tools.xpr` PNGs that materials use.
+- `motion`: `.mtn`/`.mot` motion banks (tracks with 20-bit keys, Hermite).
+- `rig`: humanoid rig (trunk FK + limb IK) and animation clips.
+- `animation`: per-node TRS clips for glTF.
+- `attach`: weapon anchors from `.itm` files and models mounted on a bone.
+- `gltf`, `obj`: exporters (`gltf` also writes GLB).
 - `cli`: `python -m ngb_tools.kmd {info,export}`.
 
-Formato verificado en `ryu.kmd` y `r_ryu.kmd`. Lo INFERRED está marcado en cada módulo.
+Format verified on `ryu.kmd` and `r_ryu.kmd`. Anything INFERRED is marked in each module.
 """
 
 from __future__ import annotations

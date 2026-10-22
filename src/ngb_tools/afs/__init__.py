@@ -1,20 +1,20 @@
-"""Lector, extractor e inventariador de contenedores AFS (CRI Middleware).
+"""Reader, extractor and inventory tool for AFS containers (CRI Middleware).
 
-Módulos, de abajo arriba:
+Modules, bottom up:
 
-- `archive`: estructuras y parseo de cabecera, TOC y atributos; lectura por streaming.
-- `invariants`: auditoría de un AFS ya parseado (alineación, solapes, campo custom).
-- `classify`: qué hay dentro de cada entrada (magias, chunks de Team Ninja, entropía).
-- `records`: forma exacta (TypedDict) de los documentos JSON del inventario.
-- `inventory`: fichas y agregados de todos los AFS de un directorio.
-- `report`: presentación en texto (listado, Markdown y JSON).
-- `extract`: extracción por streaming, siempre fuera de cualquier repo git.
+- `archive`: structures and parsing of header, TOC and attributes; streaming reads.
+- `invariants`: audit of an already-parsed AFS (alignment, overlaps, custom field).
+- `classify`: what is inside each entry (magics, Team Ninja chunks, entropy).
+- `records`: exact shape (TypedDict) of the inventory JSON documents.
+- `inventory`: cards and aggregates for all the AFS files in a directory.
+- `report`: text presentation (listing, Markdown and JSON).
+- `extract`: streaming extraction, always outside any git repo.
 - `cli`: `python -I -m ngb_tools.afs {list,extract,inventory}`.
 
-Las rutas (raíz de datos, guarda de repos y escritura atómica) vienen de
-`ngb_tools._paths`, compartido con las demás herramientas.
+The paths (data root, repo guard and atomic writes) come from `ngb_tools._paths`, shared
+with the other tools.
 
-Aquí solo se reexporta la API de lectura; el resto se importa de su módulo.
+Only the read API is re-exported here; the rest is imported from its module.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Tests de la CLI: subcomandos, salida y códigos de salida (0 ok, 1 hallazgos, 2 uso/IO)."""
+"""CLI tests: subcommands, output and exit codes (0 ok, 1 findings, 2 usage/IO)."""
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ class ListCommandTests(CliTestCase):
         self.afs_path.write_bytes(b"NOPE" + bytes(12))
         code, _, err = self.run_cli("list", str(self.afs_path))
         self.assertEqual(code, ExitCode.FINDINGS)
-        self.assertIn("magia inválida", err)
+        self.assertIn("invalid magic", err)
 
     def test_missing_file_is_an_io_error(self) -> None:
         code, _, err = self.run_cli("list", str(self.root / "missing.afs"))
@@ -85,25 +85,25 @@ class ExtractCommandTests(CliTestCase):
         code, out, _ = self.run_cli("extract", str(self.afs_path), str(out_dir), "--index", "1")
         self.assertEqual(code, ExitCode.OK)
         self.assertIn("0001_song.zlib", out)
-        self.assertIn("1 entradas ->", out)
+        self.assertIn("1 entries ->", out)
 
     def test_unknown_index_is_a_usage_error(self) -> None:
         code, _, err = self.run_cli("extract", str(self.afs_path), str(self.root), "--index", "9")
         self.assertEqual(code, ExitCode.ERROR)
-        self.assertIn("fuera de rango", err)
+        self.assertIn("out of range", err)
 
     def test_negative_index_is_a_usage_error(self) -> None:
         out_dir = self.root / "out"
         code, _, err = self.run_cli("extract", str(self.afs_path), str(out_dir), "--index", "-1")
         self.assertEqual(code, ExitCode.ERROR)
-        self.assertIn("fuera de rango", err)
+        self.assertIn("out of range", err)
         self.assertFalse(out_dir.exists())
 
     def test_output_inside_repo_is_a_usage_error(self) -> None:
         target = REPO / "build" / "nope"
         code, _, err = self.run_cli("extract", str(self.afs_path), str(target))
         self.assertEqual(code, ExitCode.ERROR)
-        self.assertIn("dentro del repo", err)
+        self.assertIn("inside repo", err)
         self.assertFalse(target.exists())
 
 
@@ -118,8 +118,8 @@ class InventoryCommandTests(CliTestCase):
         )
         self.assertEqual(code, ExitCode.OK)
         self.assertTrue(json_path.exists() and md_path.exists())
-        self.assertIn("## Histograma", md_path.read_text(encoding="utf-8"))
-        self.assertIn("2 AFS, 5 entradas", out)
+        self.assertIn("## Type histogram", md_path.read_text(encoding="utf-8"))
+        self.assertIn("2 AFS, 5 entries", out)
 
     def test_reports_are_written_durably(self) -> None:
         target = self.root / "r" / "inv.json"
@@ -132,16 +132,16 @@ class InventoryCommandTests(CliTestCase):
         self.write_misaligned()
         code, _, err = self.run_cli("inventory", str(self.root))
         self.assertEqual(code, ExitCode.FINDINGS)
-        self.assertIn("1 AFS con incidencias", err)
+        self.assertIn("1 AFS with issues", err)
 
     def test_report_inside_repo_outside_build_is_refused(self) -> None:
         target = REPO / "_afs_test_nope" / "inv.txt"
-        self.addCleanup(shutil.rmtree, target.parent, ignore_errors=True)  # si la guarda fallara
+        self.addCleanup(shutil.rmtree, target.parent, ignore_errors=True)  # if the guard failed
         for flag in ("--json", "--md"):
             with self.subTest(flag=flag):
                 code, _, err = self.run_cli("inventory", str(self.root), flag, str(target))
                 self.assertEqual(code, ExitCode.ERROR)
-                self.assertIn("dentro del repo", err)
+                self.assertIn("inside repo", err)
                 self.assertFalse(target.parent.exists())
 
     def test_report_in_another_repos_build_is_refused(self) -> None:
@@ -179,7 +179,7 @@ class ModuleEntryPointTests(CliTestCase):
             check=False,
         )
         self.assertEqual(result.returncode, ExitCode.OK, result.stderr)
-        self.assertIn("3 entradas", result.stdout)
+        self.assertIn("3 entries", result.stdout)
 
 
 if __name__ == "__main__":

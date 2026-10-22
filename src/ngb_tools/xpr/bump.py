@@ -1,34 +1,34 @@
-"""Texturas de relieve con signo, V8U8 y L6V5U5 (normal maps y mapas DuDv), a RGBA8.
+"""Signed bump textures, V8U8 and L6V5U5 (normal maps and DuDv maps), to RGBA8.
 
-En la NV2A no hay formatos "con signo": V8U8 es el color `SZ_G8B8` (0x28) y L6V5U5 es
-`SZ_R6G5B5` (0x27). Lo que los hace con signo es el estado de la etapa de textura, que el
-XPR0 no guarda; el D3D de Xbox les da el nombre de relieve (`X_D3DFMT_V8U8` = 0x28 con alias
-G8B8, `X_D3DFMT_L6V5U5` = 0x27 con alias R6G5B5) y así se exportan. En el juego hay 326 V8U8
-(KMD de escenario: agua y superficies con relieve) y 32 L6V5U5 (`kotei.kmd`...), todas
-swizzled. Disposición de la palabra little endian de 16 bits:
+The NV2A has no "signed" formats: V8U8 is the color `SZ_G8B8` (0x28) and L6V5U5 is
+`SZ_R6G5B5` (0x27). What makes them signed is the texture-stage state, which the
+XPR0 does not store; Xbox D3D gives them the bump name (`X_D3DFMT_V8U8` = 0x28 aliased to
+G8B8, `X_D3DFMT_L6V5U5` = 0x27 aliased to R6G5B5) and they are exported that way. The game
+has 326 V8U8 (scenery KMDs: water and bumpy surfaces) and 32 L6V5U5 (`kotei.kmd`...), all
+swizzled. Layout of the 16-bit little-endian word:
 
-    V8U8     bits 0-7  U (con signo, complemento a 2)   bits 8-15 V (con signo)
-    L6V5U5   bits 0-4  U (con signo)   bits 5-9 V (con signo)   bits 10-15 L (sin signo)
+    V8U8     bits 0-7  U (signed, two's complement)   bits 8-15 V (signed)
+    L6V5U5   bits 0-4  U (signed)   bits 5-9 V (signed)   bits 10-15 L (unsigned)
 
-Evidencia: Cxbx-Reloaded (`XbConvert.cpp`) describe L6V5U5 como "byte[0]=vvvUuuuu,
-byte[1]=LlllllVv (U and V, but not L, are stored in two's complement)" y lee V8U8 (G8B8)
-con B = byte 0 y G = byte 1. xemu (`pgraph/texture.c`, `pgraph_convert_texture_data`)
-convierte `SZ_R6G5B5` invirtiendo el bit de signo de los campos de 5 bits
-(`rgb655 ^= (1 << 9) | (1 << 4)`) y deja los bits 10-15 sin signo.
+Evidence: Cxbx-Reloaded (`XbConvert.cpp`) describes L6V5U5 as "byte[0]=vvvUuuuu,
+byte[1]=LlllllVv (U and V, but not L, are stored in two's complement)" and reads V8U8 (G8B8)
+with B = byte 0 and G = byte 1. xemu (`pgraph/texture.c`, `pgraph_convert_texture_data`)
+converts `SZ_R6G5B5` by flipping the sign bit of the 5-bit fields
+(`rgb655 ^= (1 << 9) | (1 << 4)`) and leaves bits 10-15 unsigned.
 
-**Mapeo a PNG** (con u, v en [-1, 1): u = U/128 en 8 bits y U/16 en 5 bits):
+**Mapping to PNG** (with u, v in [-1, 1): u = U/128 for 8 bits and U/16 for 5 bits):
 
-- R = U en binario desplazado: `U + 128` en 8 bits (el byte con el bit 7 invertido) y, en
-  5 bits, `U + 16` ampliado a 8 replicando bits (como `__L6V5U5ToARGBRow_C` de Cxbx). Es
-  `(u * 0.5 + 0.5) * 255` salvo redondeo: -128 -> 0, 0 -> 128, 127 -> 255; -16 -> 0, 0 -> 132,
+- R = U in offset binary: `U + 128` for 8 bits (the byte with bit 7 flipped) and, for
+  5 bits, `U + 16` widened to 8 by replicating bits (like Cxbx's `__L6V5U5ToARGBRow_C`). It is
+  `(u * 0.5 + 0.5) * 255` up to rounding: -128 -> 0, 0 -> 128, 127 -> 255; -16 -> 0, 0 -> 132,
   15 -> 255.
-- G = lo mismo con V.
-- B = z de la normal reconstruida, `z = sqrt(max(0, 1 - u² - v²))`, como `(z + 1) * 127.5`
-  redondeado hacia arriba en el .5: plano (u = v = 0) -> 255; u o v en el extremo -> 128.
-- A = 255 en V8U8; en L6V5U5, L ampliada de 6 a 8 bits replicando bits (es luminancia, no
-  transparencia: el manifiesto lo marca).
+- G = the same with V.
+- B = z of the reconstructed normal, `z = sqrt(max(0, 1 - u² - v²))`, as `(z + 1) * 127.5`
+  rounded up at .5: flat (u = v = 0) -> 255; u or v at the extreme -> 128.
+- A = 255 in V8U8; in L6V5U5, L widened from 6 to 8 bits by replicating bits (it is luminance,
+  not transparency: the manifest flags it).
 
-El resultado tiene el aspecto de un normal map: azul violeta donde la superficie es plana.
+The result looks like a normal map: violet-blue where the surface is flat.
 """
 
 from __future__ import annotations
@@ -47,17 +47,17 @@ _OPAQUE: Final = 255
 
 
 def signed(value: int, bits: int) -> int:
-    """El campo de `bits` bits leído en complemento a 2."""
+    """The `bits`-bit field read as two's complement."""
     return value - (1 << bits) if value >> (bits - 1) else value
 
 
 def offset_binary(value: int, bits: int) -> int:
-    """Un valor con signo de `bits` bits pasado a 0-255: binario desplazado y ampliado."""
+    """A signed `bits`-bit value mapped to 0-255: offset binary, widened."""
     return expand_bits(value + (1 << (bits - 1)), bits)
 
 
 def normal_z(u: float, v: float) -> int:
-    """Componente z de la normal (u, v, z) codificada en 128-255."""
+    """z component of the normal (u, v, z), encoded in 128-255."""
     z = math.sqrt(max(0.0, 1.0 - u * u - v * v))
     return min(255, math.floor((z + 1.0) * 127.5 + 0.5))
 
@@ -75,7 +75,7 @@ def l6v5u5_texel(word: int) -> bytes:
 
 @cache
 def _table(codec: Codec) -> tuple[bytes, ...]:
-    """Texel RGBA de cada una de las 65 536 palabras (se calcula una vez por formato)."""
+    """RGBA texel for each of the 65,536 words (computed once per format)."""
     texel = v8u8_texel if codec is Codec.V8U8 else l6v5u5_texel
     return tuple(texel(word) for word in range(_WORDS))
 
@@ -83,14 +83,14 @@ def _table(codec: Codec) -> tuple[bytes, ...]:
 def decode_bump(
     data: bytes, width: int, height: int, fmt: TextureFormat, *, pitch: int | None = None
 ) -> bytes:
-    """Imagen V8U8 o L6V5U5 en orden lineal a RGBA8; `pitch` son los bytes por fila."""
+    """V8U8 or L6V5U5 image in linear order to RGBA8; `pitch` is the bytes per row."""
     if fmt.codec not in (Codec.V8U8, Codec.L6V5U5):
-        raise ValueError(f"{fmt.name} no es un formato de relieve con signo")
+        raise ValueError(f"{fmt.name} is not a signed bump format")
     row_bytes = width * WORD_BYTES
     stride = row_bytes if pitch is None else pitch
     needed = stride * (height - 1) + row_bytes if height else 0
     if stride < row_bytes or len(data) < needed:
-        raise ValueError(f"{len(data)} bytes; {fmt.name} {width}x{height} necesita {needed}")
+        raise ValueError(f"{len(data)} bytes; {fmt.name} {width}x{height} needs {needed}")
     table = _table(fmt.codec)
     row = struct.Struct(f"<{width}H")
     return b"".join(

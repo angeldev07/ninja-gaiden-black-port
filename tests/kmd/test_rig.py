@@ -1,4 +1,4 @@
-"""Tests del rig humanoide: esqueleto deducido, FK, IK con polo y clips (esperados a mano)."""
+"""Tests of the humanoid rig: deduced skeleton, FK, IK with pole and clips (hand-computed)."""
 
 from __future__ import annotations
 
@@ -55,11 +55,11 @@ class PoseTests(unittest.TestCase):
         close(self, self.world[0][1], (0.0, 0.9, 0.0))
 
     def test_leg_ik_reaches_the_target_with_the_knee_forward(self) -> None:
-        # cadera (-0,1, 0,85, 0); rodilla = cadera + (0, -0,24, 0,32); tobillo = objetivo
+        # hip (-0.1, 0.85, 0); knee = hip + (0, -0.24, 0.32); ankle = target
         close(self, self.world[9][1], (-0.1, 0.85, 0.0))
         close(self, self.world[10][1], (-0.1, 0.61, 0.32))
         close(self, self.world[11][1], (-0.1, 0.37, 0.0))
-        close(self, self.world[13][1], (0.1, 0.61, 0.32))  # el lado +x con H = -90°
+        close(self, self.world[13][1], (0.1, 0.61, 0.32))  # the +x side with H = -90°
 
     def test_bone_lengths_are_kept(self) -> None:
         for upper, lower, end in ((9, 10, 11), (12, 13, 14)):
@@ -67,26 +67,26 @@ class PoseTests(unittest.TestCase):
             self.assertAlmostEqual(distance(self.world[lower][1], self.world[end][1]), 0.4, 6)
 
     def test_upper_bone_rotation_points_along_the_thigh(self) -> None:
-        # dirección de bind (0, -1, 0) -> (rodilla - cadera) / 0,4 = (0, -0,6, 0,8)
+        # bind direction (0, -1, 0) -> (knee - hip) / 0.4 = (0, -0.6, 0.8)
         close(self, mat_vec(self.world[9][0], (0.0, -1.0, 0.0)), (0.0, -0.6, 0.8))
 
     def test_straight_arms_reach_the_t_pose_wrist(self) -> None:
-        # hombro (-0,2, 1,35, 0); el objetivo está justo a 0,5 = 0,25 + 0,25
+        # shoulder (-0.2, 1.35, 0); the target is exactly 0.5 = 0.25 + 0.25 away
         close(self, self.world[4][1], (-0.45, 1.35, 0.0))
         close(self, self.world[5][1], (-0.7, 1.35, 0.0))
 
     def test_chest_rotation_is_local_euler(self) -> None:
         values = standing_values()
-        values[6] = 15708  # pecho: X = 90°
+        values[6] = 15708  # chest: X = 90°
         world = pose(self.rig, values)
         local = local_rotations(self.rig, world)
         close(self, local[1], (math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5)))
-        # cabeza: pecho (0, 1,1, 0) + Rx(90°)·(0, 0,3, 0) = (0, 1,1, 0,3)
+        # head: chest (0, 1.1, 0) + Rx(90°)·(0, 0.3, 0) = (0, 1.1, 0.3)
         close(self, world[2][1], (0.0, 1.1, 0.3))
 
     def test_effector_euler_is_absolute(self) -> None:
         values = standing_values()
-        values[40] = 31416  # pie +x: Y = 180°
+        values[40] = 31416  # +x foot: Y = 180°
         rotation = pose(self.rig, values)[14][0]
         for row, want in zip(
             rotation, ((-1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, -1.0)), strict=True
@@ -112,7 +112,7 @@ class ClipTests(unittest.TestCase):
         bank = parse_motion_bank(build_bank([standing_motion(frames=2)], [0]))
         clip = motion_clip(rig, bank.motion(0), "m#0")
         self.assertEqual(clip.times, (0.0, 1 / 60, 2 / 60))
-        self.assertEqual(len(clip.channels), 16)  # traslación de la raíz + 15 rotaciones
+        self.assertEqual(len(clip.channels), 16)  # root translation + 15 rotations
         root = clip.channels[0]
         self.assertEqual((root.obj, root.path), (0, "translation"))
         for value in root.values:
@@ -126,7 +126,7 @@ class ClipTests(unittest.TestCase):
         rig = find_rig(parse_kmd(build_kmd(humanoid())))
         bank = parse_motion_bank(build_bank([standing_motion()[:40]], [0]))
         with self.assertRaises(RigError):
-            motion_clip(rig, bank.motion(0), "corta")
+            motion_clip(rig, bank.motion(0), "short")
 
 
 if __name__ == "__main__":

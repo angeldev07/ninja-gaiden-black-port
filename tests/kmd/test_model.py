@@ -1,4 +1,4 @@
-"""Tests del KMD completo: emparejamiento, jerarquía, push buffers e invariantes."""
+"""Tests of the whole KMD: pairing, hierarchy, push buffers and invariants."""
 
 from __future__ import annotations
 
@@ -82,25 +82,25 @@ class InvariantTests(unittest.TestCase):
         objects = parent_and_child()
         objects[1].strip = (0, 1, 2, 9)
         model = parse_kmd(build_kmd(objects))
-        self.assertTrue(any("índice 9" in str(i) for i in model.issues))
+        self.assertTrue(any("index 9" in str(i) for i in model.issues))
         self.assertFalse(model.exportable(1, 0))
         self.assertTrue(model.exportable(0, 0))
 
     def test_rotation_is_reported_and_ignored(self) -> None:
         objects = parent_and_child()
         objects[1].rotation = (0.1, 0.0, 0.0)
-        self.assertTrue(any("rotación" in m for m in messages(build_kmd(objects))))
+        self.assertTrue(any("rotation" in m for m in messages(build_kmd(objects))))
 
     def test_missing_texture_is_an_issue(self) -> None:
         objects = parent_and_child()
         objects[0].texture = 4
-        self.assertTrue(any("textura 4" in m for m in messages(build_kmd(objects))))
+        self.assertTrue(any("texture 4" in m for m in messages(build_kmd(objects))))
 
     def test_stride_that_does_not_match_the_fvf_is_an_issue(self) -> None:
         objects = parent_and_child()
         objects[1].stride_override = 40
         model = parse_kmd(build_kmd(objects))
-        self.assertTrue(any("mide 32 bytes" in str(i) for i in model.issues))
+        self.assertTrue(any("is 32 bytes" in str(i) for i in model.issues))
         self.assertIsNone(model.objects[1].layout)
 
     def test_unsupported_fvf_is_an_issue(self) -> None:
@@ -114,16 +114,16 @@ class InvariantTests(unittest.TestCase):
         data = bytearray(build_kmd(objects))
         tree = hierarc(objects, root=0)
         start = data.index(tree)
-        # El nodo 1 dice que su padre es él mismo... no: que no tiene padre.
+        # Node 1 now says it has no parent.
         entry = start + struct.unpack_from("<I", tree, 0x30 + 4)[0]
         struct.pack_into("<H", data, entry + 2, 0xFFFF)
-        self.assertTrue(any("HIERARC: padre None" in m for m in messages(bytes(data))))
+        self.assertTrue(any("HIERARC: parent None" in m for m in messages(bytes(data))))
 
     def test_missing_hierarchy_is_an_issue_and_every_object_is_a_root(self) -> None:
         model = parse_kmd(build_kmd(parent_and_child(), hierarchy=False))
         self.assertIsNone(model.hierarchy)
         self.assertIsNone(model.parent(1))
-        self.assertTrue(any("sin HIERARC" in str(i) for i in model.issues))
+        self.assertTrue(any("no HIERARC" in str(i) for i in model.issues))
 
 
 class FormatErrorTests(unittest.TestCase):

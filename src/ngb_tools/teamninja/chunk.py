@@ -1,22 +1,22 @@
-"""Cabecera de chunk de Team Ninja y búsqueda del slot XPR0 de un KMD.
+"""Team Ninja chunk header and search for the XPR0 slot of a KMD.
 
-Muchos archivos de los AFS (KMD, itm_dat2, chr_dat...) empiezan con la misma cabecera de
-0x20 bytes, todos los campos en u32 little endian (verificado en `ryu.kmd`):
+Many AFS files (KMD, itm_dat2, chr_dat...) start with the same 0x20-byte header, all
+fields little-endian u32 (verified in `ryu.kmd`):
 
-    0x00  tag[12]    nombre ASCII rellenado con NUL ("KMD", "OBJINFO"...)
-    0x0C  size       en ryu.kmd, bytes del chunk; en r_ryu.kmd no cubre los dos últimos
-                     slots, así que su significado está sin confirmar y no se usa de límite
-    0x10  n_slots    entradas de la tabla de offsets
-    0x14  n_used     entradas no vacías
-    0x18  table_pos  posición de la tabla, relativa al chunk
-    0x1C  0x20       tamaño de esta cabecera
+    0x00  tag[12]    NUL-padded ASCII name ("KMD", "OBJINFO"...)
+    0x0C  size       in ryu.kmd, bytes of the chunk; in r_ryu.kmd it does not cover the last
+                     two slots, so its meaning is unconfirmed and it is not used as a bound
+    0x10  n_slots    entries of the offset table
+    0x14  n_used     non-empty entries
+    0x18  table_pos  position of the table, relative to the chunk
+    0x1C  0x20       size of this header
 
-En `table_pos` hay `u32 off[n_slots]` relativos al inicio del chunk; 0 marca un slot vacío.
-Un slot no declara su tamaño: se extiende hasta el siguiente offset ocupado y el último,
-hasta el final de los datos (que pueden traer el relleno de sector del AFS).
+At `table_pos` there are `u32 off[n_slots]` relative to the start of the chunk; 0 marks an
+empty slot. A slot does not declare its size: it extends up to the next occupied offset and
+the last one up to the end of the data (which may carry the AFS sector padding).
 
-En `ryu.kmd` la tabla está en 0x80 y el slot 1 es un XPR0 (texturas y buffers de la GPU) en
-0x3000. El resto del KMD (huesos, materiales, mallas) queda para el hito H3.
+In `ryu.kmd` the table is at 0x80 and slot 1 is an XPR0 (GPU textures and buffers) at
+0x3000. The rest of the KMD (bones, materials, meshes) is left for milestone H3.
 """
 
 from __future__ import annotations
@@ -28,29 +28,29 @@ from typing import Final
 HEADER_SIZE: Final = 0x20
 TAG_SIZE: Final = 12
 XPR0_MAGIC: Final = b"XPR0"
-# Tope de entradas de la tabla. Un KMD tiene 10 (ryu.kmd, r_ryu.kmd); 4096 deja
-# margen para otros chunks y evita que un `n_slots` hostil haga desempaquetar
-# millones de enteros antes de descubrir que la tabla no cabe.
+# Cap on table entries. A KMD has 10 (ryu.kmd, r_ryu.kmd); 4096 leaves
+# room for other chunks and stops a hostile `n_slots` from making us unpack
+# millions of integers before discovering that the table does not fit.
 MAX_SLOTS: Final = 4096
 
 _HEADER: Final = struct.Struct("<12s5I")
 
 
 class TeamNinjaError(Exception):
-    """Raíz de los errores de `ngb_tools.teamninja`."""
+    """Root of the `ngb_tools.teamninja` errors."""
 
 
 class ChunkFormatError(TeamNinjaError):
-    """Los bytes no forman un chunk de Team Ninja coherente."""
+    """The bytes do not form a coherent Team Ninja chunk."""
 
 
 class SlotNotFoundError(TeamNinjaError):
-    """El chunk no tiene el slot pedido, o lo tiene más de una vez."""
+    """The chunk does not have the requested slot, or has it more than once."""
 
 
 @dataclass(frozen=True, slots=True)
 class ChunkSlot:
-    """Un slot ocupado: índice en la tabla y extensión `[offset, end)` dentro del chunk."""
+    """An occupied slot: index in the table and extent `[offset, end)` within the chunk."""
 
     index: int
     offset: int
@@ -63,7 +63,7 @@ class ChunkSlot:
 
 @dataclass(frozen=True, slots=True)
 class TeamNinjaChunk:
-    """Cabecera ya validada y slots ocupados, en el orden de la tabla."""
+    """Validated header and occupied slots, in table order."""
 
     tag: str
     size: int
@@ -76,32 +76,32 @@ class TeamNinjaChunk:
 def _decode_tag(raw: bytes) -> str:
     tag = raw.rstrip(b"\0")
     if not tag or not all(0x20 <= byte <= 0x7E for byte in tag):
-        raise ChunkFormatError(f"tag no imprimible: {raw!r}")
+        raise ChunkFormatError(f"non-printable tag: {raw!r}")
     return tag.decode("ascii")
 
 
 def _read_offsets(data: bytes, table_pos: int, n_slots: int) -> list[int]:
     if n_slots > MAX_SLOTS:
-        raise ChunkFormatError(f"n_slots = {n_slots} supera el tope de {MAX_SLOTS}")
+        raise ChunkFormatError(f"n_slots = {n_slots} exceeds the cap of {MAX_SLOTS}")
     limit = len(data)
     table_end = table_pos + 4 * n_slots
     if table_pos < HEADER_SIZE or table_end > limit:
         raise ChunkFormatError(
-            f"tabla de slots [{table_pos:#x}, {table_end:#x}) fuera de los {limit:#x} bytes"
+            f"slot table [{table_pos:#x}, {table_end:#x}) outside the {limit:#x} bytes"
         )
     offsets = list(struct.unpack_from(f"<{n_slots}I", data, table_pos))
     for index, offset in enumerate(offsets):
         if offset and not table_end <= offset < limit:
             raise ChunkFormatError(
-                f"slot {index}: offset {offset:#x} fuera de [{table_end:#x}, {limit:#x})"
+                f"slot {index}: offset {offset:#x} outside [{table_end:#x}, {limit:#x})"
             )
     return offsets
 
 
 def _slots_from_offsets(offsets: list[int], limit: int) -> tuple[ChunkSlot, ...]:
-    """Cada slot ocupado llega hasta el siguiente offset mayor; el último, hasta `limit`."""
+    """Each occupied slot extends to the next larger offset; the last one, to `limit`."""
     used = sorted({offset for offset in offsets if offset})
-    if not used:  # chunk sin slots ocupados (HITMDL de un escenario sin colisión)
+    if not used:  # chunk with no occupied slots (HITMDL of a scenery without collision)
         return ()
     ends = dict(zip(used, [*used[1:], limit], strict=True))
     return tuple(
@@ -110,24 +110,24 @@ def _slots_from_offsets(offsets: list[int], limit: int) -> tuple[ChunkSlot, ...]
 
 
 def parse_chunk(data: bytes) -> TeamNinjaChunk:
-    """Parsea y valida la cabecera de chunk que empieza en `data[0]`."""
+    """Parse and validate the chunk header that starts at `data[0]`."""
     if len(data) < HEADER_SIZE:
-        raise ChunkFormatError(f"{len(data)} bytes: no cabe la cabecera de {HEADER_SIZE:#x}")
+        raise ChunkFormatError(f"{len(data)} bytes: the {HEADER_SIZE:#x}-byte header does not fit")
     raw_tag, size, n_slots, n_used, table_pos, header_size = _HEADER.unpack_from(data)
     tag = _decode_tag(raw_tag)
     if header_size != HEADER_SIZE:
-        raise ChunkFormatError(f"campo 0x1C = {header_size:#x}, se esperaba {HEADER_SIZE:#x}")
+        raise ChunkFormatError(f"field 0x1C = {header_size:#x}, expected {HEADER_SIZE:#x}")
     offsets = _read_offsets(data, table_pos, n_slots)
     if (found := sum(1 for offset in offsets if offset)) != n_used:
-        raise ChunkFormatError(f"n_used = {n_used} pero la tabla tiene {found} slots ocupados")
+        raise ChunkFormatError(f"n_used = {n_used} but the table has {found} occupied slots")
     if len(set(filter(None, offsets))) != n_used:
-        raise ChunkFormatError("dos slots comparten offset")
+        raise ChunkFormatError("two slots share an offset")
     slots = _slots_from_offsets(offsets, len(data))
     return TeamNinjaChunk(tag, size, n_slots, n_used, table_pos, slots)
 
 
 def find_xpr0_slot(data: bytes, chunk: TeamNinjaChunk | None = None) -> ChunkSlot:
-    """El único slot del chunk cuya carga útil empieza por la magia `XPR0`."""
+    """The only slot of the chunk whose payload starts with the `XPR0` magic."""
     parsed = parse_chunk(data) if chunk is None else chunk
     matches = [
         slot
@@ -135,8 +135,8 @@ def find_xpr0_slot(data: bytes, chunk: TeamNinjaChunk | None = None) -> ChunkSlo
         if data[slot.offset : slot.offset + len(XPR0_MAGIC)] == XPR0_MAGIC
     ]
     if not matches:
-        raise SlotNotFoundError(f"el chunk '{parsed.tag}' no tiene ningún slot XPR0")
+        raise SlotNotFoundError(f"chunk '{parsed.tag}' has no XPR0 slot")
     if len(matches) > 1:
         indices = ", ".join(str(slot.index) for slot in matches)
-        raise SlotNotFoundError(f"XPR0 ambiguo: {len(matches)} slots ({indices})")
+        raise SlotNotFoundError(f"ambiguous XPR0: {len(matches)} slots ({indices})")
     return matches[0]

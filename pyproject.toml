@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ngb-tools"
 version = "0.1.0"
-description = "Herramientas de ingeniería inversa del port pedagógico de Ninja Gaiden Black (Xbox)."
+description = "Reverse-engineering tools for the native PC port of Ninja Gaiden Black (Xbox)."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = []
@@ -37,21 +37,21 @@ src = ["src", "tests"]
 select = [
     "E", "W",   # pycodestyle
     "F",        # pyflakes
-    "I",        # orden de imports
-    "N",        # nombres PEP 8
-    "UP",       # sintaxis moderna
+    "I",        # import ordering
+    "N",        # PEP 8 naming
+    "UP",       # modern syntax
     "B",        # bugbear
-    "SIM",      # simplificaciones
+    "SIM",      # simplifications
     "C4",       # comprehensions
-    "PTH",      # pathlib en vez de os.path
+    "PTH",      # pathlib instead of os.path
     "RET",      # returns coherentes
-    "PL",       # pylint (subconjunto de ruff)
-    "RUF",      # reglas propias de ruff
+    "PL",       # pylint (ruff subset)
+    "RUF",      # ruff-specific rules
 ]
 ignore = [
-    "PLR2004",  # números mágicos: en formatos binarios los offsets son el dato
-    "PLR0913",  # funciones de parseo con muchos campos
-    "RUF001", "RUF002", "RUF003",  # comentarios en español con caracteres no ASCII
+    "PLR2004",  # magic numbers: in binary formats the offsets are the data
+    "PLR0913",  # parsing functions with many fields
+    "RUF001", "RUF002", "RUF003",  # non-ASCII characters in comments and strings
 ]
 
 [tool.ruff.lint.per-file-ignores]

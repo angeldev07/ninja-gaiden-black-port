@@ -1,8 +1,8 @@
-"""Informe JSON del análisis, con su esquema declarado como TypedDict.
+"""JSON report of the analysis, with its schema declared as TypedDicts.
 
-Convención: las direcciones, punteros, máscaras de flags y valores ofuscados
-van como cadenas `0x........` (así se buscan tal cual en un desensamblador);
-los tamaños, contadores y versiones van como enteros.
+Convention: addresses, pointers, flag masks and obfuscated values
+are `0x........` strings (so they can be searched as-is in a disassembler);
+sizes, counters and versions are integers.
 """
 
 from __future__ import annotations
@@ -425,7 +425,7 @@ def _optional_library(library: LibraryVersion | None) -> LibraryJson | None:
 
 
 def build_report(analysis: XbeAnalysis) -> XbeReport:
-    """El análisis completo como estructura JSON (sin serializar)."""
+    """The full analysis as a JSON structure (not serialized)."""
     image = analysis.image
     kernel = analysis.kernel
     report: XbeReport = {
@@ -451,5 +451,5 @@ def build_report(analysis: XbeAnalysis) -> XbeReport:
 
 
 def render_json(analysis: XbeAnalysis) -> str:
-    """Informe JSON serializado: UTF-8 legible (sin escapes ASCII) y salto final."""
+    """Serialized JSON report: readable UTF-8 (no ASCII escapes) and a trailing newline."""
     return json.dumps(build_report(analysis), indent=2, ensure_ascii=False) + "\n"

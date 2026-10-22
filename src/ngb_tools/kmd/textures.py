@@ -1,10 +1,11 @@
-"""Los PNG de las texturas del modelo: los del hito H2 si cuadran y, si no, se exportan.
+"""The PNGs of the model textures: the ones from milestone H2 if they match, else exported.
 
-`python -m ngb_tools.xpr export --kmd` deja un PNG por textura y un `_manifest.json` en
-`$NGB_DATA/extracted/textures/<archivo sin extensión>`. Ese manifiesto solo se reutiliza
-si describe este mismo XPR0: mismo número de texturas, mismo índice de recurso y mismo
-sha256 de los bytes de cada una. Si falta o no cuadra, se vuelve a exportar con
-`ngb_tools.xpr.export` (que también garantiza que la salida queda fuera de los repos).
+`python -m ngb_tools.xpr export --kmd` leaves one PNG per texture and a `_manifest.json` in
+`$NGB_DATA/extracted/textures/<file name without extension>`. That manifest is only reused
+if it describes this same XPR0: same number of textures, same resource index and same
+sha256 of the bytes of each one. If it is missing or does not match, the textures are
+exported again with `ngb_tools.xpr.export` (which also guarantees the output stays outside
+the repos).
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from ngb_tools.xpr.texture import texture_layout
 
 
 def default_texture_dir(kmd_path: Path, environ: Mapping[str, str] | None = None) -> Path:
-    """La carpeta donde `ngb_tools.xpr export` deja las texturas de este KMD."""
+    """The folder where `ngb_tools.xpr export` leaves this KMD's textures."""
     return default_output_dir(kmd_path, environ)
 
 
@@ -37,7 +38,7 @@ def _texture_digest(model: KmdModel, ordinal: int) -> str | None:
 
 
 def _record_matches(model: KmdModel, ordinal: int, record: Any, directory: Path) -> bool:
-    """El registro es de esta textura y, si se exportó, su PNG existe y el sha256 cuadra."""
+    """The record belongs to this texture and, if exported, its PNG exists and sha256 matches."""
     if not isinstance(record, dict) or record.get("index") != ordinal:
         return False
     if record.get("resource_index") != model.textures[ordinal].index:
@@ -54,7 +55,7 @@ def _record_matches(model: KmdModel, ordinal: int, record: Any, directory: Path)
 
 
 def _manifest_files(model: KmdModel, manifest: Any, directory: Path) -> dict[int, Path] | None:
-    """PNG por número de textura si el manifiesto describe este XPR0; si no, None."""
+    """PNG per texture number if the manifest describes this XPR0; otherwise None."""
     records = manifest.get("textures") if isinstance(manifest, dict) else None
     if not isinstance(records, list) or len(records) != len(model.textures):
         return None
@@ -73,7 +74,7 @@ def _read_manifest(directory: Path) -> Any:
 def resolve_texture_files(
     model: KmdModel, kmd_path: Path, directory: Path
 ) -> tuple[dict[int, Path], bool]:
-    """PNG de cada textura exportable y si hubo que exportarlas ahora."""
+    """PNG of each exportable texture, and whether they had to be exported just now."""
     files = _manifest_files(model, _read_manifest(directory), directory)
     if files is not None:
         return files, False
@@ -81,5 +82,5 @@ def resolve_texture_files(
     export_textures(source, directory)
     files = _manifest_files(model, _read_manifest(directory), directory)
     if files is None:
-        raise XprError(f"el manifiesto recién exportado en {directory} no cuadra con el KMD")
+        raise XprError(f"the manifest just exported to {directory} does not match the KMD")
     return files, True

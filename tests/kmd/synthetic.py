@@ -1,11 +1,11 @@
-"""Constructor de KMD sintéticos: nunca se usan datos del juego en los tests.
+"""Builder of synthetic KMDs: game data is never used in the tests.
 
-Reproduce la disposición observada en `ryu.kmd`:
+It reproduces the layout observed in `ryu.kmd`:
 
-- un chunk KMD con OBJINFO, XPR0 y HIERARC (este último opcional);
-- en el XPR0, el USERDATA de cabecera, un descriptor por objeto, las texturas (DXT1 de 4x4
-  de un color) y, por objeto, su VB seguido de su IB (o de su push buffer si la tira va
-  ahí).
+- a KMD chunk with OBJINFO, XPR0 and HIERARC (the latter optional);
+- in the XPR0, the header USERDATA, one descriptor per object, the textures (single-color
+  4x4 DXT1) and, per object, its VB followed by its IB (or by its push buffer if the strip
+  goes there).
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ QUAD_STRIP = (0, 1, 2, 3)
 
 @dataclass
 class SynthObject:
-    """Un objeto con una sola submalla; por defecto un quad en z=0 con normales +Z."""
+    """An object with a single submesh; by default a quad at z=0 with +Z normals."""
 
     positions: Sequence[Vec3] = QUAD_POSITIONS
     uvs: Sequence[Vec2] = QUAD_UVS
@@ -112,7 +112,7 @@ def descriptor(obj: SynthObject) -> bytes:
 
 
 def push_buffer_bytes(indices: Sequence[int]) -> bytes:
-    """BEGIN(strip), ARRAY_ELEMENT16 por parejas, ARRAY_ELEMENT32 si sobra uno, END, relleno."""
+    """BEGIN(strip), ARRAY_ELEMENT16 in pairs, ARRAY_ELEMENT32 if one is left, END, padding."""
     words = [0x000417FC, 6]
     pairs = [indices[i] | (indices[i + 1] << 16) for i in range(0, len(indices) - 1, 2)]
     if pairs:
@@ -177,7 +177,7 @@ def build_kmd(
     textures: int = 1,
     hierarchy: bool = True,
 ) -> bytes:
-    """KMD con un objeto por elemento de `objects`; `children` define HIERARC."""
+    """KMD with one object per element of `objects`; `children` defines HIERARC."""
     objinfo = build_chunk(b"OBJINFO", [objinfo_entry(o) for o in objects])
     slots: list[bytes | None] = [objinfo, build_xpr0(objects, textures)]
     slots.append(hierarc(objects, root) if hierarchy else None)
@@ -185,7 +185,7 @@ def build_kmd(
 
 
 def parent_and_child() -> list[SynthObject]:
-    """El caso base: padre en (0, 1, 0) y su hijo desplazado (2, 0, 0) respecto a él."""
+    """The base case: parent at (0, 1, 0) and its child offset by (2, 0, 0) from it."""
     return [
         SynthObject(translation=(0.0, 1.0, 0.0), children=(1,)),
         SynthObject(translation=(2.0, 0.0, 0.0)),

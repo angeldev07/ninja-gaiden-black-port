@@ -1,4 +1,4 @@
-"""CLI de audio sobre un AFS sintético: subcomandos, manifiesto y códigos de salida."""
+"""Audio CLI over a synthetic AFS: subcommands, manifest and exit codes."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ ZERO = bytes(4)
 
 
 def sample_adx() -> bytes:
-    # 64 muestras mono: escala 3 → 4, primer nibble 2 → 8; luego silencio.
+    # 64 mono samples: scale 3 -> 4, first nibble 2 -> 8; then silence.
     return adx_header(total=64, loop=(0, 64)) + adx_frame(3, [2]) + adx_frame(0, [])
 
 
@@ -102,7 +102,7 @@ class AdxCommandTests(AudioCliTestCase):
     def test_unknown_index_is_a_usage_error(self) -> None:
         code, _, err = self.run_cli("adx", str(self.afs), "--index", "9", "--out", str(self.root))
         self.assertEqual(code, ExitCode.ERROR)
-        self.assertIn("fuera de rango", err)
+        self.assertIn("out of range", err)
 
     def test_non_adx_entry_by_index_is_a_finding(self) -> None:
         out_dir = self.root / "txt"
@@ -114,7 +114,7 @@ class AdxCommandTests(AudioCliTestCase):
         target = REPO / "build" / "audio_nope"
         code, _, err = self.run_cli("adx", str(self.afs), "--out", str(target))
         self.assertEqual(code, ExitCode.ERROR)
-        self.assertIn("dentro del repo", err)
+        self.assertIn("inside repo", err)
         self.assertFalse(target.exists())
 
     def test_missing_file_is_an_io_error(self) -> None:

@@ -1,4 +1,4 @@
-"""Punto de entrada de `python -m ngb_tools.gallery`."""
+"""Entry point of `python -m ngb_tools.gallery`."""
 
 from __future__ import annotations
 

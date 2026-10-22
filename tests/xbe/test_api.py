@@ -1,4 +1,4 @@
-"""API pública del paquete: el flujo típico solo necesita `ngb_tools.xbe`."""
+"""Public API of the package: the typical flow only needs `ngb_tools.xbe`."""
 
 from __future__ import annotations
 

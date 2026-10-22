@@ -1,10 +1,10 @@
-"""Rasterizador mínimo con z-buffer: el KMD de frente, en pose de bind, con sus texturas.
+"""Minimal z-buffer rasterizer: the KMD from the front, in bind pose, with its textures.
 
-Proyección ortográfica desde +z (el personaje mira a +z): x de pantalla = x, y = y, y lo más
-cercano es la z mayor. Sombreado plano con la normal de la cara (en valor absoluto, porque
-no hay culling) y textura por vecino más cercano con wrap, como las UV de D3D. Solo dibuja
-los grupos de detalle y skin, colocados como en el exportador
-(`KmdModel.world_translation`). Es para la hoja de contactos: no pretende ser rápido.
+Orthographic projection from +z (the character faces +z): screen x = x, y = y, and the
+closest is the greater z. Flat shading with the face normal (absolute value, because there
+is no culling) and nearest-neighbor texturing with wrap, like D3D UVs. It only draws the
+detail and skin groups, placed as in the exporter (`KmdModel.world_translation`). It is for
+the contact sheet: it does not aim to be fast.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ class Triangle:
 
 
 class Canvas:
-    """RGB de 8 bits con z-buffer."""
+    """8-bit RGB with a z-buffer."""
 
     def __init__(self, width: int, height: int, background: Color) -> None:
         self.width, self.height = width, height
@@ -88,7 +88,7 @@ class Canvas:
 
 
 def model_triangles(model: KmdModel) -> list[Triangle]:
-    """Triángulos de los grupos de detalle y skin, en el espacio del modelo."""
+    """Triangles of the detail and skin groups, in model space."""
     triangles: list[Triangle] = []
     for obj in selected_objects(model, DEFAULT_GROUPS):
         if model.objects[obj].layout is None:
@@ -127,7 +127,7 @@ def render_front(
     height: int,
     background: Color,
 ) -> bytes:
-    """RGB de `width`x`height` con los triángulos encuadrados de frente."""
+    """RGB of `width`x`height` with the triangles framed from the front."""
     canvas = Canvas(width, height, background)
     if not triangles:
         return bytes(canvas.rgb)

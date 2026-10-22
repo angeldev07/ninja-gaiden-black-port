@@ -1,34 +1,35 @@
-"""Bancos de motions de Team Ninja (`.mtn` y `.mot`): parseo estricto y muestreo de pistas.
+"""Team Ninja motion banks (`.mtn` and `.mot`): strict parsing and track sampling.
 
-Un `.mtn` es un chunk `chr_dat` de 3 slots (`ryu.mtn` en `cmn.afs` #22, `eryun.mtn` en
-`boff_cmn.afs` #3). Un `.mot` (`rm_kt.mot`, las armas de Ryu) es directamente el cuerpo del
-slot 0, sin cabecera de chunk. Solo se lee el slot 0; el 1 (otra tabla de offsets) y el 2
-(16 bytes) quedan sin interpretar. Todo u32/u16 little endian. Offsets relativos al cuerpo.
+A `.mtn` is a 3-slot `chr_dat` chunk (`ryu.mtn` in `cmn.afs` #22, `eryun.mtn` in
+`boff_cmn.afs` #3). A `.mot` (`rm_kt.mot`, Ryu's weapons) is directly the body of slot 0,
+without a chunk header. Only slot 0 is read; slot 1 (another offset table) and slot 2
+(16 bytes) are left uninterpreted. Everything is little-endian u32/u16. Offsets are relative
+to the body.
 
-**Tabla de motions.** u32 por id de motion hasta un 0 (1890 ids en `ryu.mtn`, 1893 en
-`rm_kt.mot`). Varios ids comparten offset: los vacíos apuntan a una motion de relleno de
-4 frames. Los ids parecen un espacio global que los bancos de armas rellenan (INFERRED).
+**Motion table.** One u32 per motion id up to a 0 (1890 ids in `ryu.mtn`, 1893 in
+`rm_kt.mot`). Several ids share an offset: empty ones point to a 4-frame filler motion. The
+ids look like a global space that the weapon banks fill in (INFERRED).
 
-**Motion.** En su offset hay una cabecera de u32 terminada en 0, uno por pista: el offset de
-cada pista. Los datos de las pistas van justo antes de la cabecera, en orden. Observado:
-44 pistas en las 258 motions de `ryu.mtn` y en las 167 de `rm_kt.mot`, y todas las pistas
-de una motion duran lo mismo (VERIFIED: 0 discrepancias).
+**Motion.** At its offset there is a u32 header terminated by 0, one entry per track: the
+offset of each track. The track data sits right before the header, in order. Observed: 44
+tracks in all 258 motions of `ryu.mtn` and in the 167 of `rm_kt.mot`, and all the tracks of
+a motion last the same (VERIFIED: 0 discrepancies).
 
-**Pista.** Lista de claves; cada una empieza por un u16 de control:
+**Track.** A list of keys; each starts with a u16 control word:
 
-    bits 0-1    tipo: 1 = valor; 2 = valor + 1 tangente; 3 = valor + 2 tangentes; 0 = fin
-    bits 2-11   frames hasta la clave siguiente
-    bits 12-15  bits 16-19 del valor (entero con signo de 20 bits)
+    bits 0-1    kind: 1 = value; 2 = value + 1 tangent; 3 = value + 2 tangents; 0 = end
+    bits 2-11   frames until the next key
+    bits 12-15  bits 16-19 of the value (20-bit signed integer)
 
-Le siguen el u16 bajo del valor y 0, 1 o 2 tangentes s16. La clave de fin lleva solo el
-valor. El 97 % de las claves son de tipo 1 a 1 frame de distancia: animación ya muestreada.
+It is followed by the low u16 of the value and 0, 1 or 2 s16 tangents. The end key carries
+only the value. 97 % of the keys are kind 1 at 1-frame distance: already-sampled animation.
 
-**Interpolación.** Tipo 1, lineal. Tipos 2 y 3, Hermite cúbica: la clave k guarda la
-tangente de salida A y la de llegada B del tramo k → k+1 (tipo 2: la misma en ambos
-extremos). Evidencia: B de un tramo coincide con A del siguiente (mediana de 6 % de error
-relativo, frente al 26 % si fueran tangentes por tramo). Las tangentes son pendientes por
-frame × 16 (INFERRED: el ajuste de mínima energía da 17,9 y la mediana por tramo, 14,3).
-Unidades de los valores en `ngb_tools.kmd.rig`.
+**Interpolation.** Kind 1, linear. Kinds 2 and 3, cubic Hermite: key k stores the outgoing
+tangent A and the incoming tangent B of segment k -> k+1 (kind 2: the same at both ends).
+Evidence: the B of a segment matches the A of the next one (median 6 % relative error,
+versus 26 % if they were per-segment tangents). Tangents are slopes per frame x 16
+(INFERRED: the minimum-energy fit gives 17.9 and the per-segment median, 14.3). Units of the
+values in `ngb_tools.kmd.rig`.
 """
 
 from __future__ import annotations
@@ -49,18 +50,18 @@ KIND_VALUE: Final = 1
 KIND_ONE_SLOPE: Final = 2
 KIND_TWO_SLOPES: Final = 3
 SLOPE_SCALE: Final = 16.0
-# Topes de cordura (observado: 1893 ids y 44 pistas).
+# Sanity caps (observed: 1893 ids and 44 tracks).
 MAX_MOTION_IDS: Final = 65536
 MAX_TRACKS: Final = 256
 
 
 class MotionFormatError(KmdError):
-    """Los bytes no forman un banco de motions legible."""
+    """The bytes do not form a readable motion bank."""
 
 
 @dataclass(frozen=True, slots=True)
 class Key:
-    """Una clave: frame absoluto, valor bruto y pendientes del tramo que empieza aquí."""
+    """A key: absolute frame, raw value and slopes of the segment that starts here."""
 
     frame: int
     value: int
@@ -78,14 +79,14 @@ class Track:
         return self.keys[-1].frame
 
     def sample(self, frame: float) -> float:
-        """Valor bruto en `frame` (se satura en los extremos)."""
+        """Raw value at `frame` (clamped at the ends)."""
         keys = self.keys
         if frame <= keys[0].frame or len(keys) == 1:
             return float(keys[0].value)
         if frame >= keys[-1].frame:
             return float(keys[-1].value)
         lo, hi = 0, len(keys) - 1
-        while hi - lo > 1:  # búsqueda binaria del tramo
+        while hi - lo > 1:  # binary search for the segment
             mid = (lo + hi) // 2
             if keys[mid].frame <= frame:
                 lo = mid
@@ -122,18 +123,18 @@ class Motion:
 
 @dataclass(frozen=True, slots=True)
 class MotionBank:
-    """Tabla de ids (offset de cada uno) y motions por offset."""
+    """Id table (offset of each id) and motions by offset."""
 
     table: tuple[int, ...]
     motions: Mapping[int, Motion]
 
     def motion(self, motion_id: int) -> Motion:
         if not 0 <= motion_id < len(self.table):
-            raise MotionFormatError(f"motion {motion_id} fuera de los {len(self.table)} ids")
+            raise MotionFormatError(f"motion {motion_id} outside the {len(self.table)} ids")
         return self.motions[self.table[motion_id]]
 
     def distinct_ids(self) -> tuple[int, ...]:
-        """El primer id de cada motion distinta, en orden de id."""
+        """The first id of each distinct motion, in id order."""
         seen: dict[int, int] = {}
         for motion_id, offset in enumerate(self.table):
             seen.setdefault(offset, motion_id)
@@ -150,17 +151,17 @@ def _value20(ctrl: int, low: int) -> int:
 
 
 def parse_track(body: bytes, start: int, end: int) -> Track:
-    """Claves de la pista que ocupa `body[start:end]` (puede sobrar relleno tras el fin)."""
+    """Keys of the track that occupies `body[start:end]` (padding may follow the end key)."""
     keys: list[Key] = []
     pos, frame = start, 0
     while True:
         if pos + 4 > end:
-            raise MotionFormatError(f"pista en {start:#x}: sin clave de fin antes de {end:#x}")
+            raise MotionFormatError(f"track at {start:#x}: no end key before {end:#x}")
         ctrl, low = struct.unpack_from("<HH", body, pos)
         kind = ctrl & 0x3
         size = 4 if kind in (KIND_END, KIND_VALUE) else 2 * (kind + 1)
         if pos + size > end:
-            raise MotionFormatError(f"pista en {start:#x}: clave cortada en {pos:#x}")
+            raise MotionFormatError(f"track at {start:#x}: key truncated at {pos:#x}")
         slopes = struct.unpack_from(f"<{(size - 4) // 2}H", body, pos + 4)
         first = _s16(slopes[0]) if slopes else 0
         second = _s16(slopes[1]) if len(slopes) > 1 else first
@@ -172,36 +173,36 @@ def parse_track(body: bytes, start: int, end: int) -> Track:
 
 
 def _u32_run(body: bytes, start: int, limit: int, what: str) -> list[int]:
-    """u32 desde `start` hasta un 0 (que no se incluye)."""
+    """u32 values from `start` up to a 0 (which is not included)."""
     values: list[int] = []
     pos = start
     while True:
         if pos + 4 > len(body):
-            raise MotionFormatError(f"{what} en {start:#x} sin terminador 0")
+            raise MotionFormatError(f"{what} at {start:#x} without a 0 terminator")
         (value,) = struct.unpack_from("<I", body, pos)
         if value == 0:
             return values
         if len(values) == limit:
-            raise MotionFormatError(f"{what} en {start:#x}: más de {limit} entradas")
+            raise MotionFormatError(f"{what} at {start:#x}: more than {limit} entries")
         values.append(value)
         pos += 4
 
 
 def _parse_motion(body: bytes, offset: int, data_floor: int) -> Motion:
-    track_offsets = _u32_run(body, offset, MAX_TRACKS, "cabecera de motion")
+    track_offsets = _u32_run(body, offset, MAX_TRACKS, "motion header")
     bounds = [*track_offsets, offset]
     for a, b in pairwise(bounds):
         if not data_floor <= a < b:
-            raise MotionFormatError(f"motion en {offset:#x}: offsets de pista desordenados")
+            raise MotionFormatError(f"motion at {offset:#x}: track offsets out of order")
     tracks = tuple(parse_track(body, a, b) for a, b in pairwise(bounds))
     lengths = {track.frames for track in tracks}
     if len(lengths) > 1:
-        raise MotionFormatError(f"motion en {offset:#x}: pistas de duración distinta {lengths}")
+        raise MotionFormatError(f"motion at {offset:#x}: tracks of different length {lengths}")
     return Motion(offset, tracks)
 
 
 def motion_body(data: bytes) -> bytes:
-    """El cuerpo del banco: el slot 0 de un `chr_dat`, o el archivo entero (`.mot`)."""
+    """The bank body: slot 0 of a `chr_dat`, or the whole file (`.mot`)."""
     if not data.startswith(CHR_DAT_TAG):
         return data
     try:
@@ -210,20 +211,20 @@ def motion_body(data: bytes) -> bytes:
         raise MotionFormatError(f"chr_dat: {error}") from error
     first = min(chunk.slots, key=lambda slot: slot.index, default=None)
     if first is None or first.index != 0:
-        raise MotionFormatError("chr_dat sin slot 0")
+        raise MotionFormatError("chr_dat without slot 0")
     return data[first.offset : first.end]
 
 
 def parse_motion_bank(data: bytes) -> MotionBank:
-    """Parsea un `.mtn` (chr_dat) o un `.mot` (cuerpo suelto)."""
+    """Parse a `.mtn` (chr_dat) or a `.mot` (bare body)."""
     body = motion_body(data)
-    table = tuple(_u32_run(body, 0, MAX_MOTION_IDS, "tabla de motions"))
+    table = tuple(_u32_run(body, 0, MAX_MOTION_IDS, "motion table"))
     if not table:
-        raise MotionFormatError("tabla de motions vacía")
+        raise MotionFormatError("empty motion table")
     table_end = 4 * (len(table) + 1)
     motions: dict[int, Motion] = {}
     for offset in sorted(set(table)):
         if offset % 4 or not table_end <= offset < len(body):
-            raise MotionFormatError(f"offset de motion {offset:#x} fuera del cuerpo o no alineado")
+            raise MotionFormatError(f"motion offset {offset:#x} outside the body or unaligned")
         motions[offset] = _parse_motion(body, offset, table_end)
     return MotionBank(table, MappingProxyType(motions))

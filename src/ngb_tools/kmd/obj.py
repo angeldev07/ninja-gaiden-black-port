@@ -1,12 +1,11 @@
-"""Exportación a Wavefront OBJ + MTL: la alternativa sencilla al glTF, sin jerarquía.
+"""Wavefront OBJ + MTL export: the simple alternative to glTF, without hierarchy.
 
-Cada objeto es un `o` con sus vértices ya colocados en el modelo (traslación del mundo de
-`ngb_tools.kmd.model`) y cada submalla, un `g` con su `usemtl`. OBJ pone el origen de las
-UV abajo a la izquierda, así que `vt = (u, 1 - v)`. Las texturas trabajan con wrap: v en
-[-1, 0] da vt en [1, 2], y los visores repiten. Los triángulos son los de
-`ngb_tools.kmd.topology`, ya CCW. Del material solo va la textura de la primera etapa
-(`map_Kd`, ruta relativa) y Ka/Ks/Ns del D3DMATERIAL8; los nombres de material son los
-mismos que en el glTF.
+Each object is an `o` with its vertices already placed in the model (world translation from
+`ngb_tools.kmd.model`) and each submesh is a `g` with its `usemtl`. OBJ puts the UV origin at
+the bottom left, so `vt = (u, 1 - v)`. Textures use wrap: v in [-1, 0] gives vt in [1, 2],
+and viewers repeat. The triangles are those of `ngb_tools.kmd.topology`, already CCW. From the
+material only the first-stage texture goes in (`map_Kd`, relative path) plus Ka/Ks/Ns from the
+D3DMATERIAL8; the material names are the same as in the glTF.
 """
 
 from __future__ import annotations
@@ -40,7 +39,7 @@ class ObjStats:
 def _mtl(
     materials: Mapping[MaterialKey, Material | None], files: Mapping[int, Path], base: Path
 ) -> str:
-    lines = ["# materiales de ngb_tools.kmd (solo la textura de la primera etapa)"]
+    lines = ["# materials from ngb_tools.kmd (first-stage texture only)"]
     for key, material in sorted(materials.items(), key=lambda item: item[0].name):
         lines.append(f"newmtl {key.name}")
         if material is not None:
@@ -60,7 +59,7 @@ def _mtl(
 def build_obj(
     model: KmdModel, files: Mapping[int, Path], base: Path, options: ExportOptions, mtl_name: str
 ) -> tuple[str, str, ObjStats]:
-    """Texto del OBJ y del MTL, sin escribir nada."""
+    """OBJ and MTL text, without writing anything."""
     lines = ["# ngb_tools.kmd", f"mtllib {mtl_name}"]
     materials: dict[MaterialKey, Material | None] = {}
     warnings: list[str] = []
@@ -69,7 +68,7 @@ def build_obj(
     for obj in selected_objects(model, options.groups):
         item = model.objects[obj]
         if item.layout is None:
-            warnings.append(f"obj{obj}: FVF no admitido, sin malla")
+            warnings.append(f"obj{obj}: unsupported FVF, no mesh")
             continue
         data = model.vertices(obj)
         ox, oy, oz = model.world_translation(obj)
@@ -81,7 +80,7 @@ def build_obj(
             lines += [f"vn {x:.6f} {y:.6f} {z:.6f}" for x, y, z in data.normals]
         for position, sub in enumerate(item.mesh.submeshes):
             if not model.exportable(obj, position):
-                warnings.append(f"obj{obj} submalla {sub.index}: saltada (ver incidencias)")
+                warnings.append(f"obj{obj} submesh {sub.index}: skipped (see issues)")
                 continue
             key = material_key(sub.base_texture, sub.alpha_blend, sub.double_sided, files)
             materials.setdefault(key, sub.material)
@@ -110,7 +109,7 @@ def write_obj(
     texture_files: Mapping[int, Path],
     options: ExportOptions,
 ) -> tuple[tuple[Path, Path], ObjStats]:
-    """Escribe `<stem>.mtl` y después `<stem>.obj`, atómicos y fuera de los repos."""
+    """Write `<stem>.mtl` and then `<stem>.obj`, atomically and outside the repos."""
     out = ensure_outside_repos(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     obj_path, mtl_path = out / f"{stem}.obj", out / f"{stem}.mtl"

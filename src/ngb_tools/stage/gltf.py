@@ -1,27 +1,26 @@
-"""Una zona entera en una sola escena glTF 2.0: `.glb` (un archivo) o `.gltf` + `.bin`.
+"""A whole zone in a single glTF 2.0 scene: `.glb` (one file) or `.gltf` + `.bin`.
 
-- **Nodos:** la raíz es la zona; cada parte (`boff_01`) es un hijo, y cada objeto de la parte
-  un nieto con su malla. Los vértices de un escenario ya están en coordenadas de mundo
-  (`ngb_tools.stage.model`), así que los nodos no llevan transformación salvo una T de
-  OBJINFO distinta de 0 (props con HIERARC). S = (0, 0, 0) **no** es "oculto" en un
-  escenario: se ignora y se anota en `extras.kmd_scale`; una S distinta de 0 y de 1 sí se
-  escribe.
-- **Mallas:** una por objeto, con una primitiva TRIANGLES por submalla. Cada parte del
-  objeto tiene sus atributos (POSITION, NORMAL, TEXCOORD_0, COLOR_0) y sus primitivas los
-  comparten. Las tiras se convierten con `ngb_tools.kmd.topology` (CCW). COLOR_0 es el
-  D3DCOLOR del vértice (en los escenarios, la luz precalculada).
-- **Materiales:** uno por (parte, textura de la primera etapa, blend, doble cara), como en
-  `ngb_tools.kmd.gltf`: PBR sin metal con `baseColorTexture`, BLEND si la submalla activa
-  el alpha blend y `doubleSided` si no hace cull. Las texturas son los PNG de
-  `ngb_tools.stage.textures`: dentro del `.glb` (bufferView `image/png`) o por URI relativa
-  en el `.gltf`.
-- **Colisión (`collision=True`):** un nodo `<parte>_collision` por parte con toda su HITMDL
-  en una primitiva, con un material magenta translúcido (BLEND, alfa 0.35, doble cara) y
-  `extras.collision` y `extras.hidden_by_default` (glTF no tiene "oculto").
-- **Ejes:** sin cambios, como `ngb_tools.kmd.gltf` (Y arriba).
+- **Nodes:** the root is the zone; each part (`boff_01`) is a child, and each object of the
+  part a grandchild with its mesh. The vertices of a stage are already in world coordinates
+  (`ngb_tools.stage.model`), so nodes carry no transform except a non-zero OBJINFO T (props
+  with HIERARC). S = (0, 0, 0) is **not** "hidden" in a stage: it is ignored and noted in
+  `extras.kmd_scale`; an S other than 0 and 1 is written.
+- **Meshes:** one per object, with one TRIANGLES primitive per submesh. Each part of the
+  object has its own attributes (POSITION, NORMAL, TEXCOORD_0, COLOR_0) and its primitives
+  share them. Strips are converted with `ngb_tools.kmd.topology` (CCW). COLOR_0 is the
+  vertex D3DCOLOR (in stages, the baked light).
+- **Materials:** one per (part, first-stage texture, blend, double sided), as in
+  `ngb_tools.kmd.gltf`: PBR without metal with `baseColorTexture`, BLEND if the submesh
+  enables alpha blend and `doubleSided` if it does no cull. The textures are the PNGs from
+  `ngb_tools.stage.textures`: inside the `.glb` (`image/png` bufferView) or by relative URI
+  in the `.gltf`.
+- **Collision (`collision=True`):** a `<part>_collision` node per part with its whole HITMDL
+  in one primitive, with a translucent magenta material (BLEND, alpha 0.35, double sided)
+  and `extras.collision` and `extras.hidden_by_default` (glTF has no "hidden").
+- **Axes:** unchanged, like `ngb_tools.kmd.gltf` (Y up).
 
-TODO(kmd): el constructor de buffers y la conversión D3DCOLOR son los de
-`ngb_tools.kmd.gltf`, que son privados.
+TODO(kmd): the buffer builder and the D3DCOLOR conversion are those of
+`ngb_tools.kmd.gltf`, which are private.
 """
 
 from __future__ import annotations
@@ -67,7 +66,7 @@ class SceneFormat(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ScenePart:
-    """Una parte ya parseada, con el nombre de su nodo y los PNG de sus texturas."""
+    """An already-parsed part, with its node name and the PNGs of its textures."""
 
     name: str
     model: StageModel
@@ -106,7 +105,7 @@ def _floats(values: Iterable[float]) -> bytes:
 
 
 def _f32(value: float) -> float:
-    """El valor tal como queda en float32 (para que min/max cuadren al byte)."""
+    """The value as stored in float32 (so min/max match to the byte)."""
     return float(struct.unpack("<f", struct.pack("<f", value))[0])
 
 
@@ -118,7 +117,7 @@ def _bounds(points: Sequence[Vec3]) -> tuple[list[float], list[float]]:
 
 
 def _rgba(colors: Iterable[int]) -> bytes:
-    """D3DCOLOR (u32 ARGB) a bytes RGBA."""
+    """D3DCOLOR (u32 ARGB) to RGBA bytes."""
     out = bytearray()
     for c in colors:
         out += bytes(((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF, (c >> 24) & 0xFF))
@@ -126,7 +125,7 @@ def _rgba(colors: Iterable[int]) -> bytes:
 
 
 def image_uri(path: Path, base: Path) -> str:
-    """URI relativa de `path` vista desde la carpeta `base`, o `file:` si no hay camino."""
+    """Relative URI of `path` seen from the `base` folder, or `file:` if there is no path."""
     try:
         relative = path.resolve().relative_to(base.resolve(), walk_up=True)
     except ValueError:
@@ -135,7 +134,7 @@ def image_uri(path: Path, base: Path) -> str:
 
 
 class _Buffer:
-    """Un único buffer binario con un bufferView por accessor (o imagen), alineado a 4."""
+    """A single binary buffer with one bufferView per accessor (or image), 4-byte aligned."""
 
     def __init__(self) -> None:
         self.data = bytearray()
@@ -223,7 +222,7 @@ class _SceneWriter:
         sub = part.model.submesh(ref)
         texture = sub.base_texture
         if texture >= 0 and texture not in part.textures:
-            self.warnings.append(f"{part.name} obj{ref[0]}: textura {texture} sin PNG")
+            self.warnings.append(f"{part.name} obj{ref[0]}: texture {texture} without PNG")
             texture = -1
         key = _MaterialKey(part.name, texture, sub.alpha_blend, sub.double_sided)
         if key in self.material_index:
@@ -293,7 +292,7 @@ class _SceneWriter:
         primitives: list[Json] = []
         for ref, sub in obj.submeshes():
             if not model.exportable(ref):
-                self.warnings.append(f"{part.name} obj{ref[0]} submalla {sub.index}: saltada")
+                self.warnings.append(f"{part.name} obj{ref[0]} submesh {sub.index}: skipped")
                 continue
             triangles = model.triangles(ref)
             if not triangles:
@@ -456,10 +455,10 @@ def build_scene(
     embed_images: bool = True,
     base: Path = Path(),
 ) -> tuple[Json, bytes, SceneStats]:
-    """Documento glTF (sin `buffers`), contenido del buffer y recuento, sin escribir nada.
+    """glTF document (without `buffers`), buffer contents and counts, without writing anything.
 
-    `base` es la carpeta del `.gltf`: las URI de las imágenes (sin `embed_images`) son
-    relativas a ella.
+    `base` is the folder of the `.gltf`: the image URIs (without `embed_images`) are relative
+    to it.
     """
     writer = _SceneWriter(embed_images, base)
     gltf = writer.build(zone, parts, collision)
@@ -467,7 +466,7 @@ def build_scene(
 
 
 def glb_bytes(gltf: Json, data: bytes) -> bytes:
-    """Contenedor GLB: cabecera, chunk JSON (relleno con espacios) y chunk BIN (con ceros)."""
+    """GLB container: header, JSON chunk (space-padded) and BIN chunk (zero-padded)."""
     document = dict(gltf)
     document["buffers"] = [{"byteLength": len(data)}]
     text = json.dumps(document, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
@@ -491,7 +490,7 @@ def write_scene(
     fmt: SceneFormat = SceneFormat.GLB,
     collision: bool = False,
 ) -> tuple[tuple[Path, ...], SceneStats]:
-    """Escribe `<zona>.glb`, o `<zona>.bin` y después `<zona>.gltf`; atómicos y fuera de repos."""
+    """Write `<zone>.glb`, or `<zone>.bin` and then `<zone>.gltf`; atomic and outside repos."""
     out = ensure_outside_repos(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     embed = fmt is SceneFormat.GLB
@@ -504,6 +503,6 @@ def write_scene(
     gltf["buffers"] = [{"uri": quote(bin_path.name), "byteLength": len(data)}]
     atomic_write_bytes(bin_path, data)
     text = json.dumps(gltf, indent=1, ensure_ascii=False) + "\n"
-    # El .gltf da por buena la exportación: va el último y con fsync.
+    # The .gltf marks the export as good: it goes last and with fsync.
     atomic_write_bytes(gltf_path, text.encode("utf-8"), fsync=True)
     return (gltf_path, bin_path), stats

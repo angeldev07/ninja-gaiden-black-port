@@ -1,41 +1,41 @@
-"""CLI de la herramienta KMD: `python -m ngb_tools.kmd {info,export}`.
+"""CLI of the KMD tool: `python -m ngb_tools.kmd {info,export}`.
 
-    info   <kmd>                          objetos, grupos, texturas, huesos e incidencias
+    info   <kmd>                          objects, groups, textures, bones and issues
     export <kmd> [--out DIR] [--format gltf|glb|obj] [--all-groups] [--skin] [--textures DIR]
-                 [--motions BANCO[:ids]]... [--motion ids|all] [--attach ARMA@ANCLA]...
-                 [--name NOMBRE]
+                 [--motions BANK[:ids]]... [--motion ids|all] [--attach WEAPON@ANCHOR]...
+                 [--name NAME]
 
-`export` escribe `<archivo sin extensión>.gltf` + `.bin` (o `.obj` + `.mtl`). Sin `--out`
-va a `$NGB_DATA/extracted/models/<archivo sin extensión>`, nunca dentro de un repo git. Las
-texturas son los PNG de `python -m ngb_tools.xpr export --kmd`: en `--textures`, por defecto
-`$NGB_DATA/extracted/textures/<archivo sin extensión>`. Si faltan o no cuadran con el KMD,
-se exportan ahí mismo. Por defecto solo salen los grupos de detalle y skin; `--all-groups`
-añade LOD, sombra y efectos.
+`export` writes `<file stem>.gltf` + `.bin` (or `.obj` + `.mtl`). Without `--out` it goes to
+`$NGB_DATA/extracted/models/<file stem>`, never inside a git repo. The textures are the PNGs
+from `python -m ngb_tools.xpr export --kmd`: in `--textures`, by default
+`$NGB_DATA/extracted/textures/<file stem>`. If they are missing or do not match the KMD,
+they are exported right there. By default only the detail and skin groups come out;
+`--all-groups` adds LOD, shadow and effects.
 
-`--motions` (repetible) añade animaciones glTF desde un banco `.mtn` o `.mot`. Detrás de
-`:` pueden ir los ids (`ryu.mtn:1,3,90`) o `all`; sin ellos, se usa `--motion` (por defecto
-`all`: todas las motions distintas del banco). Cada clip se llama `<banco>#<id>`. Hace falta
-el rig humanoide de `ngb_tools.kmd.rig`: si el KMD no lo tiene, es un hallazgo (1). Las
-animaciones no van en OBJ: `--format obj` con `--motions` es un error de uso (2).
+`--motions` (repeatable) adds glTF animations from a `.mtn` or `.mot` bank. After `:` come
+the ids (`ryu.mtn:1,3,90`) or `all`; without them, `--motion` is used (default `all`: every
+distinct motion of the bank). Each clip is named `<bank>#<id>`. It needs the humanoid rig of
+`ngb_tools.kmd.rig`: if the KMD lacks it, that is a finding (1). Animations do not go in
+OBJ: `--format obj` with `--motions` is a usage error (2).
 
-`--attach` (repetible) monta otro KMD, un arma, en un hueso del modelo: el exportador
-lo cuelga como hijo de ese nodo y así hereda la animación. Hay dos formas de ancla:
+`--attach` (repeatable) mounts another KMD, a weapon, on a bone of the model: the exporter
+hangs it as a child of that node so it inherits the animation. There are two anchor forms:
 
-    arma.kmd@arma.itm[#estado]          la tabla de anclajes del .itm (por defecto el
-                                        estado 2: el arma en la mano derecha)
-    arma.kmd@HUESO[:x,y,z[,rx,ry,rz]]   un objeto del modelo y un desplazamiento en
-                                        metros y grados
+    weapon.kmd@weapon.itm[#state]       the anchor table of the .itm (default state 2:
+                                        the weapon in the right hand)
+    weapon.kmd@BONE[:x,y,z[,rx,ry,rz]]  a model object and an offset in meters and
+                                        degrees
 
-`--name` cambia el nombre de los archivos de salida (por defecto, el del KMD).
+`--name` changes the name of the output files (default: that of the KMD).
 
-Códigos de salida:
+Exit codes:
 
-- 0: todo correcto.
-- 1: hallazgo sobre los datos: KMD ilegible, invariantes incumplidas o partes saltadas.
-- 2: error de uso o de E/S: argumentos, salida dentro del repo, archivos.
+- 0: all good.
+- 1: finding about the data: unreadable KMD, violated invariants or skipped parts.
+- 2: usage or I/O error: arguments, output inside the repo, files.
 
-Sobre datos del juego se ejecuta en modo aislado (`-I`, o `-P -s` con PYTHONPATH=src).
-`run()` hace además que la consola sustituya los caracteres que no sabe representar.
+On game data it runs in isolated mode (`-I`, or `-P -s` with PYTHONPATH=src).
+`run()` also makes the console substitute characters it cannot represent.
 """
 
 from __future__ import annotations
@@ -79,14 +79,14 @@ from ngb_tools.xpr.errors import XprError
 
 PROG: Final = "python -m ngb_tools.kmd"
 MODELS_SUBDIR: Final = "models"
-UNNAMED: Final = "sin_nombre"
+UNNAMED: Final = "unnamed"
 _IDS: Final = re.compile(r"all|\d+(,\d+)*")
 _NAME: Final = re.compile(r"[A-Za-z0-9_.-]+")
 IDENTITY_QUAT: Final = (0.0, 0.0, 0.0, 1.0)
 
 
 class UsageError(Exception):
-    """Argumentos válidos para argparse pero incoherentes entre sí (código 2)."""
+    """Arguments valid for argparse but inconsistent with each other (code 2)."""
 
 
 class ExitCode(IntEnum):
@@ -96,12 +96,12 @@ class ExitCode(IntEnum):
 
 
 def model_stem(path: Path) -> str:
-    """Nombre base de la salida; uno hecho solo de puntos o espacios se sustituye."""
+    """Base name of the output; one made only of dots or spaces is replaced."""
     return path.stem if path.stem.strip(" .") else UNNAMED
 
 
 def default_output_dir(path: Path, environ: Mapping[str, str] | None = None) -> Path:
-    """`<datos>/extracted/models/<nombre del KMD sin extensión>`."""
+    """`<data>/extracted/models/<KMD name without extension>`."""
     return data_root(environ) / EXTRACTED_SUBDIR / MODELS_SUBDIR / model_stem(path)
 
 
@@ -126,7 +126,7 @@ def _triangle_count(model: KmdModel, obj: int) -> int:
 
 
 def _root(model: KmdModel) -> str:
-    return "sin HIERARC" if model.hierarchy is None else f"obj{model.hierarchy.root}"
+    return "no HIERARC" if model.hierarchy is None else f"obj{model.hierarchy.root}"
 
 
 def cmd_info(args: argparse.Namespace) -> ExitCode:
@@ -134,14 +134,14 @@ def cmd_info(args: argparse.Namespace) -> ExitCode:
     groups = Counter(o.group for o in model.objects)
     bones = sum(1 for o in model.objects if model.children(o.index))
     print(
-        f"{args.file.name}: {model.tag}, {len(model.objects)} objetos, {len(model.textures)} "
-        f"texturas, {len(model.push_buffers)} push buffers, raíz {_root(model)}"
+        f"{args.file.name}: {model.tag}, {len(model.objects)} objects, {len(model.textures)} "
+        f"textures, {len(model.push_buffers)} push buffers, root {_root(model)}"
     )
-    print("grupos: " + ", ".join(f"{group_name(g)} {n}" for g, n in sorted(groups.items())))
-    print(f"huesos (objetos con hijos): {bones}")
+    print("groups: " + ", ".join(f"{group_name(g)} {n}" for g, n in sorted(groups.items())))
+    print(f"bones (objects with children): {bones}")
     print(
-        f"{'obj':>4} {'grupo':<8} {'fvf':>5} {'vért':>5} {'tris':>5} {'sub':>3} "
-        f"{'padre':>5} {'hijos':>5}  texturas"
+        f"{'obj':>4} {'group':<8} {'fvf':>5} {'vert':>5} {'tris':>5} {'sub':>3} "
+        f"{'parent':>6} {'child':>5}  textures"
     )
     for obj in model.objects:
         k = obj.index
@@ -149,14 +149,14 @@ def cmd_info(args: argparse.Namespace) -> ExitCode:
         tris = _triangle_count(model, k) if obj.layout is not None else 0
         print(
             f"{k:>4} {group_name(obj.group):<8} {obj.mesh.fvf:>#5x} {obj.mesh.vertex_count:>5} "
-            f"{tris:>5} {len(obj.mesh.submeshes):>3} {'-' if parent is None else parent:>5} "
+            f"{tris:>5} {len(obj.mesh.submeshes):>3} {'-' if parent is None else parent:>6} "
             f"{len(model.children(k)):>5}  {_texture_list(model, k)}"
         )
     return ExitCode.FINDINGS if _print_issues(model) else ExitCode.OK
 
 
 def split_motion_spec(spec: str, default: str) -> tuple[Path, str]:
-    """`BANCO[:ids]` en (ruta, ids). Los dos puntos de `C:/x.mtn` no separan ids."""
+    """`BANK[:ids]` into (path, ids). The colon of `C:/x.mtn` does not split ids."""
     path, sep, ids = spec.rpartition(":")
     if sep and path and _IDS.fullmatch(ids):
         return Path(path), ids
@@ -164,9 +164,9 @@ def split_motion_spec(spec: str, default: str) -> tuple[Path, str]:
 
 
 def load_clips(model: KmdModel, specs: Sequence[str], default: str) -> list[AnimationClip]:
-    """Clips de cada banco de `--motions`, con los ids pedidos (o todas sus motions)."""
+    """Clips of each `--motions` bank, with the requested ids (or all its motions)."""
     if not _IDS.fullmatch(default):
-        raise UsageError(f"--motion {default!r}: se esperaba 'all' o ids separados por comas")
+        raise UsageError(f"--motion {default!r}: expected 'all' or comma-separated ids")
     rig = find_rig(model)
     clips: list[AnimationClip] = []
     for spec in specs:
@@ -182,15 +182,15 @@ def load_clips(model: KmdModel, specs: Sequence[str], default: str) -> list[Anim
 def _bone_anchor(
     target: str,
 ) -> tuple[int, tuple[float, float, float], tuple[float, float, float, float]]:
-    """`HUESO[:x,y,z[,rx,ry,rz]]`: objeto, traslación y rotación (grados) del ancla."""
+    """`BONE[:x,y,z[,rx,ry,rz]]`: object, translation and rotation (degrees) of the anchor."""
     bone_text, colon, offset_text = target.partition(":")
     try:
         bone = int(bone_text)
         values = [float(v) for v in offset_text.split(",")] if colon else []
     except ValueError as error:
-        raise UsageError(f"--attach: ancla {target!r} ilegible") from error
+        raise UsageError(f"--attach: unreadable anchor {target!r}") from error
     if len(values) not in (0, 3, 6):
-        raise UsageError("--attach: el desplazamiento son 3 o 6 números (x,y,z[,rx,ry,rz])")
+        raise UsageError("--attach: the offset is 3 or 6 numbers (x,y,z[,rx,ry,rz])")
     translation = (values[0], values[1], values[2]) if values else (0.0, 0.0, 0.0)
     rotation = IDENTITY_QUAT
     if len(values) == 6:
@@ -199,23 +199,23 @@ def _bone_anchor(
 
 
 def load_attachment(model: KmdModel, spec: str) -> Attachment:
-    """Un `--attach`: el KMD del arma, sus texturas y el ancla (del .itm o explícita)."""
+    """One `--attach`: the weapon KMD, its textures and the anchor (from the .itm or explicit)."""
     weapon_text, at, target = spec.rpartition("@")
     if not at or not weapon_text or not target:
-        raise UsageError(f"--attach {spec!r}: se esperaba ARMA.kmd@ANCLA")
+        raise UsageError(f"--attach {spec!r}: expected WEAPON.kmd@ANCHOR")
     weapon_path = Path(weapon_text)
     weapon = _load(weapon_path)
     item_text, hash_sign, state_text = target.partition("#")
     if item_text.lower().endswith(".itm"):
         if hash_sign and not state_text.isdigit():
-            raise UsageError(f"--attach: estado {state_text!r} no es un número")
+            raise UsageError(f"--attach: state {state_text!r} is not a number")
         state = int(state_text) if hash_sign else HELD_STATE
         anchor = find_anchor(parse_item_anchors(Path(item_text).read_bytes()), state)
         bone, translation, rotation = anchor.bone, anchor.position, anchor.quaternion
     else:
         bone, translation, rotation = _bone_anchor(target)
     if not 0 <= bone < len(model.objects):
-        raise UsageError(f"--attach: el hueso {bone} no es un objeto del modelo")
+        raise UsageError(f"--attach: bone {bone} is not an object of the model")
     files, _ = resolve_texture_files(weapon, weapon_path, default_texture_dir(weapon_path))
     return Attachment(
         name=model_stem(weapon_path),
@@ -229,14 +229,14 @@ def load_attachment(model: KmdModel, spec: str) -> Attachment:
 
 def cmd_export(args: argparse.Namespace) -> ExitCode:
     if args.motions and args.format == "obj":
-        raise UsageError("las animaciones (--motions) no caben en OBJ: usa gltf o glb")
+        raise UsageError("animations (--motions) do not fit in OBJ: use gltf or glb")
     if args.attach and args.format == "obj":
-        raise UsageError("los modelos montados (--attach) no caben en OBJ: usa gltf o glb")
+        raise UsageError("mounted models (--attach) do not fit in OBJ: use gltf or glb")
     if args.name is not None and not (_NAME.fullmatch(args.name) and args.name.strip(".")):
-        raise UsageError(f"--name {args.name!r}: solo letras, cifras, _ . -")
+        raise UsageError(f"--name {args.name!r}: only letters, digits, _ . -")
     model = _load(args.file)
     out_dir: Path = args.out if args.out is not None else default_output_dir(args.file)
-    ensure_outside_repos(out_dir)  # antes de exportar texturas: nada a medias
+    ensure_outside_repos(out_dir)  # before exporting textures: nothing half-done
     texture_dir: Path = (
         args.textures if args.textures is not None else default_texture_dir(args.file)
     )
@@ -255,34 +255,34 @@ def cmd_export(args: argparse.Namespace) -> ExitCode:
         paths, obj_stats = write_obj(model, out_dir, stem, files, options)
         warnings = obj_stats.warnings
         summary = (
-            f"{obj_stats.objects} objetos, {obj_stats.vertices} vértices, "
-            f"{obj_stats.triangles} triángulos, {obj_stats.materials} materiales"
+            f"{obj_stats.objects} objects, {obj_stats.vertices} vertices, "
+            f"{obj_stats.triangles} triangles, {obj_stats.materials} materials"
         )
     elif args.format == "glb":
         glb_path, stats = write_glb(model, out_dir, stem, files, options)
         paths = (glb_path,)
         warnings = stats.warnings
         summary = (
-            f"{stats.objects} objetos, {stats.vertices} vértices, {stats.triangles} triángulos, "
-            f"{stats.primitives} primitivas, {stats.materials} materiales (GLB)"
+            f"{stats.objects} objects, {stats.vertices} vertices, {stats.triangles} triangles, "
+            f"{stats.primitives} primitives, {stats.materials} materials (GLB)"
         )
     else:
         paths, stats = write_gltf(model, out_dir, stem, files, options)
         warnings = stats.warnings
         summary = (
-            f"{stats.objects} objetos, {stats.vertices} vértices, {stats.triangles} triángulos, "
-            f"{stats.primitives} primitivas, {stats.materials} materiales"
+            f"{stats.objects} objects, {stats.vertices} vertices, {stats.triangles} triangles, "
+            f"{stats.primitives} primitives, {stats.materials} materials"
         )
-    origin = "exportadas ahora" if exported else "reutilizadas"
-    print(f"texturas: {len(files)} PNG {origin} en {texture_dir.resolve()}")
+    origin = "exported now" if exported else "reused"
+    print(f"textures: {len(files)} PNG {origin} in {texture_dir.resolve()}")
     print(summary)
     if clips:
         frames = sum(len(clip.times) for clip in clips)
-        print(f"animaciones: {len(clips)} clips, {frames} muestras a {clips[0].extras['fps']} fps")
+        print(f"animations: {len(clips)} clips, {frames} samples at {clips[0].extras['fps']} fps")
     for attachment in attachments:
-        print(f"montado: {attachment.name} en obj{attachment.parent}")
+        print(f"mounted: {attachment.name} on obj{attachment.parent}")
     for warning in warnings:
-        print(f"aviso: {warning}")
+        print(f"warning: {warning}")
     findings = _print_issues(model) + len(warnings)
     for path in paths:
         print(f"-> {path}")
@@ -294,58 +294,58 @@ _COMMANDS: Final = MappingProxyType({"info": cmd_info, "export": cmd_export})
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog=PROG, description="Modelos KMD de Team Ninja: resumen y exportación a glTF/OBJ."
+        prog=PROG, description="Team Ninja KMD models: summary and export to glTF/OBJ."
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("info", help="objetos, grupos, texturas, huesos e incidencias")
+    p = sub.add_parser("info", help="objects, groups, textures, bones and issues")
     p.add_argument("file", type=Path)
 
-    p = sub.add_parser("export", help="exporta a glTF 2.0 u OBJ (siempre fuera del repo)")
+    p = sub.add_parser("export", help="export to glTF 2.0 or OBJ (always outside the repo)")
     p.add_argument("file", type=Path)
     p.add_argument(
         "--out",
         type=Path,
         metavar="DIR",
-        help=f"por defecto ${DATA_ENV_VAR}/extracted/models/<archivo sin extensión>",
+        help=f"default ${DATA_ENV_VAR}/extracted/models/<file stem>",
     )
     p.add_argument("--format", choices=("gltf", "glb", "obj"), default="gltf")
-    p.add_argument("--all-groups", action="store_true", help="también LOD, sombra y efectos")
-    p.add_argument("--skin", action="store_true", help="glTF: skin para las piezas XYZB1")
+    p.add_argument("--all-groups", action="store_true", help="also LOD, shadow and effects")
+    p.add_argument("--skin", action="store_true", help="glTF: skin for the XYZB1 pieces")
     p.add_argument(
         "--textures",
         type=Path,
         metavar="DIR",
-        help=f"PNG de las texturas; por defecto ${DATA_ENV_VAR}/extracted/textures/<archivo>",
+        help=f"texture PNGs; default ${DATA_ENV_VAR}/extracted/textures/<file>",
     )
     p.add_argument(
         "--motions",
         action="append",
         default=[],
-        metavar="BANCO[:ids]",
-        help="banco de motions (.mtn/.mot) a animar; repetible; ids opcionales tras ':'",
+        metavar="BANK[:ids]",
+        help="motion bank (.mtn/.mot) to animate; repeatable; optional ids after ':'",
     )
     p.add_argument(
         "--motion",
         default="all",
         metavar="ids|all",
-        help="ids por defecto para los bancos sin ':ids' (por defecto all)",
+        help="default ids for banks without ':ids' (default all)",
     )
     p.add_argument(
         "--attach",
         action="append",
         default=[],
-        metavar="ARMA.kmd@ANCLA",
-        help="monta otro KMD en un hueso: @arma.itm[#estado] o @HUESO[:x,y,z[,rx,ry,rz]]",
+        metavar="WEAPON.kmd@ANCHOR",
+        help="mount another KMD on a bone: @weapon.itm[#state] or @BONE[:x,y,z[,rx,ry,rz]]",
     )
-    p.add_argument("--name", metavar="NOMBRE", help="nombre de los archivos de salida")
+    p.add_argument("--name", metavar="NAME", help="name of the output files")
     return parser
 
 
 def tolerate_unencodable_output() -> None:
-    """Una consola que no sabe representar un carácter lo sustituye en vez de abortar.
+    """A console that cannot represent a character substitutes it instead of aborting.
 
-    Muta `sys.stdout` y `sys.stderr` del proceso, así que solo la llama `run()`.
+    Mutates the process `sys.stdout` and `sys.stderr`, so only `run()` calls it.
     """
     for stream in (sys.stdout, sys.stderr):
         if isinstance(stream, io.TextIOWrapper):
@@ -366,6 +366,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def run() -> int:
-    """Entrada de consola (`python -m ngb_tools.kmd`; el entry point lo añade el líder)."""
+    """Console entry (`python -m ngb_tools.kmd`)."""
     tolerate_unencodable_output()
     return main()

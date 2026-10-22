@@ -1,4 +1,4 @@
-"""Tests de las partes de una zona: búsqueda en los AFS, selección y variantes idénticas."""
+"""Tests of zone parts: lookup in the AFS files, selection and identical variants."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ PROP = build_stage_kmd([SynthStageObject()], collision=False)
 
 
 def write_game(root: Path) -> Path:
-    """`boff` con 3 AFS de parte (la 03 es igual que la 01), un `_cmn` y vecinos que no son."""
+    """`boff` with 3 part AFS files (03 equals 01), a `_cmn` and look-alike neighbors."""
     game = root / "game"
     game.mkdir()
     files = {
@@ -55,10 +55,10 @@ class ZoneTests(unittest.TestCase):
             [p.name for p in select_parts(parts, ["2", "boff_99"])], ["boff_02", "boff_99"]
         )
         self.assertEqual(len(select_parts(parts, None)), 4)
-        with self.assertRaisesRegex(ZoneNotFoundError, "no hay parte"):
+        with self.assertRaisesRegex(ZoneNotFoundError, "no part"):
             select_parts(parts, ["07"])
-        with self.assertRaisesRegex(ZoneNotFoundError, "inválida"):
-            select_parts(parts, ["uno"])
+        with self.assertRaisesRegex(ZoneNotFoundError, "invalid part"):
+            select_parts(parts, ["one"])
 
     def test_identical_parts_are_marked_as_duplicates(self) -> None:
         loaded = load_parts(find_zone_parts(self.game, "boff"))
@@ -66,7 +66,7 @@ class ZoneTests(unittest.TestCase):
         self.assertEqual(loaded[0].data, PART_A)
 
     def test_unknown_zone(self) -> None:
-        with self.assertRaisesRegex(ZoneNotFoundError, "no hay AFS"):
+        with self.assertRaisesRegex(ZoneNotFoundError, "no AFS"):
             find_zone_parts(self.game, "tomb")
 
     def test_zone_name_cannot_be_a_path(self) -> None:

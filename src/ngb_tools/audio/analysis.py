@@ -1,12 +1,12 @@
-"""Validación sin oír: estadísticas de señal y un PNG con forma de onda y espectrograma.
+"""Validation without listening: signal statistics and a PNG with waveform and spectrogram.
 
-- `signal_stats`: pico, muestras saturadas (a fondo de escala), RMS global y por segundo en
-  dBFS. Ruido blanco da un RMS alto y plano; el silencio, -120 dBFS; la música y la voz,
-  envolventes que suben y bajan.
-- `render_png`: arriba, la forma de onda (mezcla mono, mínimo/máximo y RMS por columna,
-  con marcas de tiempo); abajo, el espectrograma (FFT de 1024 con ventana de Hann, 80 dB de
-  rango, frecuencia lineal de 0 a Nyquist con una línea cada 5 kHz). La voz y la música
-  muestran armónicos como bandas horizontales; el ruido blanco, un tapiz uniforme.
+- `signal_stats`: peak, clipped samples (at full scale), global and per-second RMS in
+  dBFS. White noise gives a high, flat RMS; silence, -120 dBFS; music and voice, envelopes
+  that rise and fall.
+- `render_png`: on top, the waveform (mono mix, min/max and RMS per column, with time
+  marks); below, the spectrogram (1024-point FFT with a Hann window, 80 dB range, linear
+  frequency from 0 to Nyquist with a line every 5 kHz). Voice and music show harmonics as
+  horizontal bands; white noise, a uniform carpet.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ _TICK: Final = (40, 40, 52)
 _PEAK: Final = (80, 150, 250)
 _RMS: Final = (200, 225, 255)
 _CLIP: Final = (255, 60, 60)
-# Mapa de color del espectrograma: negro, violeta, rojo, naranja y amarillo claro.
+# Spectrogram colormap: black, violet, red, orange and light yellow.
 _COLORMAP_STOPS: Final = (
     (0.0, (0, 0, 4)),
     (0.25, (60, 15, 110)),
@@ -91,7 +91,7 @@ class SignalStats:
 
 
 def dbfs(sum_squares: int, count: int) -> float:
-    """RMS de `count` muestras en dBFS (fondo de escala = 32768), -120 si es silencio."""
+    """RMS of `count` samples in dBFS (full scale = 32768), -120 if silent."""
     if count == 0 or sum_squares == 0:
         return SILENCE_DBFS
     rms = math.sqrt(sum_squares / count) / FULL_SCALE
@@ -103,7 +103,7 @@ def _sum_squares(samples: Sequence[int]) -> int:
 
 
 def signal_stats(samples: array[int], channels: int, sample_rate: int) -> SignalStats:
-    """Pico, saturación y RMS (global y por segundo, todos los canales juntos)."""
+    """Peak, clipping and RMS (global and per second, all channels together)."""
     second = sample_rate * channels
     per_second: list[float] = []
     total = 0
@@ -126,11 +126,11 @@ def signal_stats(samples: array[int], channels: int, sample_rate: int) -> Signal
     )
 
 
-# --- Imagen -------------------------------------------------------------------------------
+# --- Image -------------------------------------------------------------------------------
 
 
 def mono_mix(samples: array[int], channels: int) -> array[int]:
-    """Media de los canales (división entera hacia abajo)."""
+    """Average of the channels (integer division rounding down)."""
     if channels == 1:
         return samples
     lanes = [samples[ch::channels] for ch in range(channels)]
@@ -153,7 +153,7 @@ def _bit_reverse(n: int) -> list[int]:
 
 
 class _Fft:
-    """FFT radix-2 iterativa de tamaño fijo (potencia de 2), con tablas precalculadas."""
+    """Iterative radix-2 FFT of fixed size (a power of 2), with precomputed tables."""
 
     def __init__(self, size: int) -> None:
         self.size = size
@@ -162,7 +162,7 @@ class _Fft:
         self.window = [0.5 - 0.5 * math.cos(2 * math.pi * i / (size - 1)) for i in range(size)]
 
     def magnitudes(self, frame: Sequence[int]) -> list[float]:
-        """|X[k]| de la mitad positiva del espectro de `frame` (con ventana de Hann)."""
+        """|X[k]| of the positive half of the spectrum of `frame` (with a Hann window)."""
         size = self.size
         window = self.window
         data: list[complex] = [complex(frame[i] * window[i]) for i in self.order]
@@ -246,11 +246,11 @@ def _spectrogram_rows(mono: array[int], sample_rate: int, width: int) -> list[by
         line_rows = {
             round(f / hz_per_row) for f in range(_FREQ_LINE_HZ, sample_rate // 2, _FREQ_LINE_HZ)
         }
-    for r in range(SPEC_HEIGHT - 1, -1, -1):  # la fila 0 (graves) va abajo
+    for r in range(SPEC_HEIGHT - 1, -1, -1):  # row 0 (lows) goes at the bottom
         row = bytearray()
         for col in columns:
             row += bytes(_colormap((col[r] - floor) / DYNAMIC_RANGE_DB))
-        if r in line_rows:  # línea punteada de referencia cada 5 kHz
+        if r in line_rows:  # dotted reference line every 5 kHz
             for x in range(0, len(columns), 8):
                 row[3 * x : 3 * x + 3] = bytes(_AXIS)
         rows.append(row)
@@ -258,7 +258,7 @@ def _spectrogram_rows(mono: array[int], sample_rate: int, width: int) -> list[by
 
 
 def render_png(samples: array[int], channels: int, sample_rate: int, width: int = WIDTH) -> bytes:
-    """PNG de forma de onda (arriba) y espectrograma (abajo) de la mezcla mono."""
+    """PNG of the waveform (top) and spectrogram (bottom) of the mono mix."""
     mono = mono_mix(samples, channels)
     if not mono:
         mono = array("h", bytes(2))

@@ -1,8 +1,8 @@
-"""Fuente de mapa de bits propia de 5x7 (mayúsculas, cifras y `_-.#/()?`) para las etiquetas.
+"""Own 5x7 bitmap font (capitals, digits and `_-.#/()?`) for the labels.
 
-Cada glifo son 7 filas de 5 bits, con el bit 4 a la izquierda. Una letra minúscula se
-dibuja como su mayúscula y lo que no tiene glifo, como `?`. Avance de 6 píxeles por
-carácter (5 de glifo y 1 de separación), multiplicado por la escala.
+Each glyph is 7 rows of 5 bits, with bit 4 on the left. A lowercase letter is drawn as its
+capital and anything without a glyph as `?`. Advance of 6 pixels per character (5 of glyph
+and 1 of spacing), multiplied by the scale.
 """
 
 from __future__ import annotations
@@ -83,7 +83,7 @@ def draw_text(
     color: tuple[int, int, int],
     scale: int = 1,
 ) -> None:
-    """Pinta `text` en un búfer RGB de `width` de ancho; lo que se sale se recorta."""
+    """Paint `text` into an RGB buffer `width` wide; whatever falls outside is clipped."""
     height = len(rgb) // (3 * width)
     paint = bytes(color)
     for k, char in enumerate(text):

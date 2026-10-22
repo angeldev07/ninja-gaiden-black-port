@@ -1,11 +1,11 @@
-"""Tiras de triángulos (triangle strips) a lista de triángulos.
+"""Triangle strips to a triangle list.
 
-Los índices de un KMD son tiras u16 sin reinicio (no aparece 0xFFFF): las submallas unen
-sus tiras con triángulos degenerados. El triángulo i de la tira es (a, b, c) si i es par y
-(b, a, c) si es impar, para que todos conserven la orientación del primero. Así orientados,
-la normal por la regla de la mano derecha coincide con las normales guardadas en el 99,93 %
-de los triángulos de `ryu.kmd` (14673 de 14683): son CCW vistos desde fuera, lo que esperan
-glTF y OBJ. Los degenerados (dos índices iguales) se descartan.
+The indices of a KMD are u16 strips without restart (0xFFFF never appears): submeshes join
+their strips with degenerate triangles. Triangle i of the strip is (a, b, c) if i is even and
+(b, a, c) if it is odd, so that all of them keep the orientation of the first. Oriented that
+way, the right-hand-rule normal matches the stored normals in 99.93 % of the triangles of
+`ryu.kmd` (14673 of 14683): they are CCW seen from outside, which is what glTF and OBJ
+expect. Degenerate triangles (two equal indices) are dropped.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ type Triangle = tuple[int, int, int]
 
 
 def strip_to_triangles(indices: Sequence[int]) -> list[Triangle]:
-    """Triángulos no degenerados de una tira, con el orden alternado corregido."""
+    """Non-degenerate triangles of a strip, with the alternating winding fixed."""
     triangles: list[Triangle] = []
     for i in range(len(indices) - 2):
         a, b, c = indices[i], indices[i + 1], indices[i + 2]

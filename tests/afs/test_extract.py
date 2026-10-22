@@ -1,4 +1,4 @@
-"""Tests de la extracción por streaming, su manifiesto y su ruta por defecto."""
+"""Tests of streaming extraction, its manifest and its default path."""
 
 from __future__ import annotations
 
@@ -44,8 +44,8 @@ class ExtractTests(unittest.TestCase):
         self.afs_path.write_bytes(build_afs(FILES, "none"))
         out = self.root / "one"
         extract_archive(self.afs_path, out, [0])
-        self.assertTrue((out / "0000_sin_nombre.xpr").exists())
-        self.assertFalse((out / "0001_sin_nombre.zlib").exists())
+        self.assertTrue((out / "0000_unnamed.xpr").exists())
+        self.assertFalse((out / "0001_unnamed.zlib").exists())
 
     def test_extract_refuses_repo(self) -> None:
         target = REPO / "build" / "nope"
@@ -73,7 +73,7 @@ class ExtractTests(unittest.TestCase):
 
     def test_truncated_entry_fails_before_writing(self) -> None:
         data = build_afs(FILES, "none")
-        self.afs_path.write_bytes(data[: 0x1800 + 10])  # corta la entrada #2
+        self.afs_path.write_bytes(data[: 0x1800 + 10])  # cuts entry #2
         out = self.root / "out"
         with self.assertRaisesRegex(AfsTruncatedError, "#2"):
             extract_archive(self.afs_path, out)
@@ -106,7 +106,7 @@ class OutputGuardTests(unittest.TestCase):
         out = self.root / "out"
         out.mkdir()
         stale = out / ("0000_menu.xpr" + PARTIAL_SUFFIX)
-        stale.write_bytes(b"corte anterior")
+        stale.write_bytes(b"previous interruption")
         extract_archive(self.afs_path, out, [0])
         self.assertEqual((out / "0000_menu.xpr").read_bytes(), FILES[0][1])
         self.assertFalse(stale.exists())

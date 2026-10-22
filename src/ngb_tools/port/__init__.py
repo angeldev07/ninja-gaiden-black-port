@@ -1,1 +1,1 @@
-"""Soporte en Python del port nativo (`port/`): generadores de código C a partir de los datos."""
+"""Python support for the native port (`port/`): C code generators driven by the data."""

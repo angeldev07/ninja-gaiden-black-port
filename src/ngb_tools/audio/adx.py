@@ -1,24 +1,24 @@
-"""ADX de CRI Middleware: cabecera, coeficientes del predictor y decodificación a PCM16.
+"""CRI Middleware ADX: header, predictor coefficients and decoding to PCM16.
 
-Disposición (todo big endian), contrastada con vgmstream (`meta/adx.c`,
-`coding/adx_decoder.c`) y FFmpeg (`libavcodec/adx.c`):
+Layout (everything big endian), cross-checked against vgmstream (`meta/adx.c`,
+`coding/adx_decoder.c`) and FFmpeg (`libavcodec/adx.c`):
 
-- 0x00 u16 `0x8000`; 0x02 u16 offset del copyright: el audio empieza en offset + 4 y los 6
-  bytes previos son `(c)CRI`.
-- 0x04 u8 codificación (3 = ADPCM estándar con coeficientes desde el corte), 0x05 u8 tamaño
-  de bloque (18), 0x06 u8 bits por muestra (4), 0x07 u8 canales.
-- 0x08 u32 frecuencia, 0x0C u32 muestras por canal, 0x10 u16 corte del highpass (Hz).
-- 0x12 u8 versión (3, 4 o 5) y 0x13 u8 flags: 0x08 y 0x09 son los dos cifrados de CRI.
-- Loops (solo metadatos): en la versión 3, en 0x14; en la 4, tras la historia inicial
-  (0x18 + 4·canales, mínimo 8) y, si lo hay, un bloque `AINF`. Cada bloque de loop es
-  `u16 relleno, u16 1, u32 flag, u32 muestra inicial, u32 offset inicial, u32 muestra
-  final, u32 offset final`.
+- 0x00 u16 `0x8000`; 0x02 u16 copyright offset: the audio starts at offset + 4 and the 6
+  bytes before it are `(c)CRI`.
+- 0x04 u8 encoding (3 = standard ADPCM with coefficients from the cutoff), 0x05 u8 block
+  size (18), 0x06 u8 bits per sample (4), 0x07 u8 channels.
+- 0x08 u32 sample rate, 0x0C u32 samples per channel, 0x10 u16 highpass cutoff (Hz).
+- 0x12 u8 version (3, 4 or 5) and 0x13 u8 flags: 0x08 and 0x09 are the two CRI encryptions.
+- Loops (metadata only): in version 3, at 0x14; in 4, after the initial history
+  (0x18 + 4*channels, minimum 8) and, if present, an `AINF` block. Each loop block is
+  `u16 padding, u16 1, u32 flag, u32 start sample, u32 start offset, u32 end sample,
+  u32 end offset`.
 
-Cada bloque de 18 bytes es de un canal (los canales se intercalan bloque a bloque): u16
-escala y 32 nibbles con signo, el alto primero. Muestra:
-`n·(escala+1) + predicción`, con la predicción `coef1·h1 + coef2·h2` en punto fijo ×4096.
-La biblioteca de la versión 3 desplaza cada producto por separado; la de la 4, la suma
-(vgmstream lo distingue así; la diferencia es de ±1 LSB). Todo se satura a 16 bits.
+Each 18-byte block belongs to one channel (the channels are interleaved block by block):
+u16 scale and 32 signed nibbles, high first. Sample: `n*(scale+1) + prediction`, with the
+prediction `coef1*h1 + coef2*h2` in x4096 fixed point. The version 3 library shifts each
+product separately; version 4's shifts the sum (vgmstream tells them apart this way; the
+difference is +-1 LSB). Everything is clamped to 16 bits.
 """
 
 from __future__ import annotations
@@ -57,14 +57,14 @@ def _signed_nibble(value: int) -> int:
     return value - 16 if value >= 8 else value
 
 
-# Nibble alto y bajo de cada byte, ya con signo: evita desplazamientos en el bucle caliente.
+# High and low nibble of each byte, already signed: avoids shifts in the hot loop.
 _NIBBLE_HI: Final = tuple(_signed_nibble(b >> 4) for b in range(256))
 _NIBBLE_LO: Final = tuple(_signed_nibble(b & 0x0F) for b in range(256))
 
 
 @dataclass(frozen=True, slots=True)
 class AdxLoop:
-    """Loop declarado en la cabecera (muestras por canal y offsets absolutos en el ADX)."""
+    """Loop declared in the header (samples per channel and absolute offsets in the ADX)."""
 
     start_sample: int
     start_offset: int
@@ -92,22 +92,22 @@ class AdxHeader:
 
     @property
     def frames(self) -> int:
-        """Bloques por canal que hacen falta para `total_samples`."""
+        """Blocks per channel needed for `total_samples`."""
         return -(-self.total_samples // SAMPLES_PER_FRAME)
 
     @property
     def data_size(self) -> int:
-        """Bytes de audio que cubren `total_samples` (sin el bloque de fin de flujo)."""
+        """Audio bytes covering `total_samples` (without the end-of-stream block)."""
         return self.frames * self.channels * self.frame_size
 
 
 def header_size(prefix: bytes) -> int:
-    """Bytes de cabecera (hasta el primer bloque de audio) según los 4 primeros bytes."""
+    """Header bytes (up to the first audio block) according to the first 4 bytes."""
     if len(prefix) < 4:
-        raise AudioTruncatedError("cabecera ADX truncada")
+        raise AudioTruncatedError("truncated ADX header")
     magic, offset = struct.unpack_from(">HH", prefix)
     if magic != MAGIC:
-        raise AudioFormatError(f"magia ADX inválida {magic:#06x}")
+        raise AudioFormatError(f"invalid ADX magic {magic:#06x}")
     return int(offset) + 4
 
 
@@ -119,7 +119,7 @@ def _loop_at(raw: bytes, pos: int) -> AdxLoop | None:
 
 
 def parse_loop(raw: bytes, version: int, channels: int, data_offset: int) -> AdxLoop | None:
-    """Loop de las versiones 3 y 4 si la cabecera tiene sitio para él (como vgmstream)."""
+    """Loop for versions 3 and 4 if the header has room for it (like vgmstream)."""
     room = data_offset - len(COPYRIGHT)
     if version == 3:
         return _loop_at(raw, MIN_HEADER) if room >= MIN_HEADER + _LOOP.size else None
@@ -135,19 +135,19 @@ def parse_loop(raw: bytes, version: int, channels: int, data_offset: int) -> Adx
 
 
 def parse_header(raw: bytes) -> AdxHeader:
-    """Cabecera completa (`raw` empieza en el ADX y llega al menos al primer bloque).
+    """Full header (`raw` starts at the ADX and reaches at least the first block).
 
-    Solo valida la estructura; si el flujo se puede decodificar lo dice `check_supported`.
+    It only validates the structure; whether the stream can be decoded is up to `check_supported`.
     """
     data_offset = header_size(raw)
     if data_offset < MIN_HEADER + len(COPYRIGHT) or len(raw) < data_offset:
-        raise AudioTruncatedError(f"cabecera ADX de {data_offset} bytes truncada o imposible")
+        raise AudioTruncatedError(f"ADX header of {data_offset} bytes truncated or impossible")
     fields: tuple[int, ...] = _BASE.unpack_from(raw)
     _, _, encoding, frame_size, bits, channels, rate, total, cutoff, version, flags = fields
     if raw[data_offset - len(COPYRIGHT) : data_offset] != COPYRIGHT:
-        raise AudioFormatError("falta la firma (c)CRI antes del audio")
+        raise AudioFormatError("missing (c)CRI signature before the audio")
     if not 1 <= channels <= MAX_CHANNELS or rate == 0:
-        raise AudioFormatError(f"canales {channels} o frecuencia {rate} imposibles")
+        raise AudioFormatError(f"channels {channels} or sample rate {rate} impossible")
     return AdxHeader(
         data_offset=data_offset,
         encoding=encoding,
@@ -164,28 +164,28 @@ def parse_header(raw: bytes) -> AdxHeader:
 
 
 def check_supported(header: AdxHeader) -> None:
-    """Lanza `EncryptedAdxError` si el flujo va cifrado y `UnsupportedCodecError` si no es la
-    codificación estándar de 4 bits en bloques de 18 bytes con una versión conocida.
+    """Raise `EncryptedAdxError` if the stream is encrypted and `UnsupportedCodecError` if it
+    is not the standard 4-bit encoding in 18-byte blocks with a known version.
     """
     if header.encrypted:
-        raise EncryptedAdxError(f"ADX cifrado (flags {header.flags:#04x})")
+        raise EncryptedAdxError(f"encrypted ADX (flags {header.flags:#04x})")
     if (header.encoding, header.frame_size, header.bits) != (ENCODING_STANDARD, FRAME_SIZE, 4):
         raise UnsupportedCodecError(
-            f"ADX no estándar: codificación {header.encoding}, bloque {header.frame_size}, "
+            f"non-standard ADX: encoding {header.encoding}, block {header.frame_size}, "
             f"{header.bits} bits"
         )
     if header.version not in VERSIONS:
-        raise UnsupportedCodecError(f"versión de cabecera ADX {header.version} desconocida")
+        raise UnsupportedCodecError(f"unknown ADX header version {header.version}")
 
 
 def compute_coefficients(cutoff: int, sample_rate: int) -> tuple[int, int]:
-    """Coeficientes del predictor en punto fijo ×4096 desde el corte del highpass.
+    """Predictor coefficients in x4096 fixed point from the highpass cutoff.
 
-    `a = √2 − cos(2π·corte/frecuencia)`, `b = √2 − 1`, `c = (a − √((a+b)(a−b)))/b`,
-    `coef1 = 2c` y `coef2 = −c²`. Se trunca hacia cero, como el `(short)` de vgmstream.
+    `a = √2 − cos(2π·cutoff/sample_rate)`, `b = √2 − 1`, `c = (a − √((a+b)(a−b)))/b`,
+    `coef1 = 2c` and `coef2 = −c²`. Truncated toward zero, like vgmstream's `(short)`.
     """
     if sample_rate <= 0 or not 0 <= cutoff * 2 < sample_rate:
-        raise AudioFormatError(f"corte {cutoff} Hz imposible a {sample_rate} Hz")
+        raise AudioFormatError(f"cutoff {cutoff} Hz impossible at {sample_rate} Hz")
     a = math.sqrt(2.0) - math.cos(2.0 * math.pi * cutoff / sample_rate)
     b = math.sqrt(2.0) - 1.0
     c = (a - math.sqrt((a + b) * (a - b))) / b
@@ -202,10 +202,10 @@ def decode_channel(
     *,
     split_shift: bool,
 ) -> array[int]:
-    """Decodifica `frames` bloques de un canal: el primero en `start`, cada `stride` bytes.
+    """Decode `frames` blocks of one channel: the first at `start`, one every `stride` bytes.
 
-    `split_shift` reproduce la biblioteca de la versión 3 (cada producto se desplaza por
-    separado); si no, se desplaza la suma, como en la 4.
+    `split_shift` reproduces the version 3 library (each product is shifted separately);
+    otherwise the sum is shifted, as in version 4.
     """
     out = array("h", bytes(2 * SAMPLES_PER_FRAME * frames))
     c1, c2 = coefs
@@ -231,17 +231,17 @@ def decode_channel(
 
 
 def decode(raw: bytes) -> tuple[AdxHeader, array[int]]:
-    """Cabecera y PCM16 intercalado de un ADX completo en memoria."""
+    """Header and interleaved PCM16 of a complete in-memory ADX."""
     header = parse_header(raw)
     return header, decode_pcm(raw, header)
 
 
 def decode_pcm(raw: bytes, header: AdxHeader) -> array[int]:
-    """PCM16 intercalado del ADX `raw`, cuya cabecera ya se parseó en `header`."""
+    """Interleaved PCM16 of the ADX `raw`, whose header was already parsed into `header`."""
     check_supported(header)
     end = header.data_offset + header.data_size
     if len(raw) < end:
-        raise AudioTruncatedError(f"ADX truncado: {len(raw)} bytes de {end} necesarios")
+        raise AudioTruncatedError(f"truncated ADX: {len(raw)} bytes of {end} needed")
     coefs = compute_coefficients(header.cutoff, header.sample_rate)
     stride = header.channels * FRAME_SIZE
     decoded = [
@@ -259,7 +259,7 @@ def decode_pcm(raw: bytes, header: AdxHeader) -> array[int]:
 
 
 def looks_like_adx(prefix: bytes) -> bool:
-    """`80 00` y `(c)CRI` justo antes del audio: basta para elegir el decodificador."""
+    """`80 00` and `(c)CRI` right before the audio: enough to pick the decoder."""
     if len(prefix) < 4 or prefix[:2] != b"\x80\x00":
         return False
     data_offset = header_size(prefix)

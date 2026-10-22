@@ -1,9 +1,9 @@
-"""Tests del montaje de armas: tabla de anclajes del .itm, herencia del nodo y CLI.
+"""Tests of weapon mounting: .itm anchor table, node inheritance and CLI.
 
-Los esperados de la herencia están calculados a mano. Mano del humanoide sintético (obj5):
-mundo (-0,7, 0,45, 0) = pecho (0, 0,2, 0) + hombro (-0,2, 0,25, 0) + 2 · (-0,25, 0, 0).
-Arma (parent_and_child): obj0 con T (0, 1, 0) e hijo obj1 con T (2, 0, 0). Ancla con
-traslación (0,1, 0, 0) y rotación Ry(90°), que lleva (x, y, z) a (z, y, -x).
+The expected inheritance values are computed by hand. Hand of the synthetic humanoid (obj5):
+world (-0.7, 0.45, 0) = chest (0, 0.2, 0) + shoulder (-0.2, 0.25, 0) + 2 · (-0.25, 0, 0).
+Weapon (parent_and_child): obj0 with T (0, 1, 0) and child obj1 with T (2, 0, 0). Anchor with
+translation (0.1, 0, 0) and rotation Ry(90°), which takes (x, y, z) to (z, y, -x).
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ def close(case: unittest.TestCase, got: Any, want: Any, places: int = 5) -> None
         case.assertAlmostEqual(g, w, places=places)
 
 
-# --- evaluador TRS mínimo (independiente del exportador) ----------------------------------
+# --- minimal TRS evaluator (independent of the exporter) ----------------------------------
 
 
 def _quat_rotate(q: Any, v: Any) -> list[float]:
@@ -72,7 +72,7 @@ def _quat_mul(a: Any, b: Any) -> list[float]:
 
 
 def world_positions(gltf: dict[str, Any], overrides: dict[int, Any] | None = None) -> list[Any]:
-    """Posición de mundo de cada nodo (traslación y rotación; las escalas son 1)."""
+    """World position of each node (translation and rotation; scales are 1)."""
     nodes = gltf["nodes"]
     overrides = overrides or {}
     parent = {c: i for i, n in enumerate(nodes) for c in n.get("children", [])}
@@ -120,7 +120,7 @@ class AnchorTableTests(unittest.TestCase):
             find_anchor(anchors, 7)
 
     def test_rotation_degrees_to_quaternion(self) -> None:
-        # Ry(-13°) -> (0, sin(-6,5°), 0, cos(6,5°))
+        # Ry(-13°) -> (0, sin(-6.5°), 0, cos(6.5°))
         anchor = find_anchor(parse_item_anchors(build_item(KATANA_LIKE)))
         half = math.radians(-13) / 2
         close(self, anchor.quaternion, (0.0, math.sin(half), 0.0, math.cos(half)))
@@ -189,17 +189,17 @@ class InheritanceTests(ExportCase):
         gltf, _ = self.export()
         world = world_positions(gltf)
         close(self, world[node_named(gltf, kmd_object=5)], (-0.7, 0.45, 0.0))
-        # ancla = mano + (0,1, 0, 0); obj0 = ancla + Ry(90°)·(0, 1, 0) = (-0,6, 1,45, 0)
+        # anchor = hand + (0.1, 0, 0); obj0 = anchor + Ry(90°)·(0, 1, 0) = (-0.6, 1.45, 0)
         close(self, world[node_named(gltf, kmd_object=0, attachment="sword")], (-0.6, 1.45, 0.0))
-        # obj1 = obj0 + Ry(90°)·(2, 0, 0) = (-0,6, 1,45, 0) + (0, 0, -2)
+        # obj1 = obj0 + Ry(90°)·(2, 0, 0) = (-0.6, 1.45, 0) + (0, 0, -2)
         close(self, world[node_named(gltf, kmd_object=1, attachment="sword")], (-0.6, 1.45, -2.0))
 
     def test_rotating_the_hand_carries_the_weapon(self) -> None:
         gltf, _ = self.export()
         hand = node_named(gltf, kmd_object=5)
         world = world_positions(gltf, {hand: RZ90})
-        # Rz(90°) lleva (x, y, z) a (-y, x, z): ancla = (-0,7, 0,45 + 0,1, 0);
-        # obj0 = ancla + Rz(90°)·Ry(90°)·(0, 1, 0) = ancla + (-1, 0, 0)
+        # Rz(90°) takes (x, y, z) to (-y, x, z): anchor = (-0.7, 0.45 + 0.1, 0);
+        # obj0 = anchor + Rz(90°)·Ry(90°)·(0, 1, 0) = anchor + (-1, 0, 0)
         close(self, world[node_named(gltf, kmd_object=0, attachment="sword")], (-1.7, 0.55, 0.0))
 
     def test_materials_and_images_of_each_model_stay_apart(self) -> None:
@@ -255,7 +255,7 @@ class CliTests(ExportCase):
         code, out, _ = self.run_cli("export", str(self.hero_path), "--out", str(self.root / "o"),
                                     "--attach", spec)  # fmt: skip
         self.assertEqual(code, ExitCode.OK, out)
-        self.assertIn("montado: sword en obj5", out)
+        self.assertIn("mounted: sword on obj5", out)
         anchor = next(n for n in self.gltf()["nodes"] if n["name"] == "sword_anchor")
         close(self, anchor["translation"], (0.1, 0.0, 0.0))
         close(self, anchor["rotation"], RY90)
@@ -268,7 +268,7 @@ class CliTests(ExportCase):
             "--attach", f"{self.sword_path}@{item}",
         )  # fmt: skip
         self.assertEqual(code, ExitCode.OK, out)
-        self.assertIn("montado: sword en obj11", out)
+        self.assertIn("mounted: sword on obj11", out)
         anchor = next(n for n in self.gltf("hero_sword")["nodes"] if n["name"] == "sword_anchor")
         close(self, anchor["translation"], (-0.058, 0.0, -0.025))
 
@@ -282,11 +282,11 @@ class CliTests(ExportCase):
     def test_usage_errors(self) -> None:
         base = ("export", str(self.hero_path), "--out", str(self.root / "o"))
         for extra in (
-            ("--attach", str(self.sword_path)),  # sin @
-            ("--attach", f"{self.sword_path}@99"),  # hueso fuera del modelo
-            ("--attach", f"{self.sword_path}@5:1,2"),  # desplazamiento de 2 números
+            ("--attach", str(self.sword_path)),  # no @
+            ("--attach", f"{self.sword_path}@99"),  # bone outside the model
+            ("--attach", f"{self.sword_path}@5:1,2"),  # offset of 2 numbers
             ("--attach", f"{self.sword_path}@5", "--format", "obj"),
-            ("--name", "../fuera"),
+            ("--name", "../outside"),
         ):
             with self.subTest(extra=extra):
                 code, _, _ = self.run_cli(*base, *extra)

@@ -438,3 +438,11 @@ Detalle en [[gpu-nv2a]].
 - Checked: zero warnings, 807 Python tests pass, and code and format specifiers are identical once comments and
   strings are stripped.
 - Next: phase 2 (Python tooling), then phase 3 (vault, root README, CLAUDE.md rules).
+
+## [2026-10-22] chore | English translation, phase 2: Python tooling
+- Everything under `src/`, `tests/` and `tools/` (Python, the Ghidra Java scripts, `.ps1`, `pyproject.toml`) is now in
+  English: 183 files.
+- CLI and report output changed. For example: `sin_nombre` → `unnamed`, gallery `fallo` → `failed`, and Markdown
+  report headers in English. The pinned SHA-256 of `xboxkrnl_exports.tsv` changed with its header comments.
+- Intentional non-ASCII fixtures stay (`ñ`, `téxture`, Shift-JIS `修正版`).
+- Checked: 807 tests pass, and ruff and mypy are clean.

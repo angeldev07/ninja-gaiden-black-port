@@ -1,20 +1,20 @@
-"""CLI de audio: `python -P -s -m ngb_tools.audio {adx,wva,xwb,analyze}`.
+"""Audio CLI: `python -P -s -m ngb_tools.audio {adx,wva,xwb,analyze}`.
 
-- `adx <archivo.afs> [--index N] [--out DIR]`: ADX de CRI a WAV PCM16.
-- `wva <archivo.afs> [--index N] [--out DIR]`: registros de los bancos `.wva` a WAV.
-- `xwb <Wave.xwb> [--out DIR]`: entradas de un wave bank de XACT a WAV.
-- `analyze <archivo.wav>... [--png-dir DIR]`: validación sin oír (estadísticas y PNG de
-  forma de onda y espectrograma).
+- `adx <file.afs> [--index N] [--out DIR]`: CRI ADX to PCM16 WAV.
+- `wva <file.afs> [--index N] [--out DIR]`: records of the `.wva` banks to WAV.
+- `xwb <Wave.xwb> [--out DIR]`: entries of an XACT wave bank to WAV.
+- `analyze <file.wav>... [--png-dir DIR]`: validation without listening (statistics and
+  waveform/spectrogram PNG).
 
-Por defecto los WAV van a `$NGB_DATA/extracted/audio/<origen>/` con `_manifest.json`, y
-los PNG junto a cada WAV. Nada se escribe dentro de un repo git.
+By default the WAV files go to `$NGB_DATA/extracted/audio/<source>/` with
+`_manifest.json`, and the PNG files next to each WAV. Nothing is written inside a git repo.
 
-Códigos de salida:
+Exit codes:
 
-- 0: todo correcto.
-- 1: hallazgo sobre los datos: pistas cifradas, códecs no soportados o datos ilegibles
-  (se informan y se saltan; el resto del lote se extrae igual).
-- 2: error de uso o de E/S: argumentos, índices, salida dentro de un repo, archivos.
+- 0: everything fine.
+- 1: finding about the data: encrypted tracks, unsupported codecs or unreadable data
+  (reported and skipped; the rest of the batch is extracted anyway).
+- 2: usage or I/O error: arguments, indices, output inside a repo, files.
 """
 
 from __future__ import annotations
@@ -65,8 +65,8 @@ def _print_track(track: TrackRecord) -> None:
 def _report(manifest: AudioManifest) -> ExitCode:
     s = manifest["summary"]
     print(
-        f"{s['ok']}/{s['total']} ok, {s['encrypted']} cifradas, {s['unsupported']} no "
-        f"soportadas, {s['error']} con error -> {manifest['out_dir']}"
+        f"{s['ok']}/{s['total']} ok, {s['encrypted']} encrypted, {s['unsupported']} "
+        f"unsupported, {s['error']} with errors -> {manifest['out_dir']}"
     )
     return ExitCode.OK if s["ok"] == s["total"] else ExitCode.FINDINGS
 
@@ -97,10 +97,10 @@ def _read_wav(path: Path) -> tuple[int, int, bytes]:
     try:
         with wave.open(str(path), "rb") as reader:
             if reader.getsampwidth() != 2:
-                raise AudioFormatError(f"{path.name}: solo se analiza PCM de 16 bits")
+                raise AudioFormatError(f"{path.name}: only 16-bit PCM is analyzed")
             return reader.getnchannels(), reader.getframerate(), reader.readframes(-1)
     except (wave.Error, EOFError) as err:
-        raise AudioFormatError(f"{path.name}: WAV ilegible ({err})") from err
+        raise AudioFormatError(f"{path.name}: unreadable WAV ({err})") from err
 
 
 def _per_second(values: Sequence[float]) -> str:
@@ -120,8 +120,8 @@ def cmd_analyze(args: argparse.Namespace) -> ExitCode:
         target.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_bytes(target, render_png(pcm, channels, rate))
         print(
-            f"{wav.name}: {channels}ch {rate} Hz {stats.duration:.2f} s, pico {stats.peak}, "
-            f"saturadas {stats.clipped}, RMS {stats.rms_dbfs:.1f} dBFS -> {target}"
+            f"{wav.name}: {channels}ch {rate} Hz {stats.duration:.2f} s, peak {stats.peak}, "
+            f"clipped {stats.clipped}, RMS {stats.rms_dbfs:.1f} dBFS -> {target}"
         )
         print(f"  RMS/s (dBFS): {_per_second(stats.rms_per_second_dbfs)}")
     return ExitCode.OK
@@ -133,27 +133,27 @@ _COMMANDS: Final = MappingProxyType(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=PROG, description="Audio del juego a WAV PCM16.")
+    parser = argparse.ArgumentParser(prog=PROG, description="Game audio to PCM16 WAV.")
     sub = parser.add_subparsers(dest="command", required=True)
-    out_help = f"por defecto ${DATA_ENV_VAR}/extracted/audio/<origen dentro de game/>"
+    out_help = f"default: ${DATA_ENV_VAR}/extracted/audio/<source inside game/>"
     for name, help_text, source in (
-        ("adx", "ADX de CRI dentro de un AFS", "AFS"),
-        ("wva", "bancos .wva (Xbox ADPCM) dentro de un AFS", "AFS"),
-        ("xwb", "wave bank de XACT (WBND)", "XWB"),
+        ("adx", "CRI ADX inside an AFS", "AFS"),
+        ("wva", ".wva banks (Xbox ADPCM) inside an AFS", "AFS"),
+        ("xwb", "XACT wave bank (WBND)", "XWB"),
     ):
         p = sub.add_parser(name, help=help_text)
         p.add_argument("source", type=Path, metavar=source)
         if source == "AFS":
-            p.add_argument("--index", type=int, action="append", metavar="N", help="repetible")
+            p.add_argument("--index", type=int, action="append", metavar="N", help="repeatable")
         p.add_argument("--out", type=Path, metavar="DIR", help=out_help)
-    p = sub.add_parser("analyze", help="estadísticas y PNG de forma de onda y espectrograma")
+    p = sub.add_parser("analyze", help="statistics and waveform/spectrogram PNG")
     p.add_argument("wav", type=Path, nargs="+")
-    p.add_argument("--png-dir", type=Path, metavar="DIR", help="por defecto, junto a cada WAV")
+    p.add_argument("--png-dir", type=Path, metavar="DIR", help="default: next to each WAV")
     return parser
 
 
 def tolerate_unencodable_output() -> None:
-    """Una consola que no sabe representar un carácter lo sustituye en vez de abortar."""
+    """A console that cannot represent a character substitutes it instead of aborting."""
     if isinstance(sys.stdout, io.TextIOWrapper):
         sys.stdout.reconfigure(errors="replace")
 
@@ -172,6 +172,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def run() -> int:
-    """Entrada de consola (`python -m ngb_tools.audio`; el entry point lo añade el líder)."""
+    """Console entry (`ngb-audio` and `python -m ngb_tools.audio`)."""
     tolerate_unencodable_output()
     return main()

@@ -1,7 +1,7 @@
-"""Regenera `port/src/kernel/stubs.c` desde la tabla de exports del kernel (TSV).
+"""Regenerate `port/src/kernel/stubs.c` from the kernel exports table (TSV).
 
-Envoltorio de `python -m ngb_tools.port.kernel_stubs`, ejecutable desde la raíz del repo
-sin instalar el paquete: `python tools/gen_kernel_stubs.py [--check]`.
+Wrapper around `python -m ngb_tools.port.kernel_stubs`, runnable from the repo root
+without installing the package: `python tools/gen_kernel_stubs.py [--check]`.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Tests de los formatos empaquetados (ARGB, 565, 1555, 4444, A8, L8...) y de P8 con paleta."""
+"""Tests of packed formats (ARGB, 565, 1555, 4444, A8, L8...) and of P8 with a palette."""
 
 from __future__ import annotations
 
@@ -68,13 +68,13 @@ class PackedFormatTests(unittest.TestCase):
         self.assertEqual(decode_one(0x1A, u16(0x8040)), (0x40, 0x40, 0x40, 0x80))
 
     def test_a8b8g8r8_is_rgba_in_memory(self) -> None:
-        # 0x3A: R en el byte bajo y A en el alto -> en memoria R, G, B, A.
+        # 0x3A: R in the low byte and A in the high one -> in memory R, G, B, A.
         self.assertEqual(
             decode_one(0x3A, bytes([0x11, 0x22, 0x33, 0x44])), (0x11, 0x22, 0x33, 0x44)
         )
 
     def test_b8g8r8a8_is_argb_in_memory(self) -> None:
-        # 0x3B: A en el byte bajo, luego R, G y B -> en memoria A, R, G, B.
+        # 0x3B: A in the low byte, then R, G and B -> in memory A, R, G, B.
         self.assertEqual(
             decode_one(0x3B, bytes([0x44, 0x11, 0x22, 0x33])), (0x11, 0x22, 0x33, 0x44)
         )
@@ -86,7 +86,7 @@ class PackedFormatTests(unittest.TestCase):
         self.assertEqual(decode_one(0x38, u16(0xF820)), (255, 0, 132, 0))
 
     def test_r4g4b4a4_alpha_is_the_low_nibble(self) -> None:
-        # 0x39: 0x1234 -> R 1, G 2, B 3, A 4; cada nibble n se amplía a n * 17.
+        # 0x39: 0x1234 -> R 1, G 2, B 3, A 4; each nibble n widens to n * 17.
         self.assertEqual(decode_one(0x39, u16(0x1234)), (0x11, 0x22, 0x33, 0x44))
 
     def test_x1r5g5b5_ignores_the_top_bit(self) -> None:
@@ -97,13 +97,13 @@ class PackedFormatTests(unittest.TestCase):
         self.assertEqual(decode_one(0x32, u16(0xABCD)), (0xAB, 0xAB, 0xAB, 255))
 
     def test_32bpp_rows_are_read_with_the_pitch(self) -> None:
-        # LIN_A8R8G8B8 de 1x2 con pitch 64: B, G, R, A de cada fila y relleno detrás.
+        # LIN_A8R8G8B8 of 1x2 with pitch 64: B, G, R, A of each row and padding after.
         raw = bytes([1, 2, 3, 4]) + bytes(60) + bytes([5, 6, 7, 8]) + bytes(60)
         decoded = decode_packed(raw, 1, 2, FORMATS[0x12], pitch=64)
         self.assertEqual(pixels(decoded), [(3, 2, 1, 4), (7, 6, 5, 8)])
 
     def test_rows_are_read_with_the_pitch(self) -> None:
-        # LIN_A8 de 2x2 con pitch de 64 bytes: solo los dos primeros bytes de cada fila valen.
+        # LIN_A8 of 2x2 with a 64-byte pitch: only the first two bytes of each row count.
         raw = bytes([1, 2]) + bytes(62) + bytes([3, 4]) + bytes(62)
         decoded = decode_packed(raw, 2, 2, FORMATS[0x1F], pitch=64)
         self.assertEqual(list(decoded[3::4]), [1, 2, 3, 4])
@@ -118,7 +118,7 @@ class PackedFormatTests(unittest.TestCase):
 
 
 class PackedMemoryTests(unittest.TestCase):
-    """La decodificación no memoriza una entrada por píxel distinto en 32 bpp."""
+    """Decoding does not memoize one entry per distinct pixel at 32 bpp."""
 
     def test_distinct_argb_pixels_peak_is_a_few_times_the_image(self) -> None:
         side = 512
@@ -134,7 +134,7 @@ class PackedMemoryTests(unittest.TestCase):
         self.assertLess(peak, 4 * output)
 
     def test_every_16_bit_word_decodes(self) -> None:
-        # Las 65 536 palabras de R5G6B5 a la vez: la memoria acotada no cambia el resultado.
+        # All 65,536 R5G6B5 words at once: the bounded memo does not change the result.
         raw = u16(*range(1 << 16))
         decoded = pixels(decode_packed(raw, 256, 256, FORMATS[0x05]))
         self.assertEqual(decoded[0x0000], (0, 0, 0, 255))
@@ -146,7 +146,7 @@ class PackedMemoryTests(unittest.TestCase):
 
 class PaletteTests(unittest.TestCase):
     def test_entries_are_d3dcolor_argb(self) -> None:
-        # D3DCOLOR = u32 ARGB little endian: en memoria B, G, R, A.
+        # D3DCOLOR = little-endian ARGB u32: in memory B, G, R, A.
         palette = bytes([0x10, 0x20, 0x30, 0x40, 0xAA, 0xBB, 0xCC, 0xDD])
         decoded = pixels(decode_palette(bytes([1, 0, 1]), palette))
         second, first = (0xCC, 0xBB, 0xAA, 0xDD), (0x30, 0x20, 0x10, 0x40)

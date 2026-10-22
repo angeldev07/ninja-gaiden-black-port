@@ -1,39 +1,40 @@
-"""Exportación a glTF 2.0 (`.gltf` JSON + `.bin`, o un `.glb` autocontenido) con la stdlib.
+"""glTF 2.0 export (`.gltf` JSON + `.bin`, or a self-contained `.glb`) with the stdlib.
 
-- **Nodos:** uno por objeto exportado y por cada antepasado suyo en HIERARC (aunque no se
-  exporte su malla), con su traslación local de OBJINFO y su escala si no es 1. Una escala 0
-  (efectos de `ryu.kmd`, la cara de `do_face.kmd`) parece "oculto por defecto" (INFERRED):
-  no se escribe y el nodo lleva `extras.hidden_by_default`. Las piezas con peso de mezcla van
-  en su padre sin traslación propia (ver `ngb_tools.kmd.model`).
-- **Mallas:** una por objeto y una primitiva TRIANGLES por submalla: las tiras se
-  convierten con `ngb_tools.kmd.topology`, que deja los triángulos CCW. Los atributos
-  (POSITION, NORMAL, TEXCOORD_0, COLOR_0) se comparten entre las primitivas del objeto. Las
-  UV van tal cual: glTF, como D3D, pone el origen arriba a la izquierda.
-- **Ejes:** sin cambios. El modelo mira a +Z con Y arriba, como pide glTF. La mano derecha
-  es INFERRED: el cull CW de las submallas solo cuadra con las normales guardadas si la
-  vista es de mano derecha.
-- **Materiales:** PBR sin metal, con `baseColorTexture` = la textura de la primera etapa,
-  que es un PNG exportado por `ngb_tools.xpr` y se referencia con ruta relativa. `alphaMode`
-  es BLEND si la submalla activa el alpha blend (+0x28, INFERRED). Si no, es OPAQUE, aunque
-  la textura sea DXT5: en `ryu.kmd` el alfa de las DXT5 opacas no es transparencia. El
-  blend aditivo (destino ONE) se aproxima con BLEND. `doubleSided` si la submalla no hace
-  cull. El D3DMATERIAL8 y las etapas extra van en `extras`.
-- **Skin (`skin=True`, opcional):** las piezas XYZB1 pasan a espacio del modelo y se
-  enganchan a una única skin con JOINTS_0 = (abuelo, padre) y WEIGHTS_0 = (w, 1-w),
-  semántica INFERRED. Las matrices inversas de bind son traslaciones a -mundo(joint). Sin
-  skin, cada pieza va rígida en su nodo padre, igual que en el spike.
+- **Nodes:** one per exported object and one per ancestor of it in HIERARC (even if its mesh
+  is not exported), with its local OBJINFO translation and its scale if not 1. A scale of 0
+  (effects in `ryu.kmd`, the face in `do_face.kmd`) looks like "hidden by default"
+  (INFERRED): it is not written and the node carries `extras.hidden_by_default`. Pieces with
+  a blend weight go under their parent without their own translation (see
+  `ngb_tools.kmd.model`).
+- **Meshes:** one per object and one TRIANGLES primitive per submesh: strips are converted
+  with `ngb_tools.kmd.topology`, which leaves the triangles CCW. The attributes (POSITION,
+  NORMAL, TEXCOORD_0, COLOR_0) are shared among the primitives of the object. UVs go as they
+  are: glTF, like D3D, puts the origin at the top left.
+- **Axes:** unchanged. The model faces +Z with Y up, as glTF requires. The right-handedness
+  is INFERRED: the CW cull of the submeshes only matches the stored normals if the view is
+  right-handed.
+- **Materials:** PBR without metal, with `baseColorTexture` = the first-stage texture, which
+  is a PNG exported by `ngb_tools.xpr` and referenced by relative path. `alphaMode` is BLEND
+  if the submesh enables alpha blend (+0x28, INFERRED). Otherwise it is OPAQUE, even if the
+  texture is DXT5: in `ryu.kmd` the alpha of opaque DXT5 textures is not transparency.
+  Additive blend (destination ONE) is approximated with BLEND. `doubleSided` if the submesh
+  does no cull. The D3DMATERIAL8 and the extra stages go in `extras`.
+- **Skin (`skin=True`, optional):** XYZB1 pieces move to model space and are bound to a
+  single skin with JOINTS_0 = (grandparent, parent) and WEIGHTS_0 = (w, 1-w), semantics
+  INFERRED. The inverse bind matrices are translations by -world(joint). Without skin, each
+  piece is rigid under its parent node, as in the spike.
 
-- **Modelos montados (`attachments`, opcional):** cada uno es un nodo ancla con su
-  traslación y rotación locales, hijo del nodo del hueso (`ngb_tools.kmd.attach`), así que
-  hereda la animación. Dentro va el modelo del arma con su jerarquía. Sus mallas,
-  materiales e imágenes llevan el prefijo `<arma>_` y sus nodos, `extras.attachment`.
-- **Animaciones (`animations`, opcional):** clips de `ngb_tools.kmd.animation` (los genera
-  `ngb_tools.kmd.rig` a partir de las motions). Cada canal da un sampler LINEAR con su
-  traslación o rotación por instante, y todos los samplers de un clip comparten la misma
-  entrada de tiempos.
+- **Mounted models (`attachments`, optional):** each one is an anchor node with its local
+  translation and rotation, a child of the bone node (`ngb_tools.kmd.attach`), so it
+  inherits the animation. Inside goes the weapon model with its hierarchy. Its meshes,
+  materials and images carry the `<weapon>_` prefix and its nodes, `extras.attachment`.
+- **Animations (`animations`, optional):** clips from `ngb_tools.kmd.animation` (generated
+  by `ngb_tools.kmd.rig` from the motions). Each channel yields a LINEAR sampler with its
+  translation or rotation per instant, and all the samplers of a clip share the same time
+  input.
 
-Grupos: por defecto solo detalle (1) y skin (4). LOD, sombra y efecto (`groups=None`)
-salen como objetos aparte que se solapan con el cuerpo.
+Groups: by default only detail (1) and skin (4). LOD, shadow and effect (`groups=None`) come
+out as separate objects that overlap the body.
 """
 
 from __future__ import annotations
@@ -70,7 +71,7 @@ type Json = dict[str, Any]
 
 @dataclass(frozen=True, slots=True)
 class ExportOptions:
-    """Qué exportar: grupos (`None` = todos), skin, clips y modelos montados (armas)."""
+    """What to export: groups (`None` = all), skin, clips and mounted models (weapons)."""
 
     groups: frozenset[int] | None = DEFAULT_GROUPS
     skin: bool = False
@@ -80,7 +81,7 @@ class ExportOptions:
 
 @dataclass(frozen=True, slots=True)
 class ExportStats:
-    """Recuento de lo exportado y avisos (submallas saltadas, texturas sin PNG)."""
+    """Counts of what was exported and warnings (skipped submeshes, textures without PNG)."""
 
     objects: int
     vertices: int
@@ -93,7 +94,7 @@ class ExportStats:
 
 @dataclass(frozen=True, slots=True)
 class MaterialKey:
-    """Lo que distingue un material exportado."""
+    """What distinguishes an exported material."""
 
     texture: int
     blend: bool
@@ -112,12 +113,12 @@ def selected_objects(model: KmdModel, groups: frozenset[int] | None) -> list[int
 def material_key(
     texture: int, blend: bool, double_sided: bool, files: Mapping[int, Path]
 ) -> MaterialKey:
-    """Clave del material; una textura sin PNG cuenta como sin textura."""
+    """Material key; a texture without a PNG counts as no texture."""
     return MaterialKey(texture if texture in files else -1, blend, double_sided)
 
 
 def texture_uri(texture: Path, base: Path) -> str:
-    """Ruta relativa (URI) de `texture` vista desde la carpeta `base`, o `file:` si no hay."""
+    """Relative path (URI) of `texture` seen from the `base` folder, or `file:` if none."""
     try:
         relative = texture.resolve().relative_to(base.resolve(), walk_up=True)
     except ValueError:
@@ -126,7 +127,7 @@ def texture_uri(texture: Path, base: Path) -> str:
 
 
 class _BufferBuilder:
-    """Un único buffer binario con un bufferView por accessor, alineado a 4 bytes."""
+    """A single binary buffer with one bufferView per accessor, 4-byte aligned."""
 
     def __init__(self) -> None:
         self.data = bytearray()
@@ -170,7 +171,7 @@ def _floats(values: Iterable[float]) -> bytes:
 
 
 def _f32(value: float) -> float:
-    """El valor tal como queda guardado en float32 (para que min/max cuadren al byte)."""
+    """The value as stored in float32 (so min/max match to the byte)."""
     return float(struct.unpack("<f", struct.pack("<f", value))[0])
 
 
@@ -182,7 +183,7 @@ def _bounds(points: Sequence[Vec3]) -> tuple[list[float], list[float]]:
 
 
 def _rgba(colors: Iterable[int]) -> bytes:
-    """D3DCOLOR (u32 ARGB) a bytes RGBA."""
+    """D3DCOLOR (u32 ARGB) to RGBA bytes."""
     out = bytearray()
     for c in colors:
         out += bytes(((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF, (c >> 24) & 0xFF))
@@ -201,7 +202,7 @@ class _GltfWriter:
         self.nodes: list[Json] = []
         self.meshes: list[Json] = []
         self.materials: list[Json] = []
-        # Claves con el prefijo del modelo: un arma montada tiene sus propias texturas.
+        # Keys carry the model prefix: a mounted weapon has its own textures.
         self.tag = ""
         self.material_index: dict[tuple[str, MaterialKey], int] = {}
         self.textures: list[Json] = []
@@ -226,7 +227,7 @@ class _GltfWriter:
         sub = self.model.objects[obj].mesh.submeshes[position]
         texture = sub.base_texture
         if texture >= 0 and texture not in self.files:
-            self.warnings.append(f"obj{obj} submalla {sub.index}: textura {texture} sin PNG")
+            self.warnings.append(f"obj{obj} submesh {sub.index}: texture {texture} without PNG")
         key = material_key(texture, sub.alpha_blend, sub.double_sided, self.files)
         if (self.tag, key) in self.material_index:
             return self.material_index[(self.tag, key)]
@@ -305,7 +306,7 @@ class _GltfWriter:
 
     def _skin_attributes(self, obj: int, weights: Sequence[float]) -> Json:
         joints = self.model.skin_joints(obj)
-        if joints is None:  # build() solo crea skin para piezas con padre
+        if joints is None:  # build() only creates skin for pieces with a parent
             return {}
         a, b = (self.joint_slot[j] for j in joints)
         clamped = [min(1.0, max(0.0, w)) for w in weights]
@@ -334,11 +335,11 @@ class _GltfWriter:
         wide = vertex_count > MAX_U16_INDEX
         for position, sub in enumerate(model.objects[obj].mesh.submeshes):
             if not model.exportable(obj, position):
-                self.warnings.append(f"obj{obj} submalla {sub.index}: saltada (ver incidencias)")
+                self.warnings.append(f"obj{obj} submesh {sub.index}: skipped (see issues)")
                 continue
             triangles = model.triangles(obj, position)
             if not triangles:
-                self.warnings.append(f"obj{obj} submalla {sub.index}: sin triángulos")
+                self.warnings.append(f"obj{obj} submesh {sub.index}: no triangles")
                 continue
             flat = [i for t in triangles for i in t]
             payload = struct.pack(f"<{len(flat)}{'I' if wide else 'H'}", *flat)
@@ -363,7 +364,7 @@ class _GltfWriter:
     def _mesh(self, obj: int, skinned: bool) -> int | None:
         model = self.model
         if model.objects[obj].layout is None:
-            self.warnings.append(f"obj{obj}: FVF no admitido, sin malla")
+            self.warnings.append(f"obj{obj}: unsupported FVF, no mesh")
             return None
         data = model.vertices(obj)
         offset = model.world_translation(obj) if skinned else (0.0, 0.0, 0.0)
@@ -418,10 +419,10 @@ class _GltfWriter:
         return gltf
 
     def _attach(self, attachment: Attachment, node_of: Mapping[int, int]) -> None:
-        """Nodo ancla hijo del objeto `parent` (traslación y rotación), con el arma dentro."""
+        """Anchor node, child of object `parent` (translation, rotation), with the weapon inside."""
         parent = node_of.get(attachment.parent)
         if parent is None:
-            self.warnings.append(f"{attachment.name}: obj{attachment.parent} no se exporta")
+            self.warnings.append(f"{attachment.name}: obj{attachment.parent} is not exported")
             return
         saved = (self.model, self.files, self.tag)
         self.model, self.files = attachment.model, attachment.texture_files
@@ -456,7 +457,7 @@ class _GltfWriter:
             self.model, self.files, self.tag = saved
 
     def _animation(self, clip: AnimationClip, node_of: Mapping[int, int]) -> Json:
-        """Un clip: un sampler LINEAR por canal, todos con la misma entrada de tiempos."""
+        """One clip: a LINEAR sampler per channel, all sharing the same time input."""
         times = clip.times
         bounds = ([_f32(times[0])], [_f32(times[-1])]) if times else None
         source = self.buffer.add(
@@ -467,7 +468,9 @@ class _GltfWriter:
         channels: list[Json] = []
         for channel in clip.channels:
             if channel.obj not in node_of or len(channel.values) != len(times):
-                self.warnings.append(f"{clip.name}: canal de obj{channel.obj} sin nodo, saltado")
+                self.warnings.append(
+                    f"{clip.name}: channel of obj{channel.obj} has no node, skipped"
+                )
                 continue
             kind = "VEC4" if channel.path == ROTATION else "VEC3"
             output = self.buffer.add(
@@ -502,7 +505,7 @@ class _GltfWriter:
             node["translation"] = list(translation)
         scale = item.info.scale
         if scale == (0.0, 0.0, 0.0):
-            # Escala 0 = oculto por defecto (INFERRED): se exporta visible y se anota.
+            # Scale 0 = hidden by default (INFERRED): exported visible and annotated.
             node["extras"]["hidden_by_default"] = True
         elif scale != (1.0, 1.0, 1.0):
             node["scale"] = list(scale)
@@ -544,7 +547,7 @@ class _GltfWriter:
             gltf["bufferViews"] = self.buffer.views
 
     def image_files(self) -> list[Path]:
-        """PNG de cada imagen, en el orden de `images`."""
+        """PNG of each image, in the order of `images`."""
         return list(self.image_paths)
 
     def stats(self) -> ExportStats:
@@ -567,7 +570,7 @@ def build_gltf(
     options: ExportOptions,
     bin_uri: str,
 ) -> tuple[Json, bytes, ExportStats]:
-    """Documento glTF, contenido del `.bin` y recuento, sin escribir nada."""
+    """glTF document, `.bin` contents and counts, without writing anything."""
     writer = _GltfWriter(model, texture_files, base, options)
     gltf = writer.build()
     data = bytes(writer.buffer.data)
@@ -582,14 +585,14 @@ def write_gltf(
     texture_files: Mapping[int, Path],
     options: ExportOptions,
 ) -> tuple[tuple[Path, Path], ExportStats]:
-    """Escribe `<stem>.bin` y después `<stem>.gltf`, atómicos y fuera de los repos."""
+    """Write `<stem>.bin` and then `<stem>.gltf`, atomically and outside the repos."""
     out = ensure_outside_repos(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     gltf_path, bin_path = out / f"{stem}.gltf", out / f"{stem}.bin"
     gltf, data, stats = build_gltf(model, texture_files, out, options, bin_path.name)
     atomic_write_bytes(bin_path, data)
     text = json.dumps(gltf, indent=1, ensure_ascii=False) + "\n"
-    # El .gltf da por buena la exportación: va el último y con fsync.
+    # The .gltf marks the export as good: it goes last and with fsync.
     atomic_write_bytes(gltf_path, text.encode("utf-8"), fsync=True)
     return (gltf_path, bin_path), stats
 
@@ -601,7 +604,7 @@ GLB_BIN: Final = 0x004E4942
 
 
 def pack_glb(gltf: Json, data: bytes) -> bytes:
-    """Contenedor GLB: cabecera de 12 bytes, chunk JSON (relleno con espacios) y chunk BIN."""
+    """GLB container: 12-byte header, JSON chunk (space-padded) and BIN chunk."""
     text = json.dumps(gltf, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     text += b" " * (-len(text) % 4)
     binary = data + bytes(-len(data) % 4)
@@ -618,7 +621,7 @@ def pack_glb(gltf: Json, data: bytes) -> bytes:
 def build_glb(
     model: KmdModel, texture_files: Mapping[int, Path], options: ExportOptions
 ) -> tuple[bytes, ExportStats]:
-    """GLB autocontenido: el buffer y los PNG van incrustados (bufferView + mimeType)."""
+    """Self-contained GLB: the buffer and the PNGs are embedded (bufferView + mimeType)."""
     writer = _GltfWriter(model, texture_files, Path.cwd(), options)
     gltf = writer.build()
     data = bytearray(writer.buffer.data)
@@ -644,7 +647,7 @@ def write_glb(
     texture_files: Mapping[int, Path],
     options: ExportOptions,
 ) -> tuple[Path, ExportStats]:
-    """Escribe `<stem>.glb` (atómico, con fsync) fuera de los repos."""
+    """Write `<stem>.glb` (atomic, with fsync) outside the repos."""
     out = ensure_outside_repos(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     glb_path = out / f"{stem}.glb"

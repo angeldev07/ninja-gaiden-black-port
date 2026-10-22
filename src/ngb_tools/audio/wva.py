@@ -1,16 +1,16 @@
-"""Bancos de efectos `.wva` de Ninja Gaiden Black (formato propio de Team Ninja).
+"""Ninja Gaiden Black `.wva` effect banks (Team Ninja's own format).
 
-Disposición INFERRED, contrastada sobre los 326 `.wva` del disco (2966 registros, todos
-coherentes con lo que sigue; todo little endian):
+INFERRED layout, checked against the 326 `.wva` files on the disc (2966 records, all
+consistent with what follows; everything little endian):
 
-- `u32 N` y N punteros `u32`: los 31 bits bajos son el offset del registro dentro del
-  `.wva` (0 = hueco vacío) y el bit 31 indica que el registro trae el bloque de parámetros
-  largo. El primer registro empieza justo tras la tabla (4 + 4·N).
-- Cada registro: `u32 (flags << 24 | tamaño de datos)`; un WAVEFORMATEX de 20 bytes (tag
-  0x0069 Xbox ADPCM, canales, frecuencia, bytes/s, alineación 36·canales, 4 bits,
-  `cbSize` 2 y 64 muestras por bloque); un bloque de parámetros de 24 bytes con el bit 31
-  (floats, quizá volumen y distancias 3D) u 8 sin él; y después los datos.
-- Los flags vistos son 0x00, 0x01 y 0x04 (sentido sin confirmar; quizá loop).
+- `u32 N` and N `u32` pointers: the low 31 bits are the record's offset inside the `.wva`
+  (0 = empty slot) and bit 31 says the record carries the long parameter block. The first
+  record starts right after the table (4 + 4*N).
+- Each record: `u32 (flags << 24 | data size)`; a 20-byte WAVEFORMATEX (tag 0x0069 Xbox
+  ADPCM, channels, sample rate, bytes/s, alignment 36*channels, 4 bits, `cbSize` 2 and 64
+  samples per block); a 24-byte parameter block with bit 31 (floats, perhaps volume and 3D
+  distances) or 8 bytes without it; and then the data.
+- The flags seen are 0x00, 0x01 and 0x04 (meaning unconfirmed; perhaps loop).
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ _WAVEFORMAT: Final = struct.Struct("<HHIIHHHH")
 
 @dataclass(frozen=True, slots=True)
 class WvaRecord:
-    """Registro `slot` del banco; `data_offset` es relativo al inicio del `.wva`."""
+    """Record `slot` of the bank; `data_offset` is relative to the start of the `.wva`."""
 
     slot: int
     offset: int
@@ -52,7 +52,7 @@ class WvaRecord:
 
     @property
     def samples(self) -> int:
-        """Muestras por canal de los bloques completos."""
+        """Samples per channel of the complete blocks."""
         if self.block_align <= 0:
             return 0
         return self.data_size // self.block_align * self.samples_per_block
@@ -66,12 +66,12 @@ def _parse_record(data: bytes, slot: int, pointer: int) -> WvaRecord:
     params_at = fmt_at + WAVEFORMAT_SIZE
     data_at = params_at + params_size
     if data_at > len(data):
-        raise AudioTruncatedError(f"registro {slot} en {offset:#x} truncado")
+        raise AudioTruncatedError(f"record {slot} at {offset:#x} truncated")
     word = int.from_bytes(data[offset : offset + 4], "little")
     tag, channels, rate, _avg, align, bits, _cb, spb = _WAVEFORMAT.unpack_from(data, fmt_at)
     size = word & SIZE_MASK
     if data_at + size > len(data):
-        raise AudioTruncatedError(f"registro {slot}: {size} bytes de datos más allá del final")
+        raise AudioTruncatedError(f"record {slot}: {size} bytes of data past the end")
     return WvaRecord(
         slot=slot,
         offset=offset,
@@ -90,13 +90,13 @@ def _parse_record(data: bytes, slot: int, pointer: int) -> WvaRecord:
 
 
 def parse_wva(data: bytes) -> tuple[WvaRecord, ...]:
-    """Registros no vacíos del banco, en el orden de la tabla de punteros."""
+    """Non-empty records of the bank, in pointer table order."""
     if len(data) < 4:
-        raise AudioTruncatedError("banco .wva truncado")
+        raise AudioTruncatedError("truncated .wva bank")
     count = int.from_bytes(data[:4], "little")
     table_end = 4 + 4 * count
     if count == 0 or count > MAX_RECORDS or table_end > len(data):
-        raise AudioFormatError(f"tabla de {count} registros imposible en {len(data)} bytes")
+        raise AudioFormatError(f"table of {count} records impossible in {len(data)} bytes")
     pointers = struct.unpack_from(f"<{count}I", data, 4)
     records = []
     for slot, pointer in enumerate(pointers):
@@ -104,19 +104,19 @@ def parse_wva(data: bytes) -> tuple[WvaRecord, ...]:
         if offset == 0:
             continue
         if offset < table_end:
-            raise AudioFormatError(f"registro {slot} en {offset:#x}, dentro de la tabla")
+            raise AudioFormatError(f"record {slot} at {offset:#x}, inside the table")
         records.append(_parse_record(data, slot, pointer))
     return tuple(records)
 
 
 def check_xbox_adpcm(record: WvaRecord) -> None:
-    """Lanza `UnsupportedCodecError` si el registro no es el Xbox ADPCM conocido."""
+    """Raise `UnsupportedCodecError` if the record is not the known Xbox ADPCM."""
     expected = (FORMAT_TAG, 4, block_align(record.channels), SAMPLES_PER_BLOCK)
     found = (record.format_tag, record.bits, record.block_align, record.samples_per_block)
     if found != expected or not 1 <= record.channels <= 2:
         raise UnsupportedCodecError(
-            f"registro {record.slot}: formato {record.format_tag:#06x}, {record.channels} "
-            f"canales, alineación {record.block_align}, {record.samples_per_block} muestras"
+            f"record {record.slot}: format {record.format_tag:#06x}, {record.channels} "
+            f"channels, alignment {record.block_align}, {record.samples_per_block} samples"
         )
 
 

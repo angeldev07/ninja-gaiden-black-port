@@ -1,5 +1,5 @@
-// H5: decompila (y desensambla) las funciones que contienen las direcciones dadas.
-// Uso: -process default.xbe -noanalysis -readOnly -postScript H5Decomp.java <salida.txt> <addr> [addr...]
+// H5: decompiles (and disassembles) the functions that contain the given addresses.
+// Usage: -process default.xbe -noanalysis -readOnly -postScript H5Decomp.java <output.txt> <addr> [addr...]
 //@category NGB
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -21,7 +21,7 @@ public class H5Decomp extends GhidraScript {
 		for (int i = 1; i < args.length; i++) {
 			if (args[i].equals("--asm")) { targets.add("--asm"); continue; }
 			if (args[i].startsWith("callers:")) {
-				// Todas las funciones de .text que llaman a la dirección dada.
+				// All .text functions that call the given address.
 				Address t = toAddr(Long.decode(args[i].substring(8)));
 				java.util.Set<Long> seen = new java.util.TreeSet<>();
 				for (ghidra.program.model.symbol.Reference r : getReferencesTo(t)) {
@@ -35,7 +35,7 @@ public class H5Decomp extends GhidraScript {
 				continue;
 			}
 			if (args[i].startsWith("refsin:")) {
-				// refsin:<bloque>:<símbolo o dirección>: funciones del bloque que referencian el destino.
+				// refsin:<block>:<symbol or address>: functions in the block that reference the target.
 				String[] p = args[i].split(":", 3);
 				Address t;
 				if (p[2].startsWith("0x")) {
@@ -43,7 +43,7 @@ public class H5Decomp extends GhidraScript {
 				} else {
 					t = getSymbols(p[2], null).isEmpty() ? null : getSymbols(p[2], null).get(0).getAddress();
 				}
-				if (t == null) { out.println("(símbolo no encontrado: " + p[2] + ")"); continue; }
+				if (t == null) { out.println("(symbol not found: " + p[2] + ")"); continue; }
 				java.util.Set<Long> seen = new java.util.TreeSet<>();
 				for (ghidra.program.model.symbol.Reference r : getReferencesTo(t)) {
 					Function cf = getFunctionContaining(r.getFromAddress());
@@ -51,7 +51,7 @@ public class H5Decomp extends GhidraScript {
 						seen.add(cf.getEntryPoint().getOffset());
 					}
 				}
-				out.println("// refsin " + p[1] + " -> " + p[2] + " @ " + t + ": " + seen.size() + " funciones");
+				out.println("// refsin " + p[1] + " -> " + p[2] + " @ " + t + ": " + seen.size() + " functions");
 				for (Long l : seen) targets.add(String.format("0x%08X", l));
 				continue;
 			}
@@ -62,13 +62,13 @@ public class H5Decomp extends GhidraScript {
 			Address a = toAddr(Long.decode(arg));
 			Function f = getFunctionContaining(a);
 			out.println("==================== " + arg + " ====================");
-			if (f == null) { out.println("(sin función)"); continue; }
-			out.printf("// %s @ %s tamaño=%d%n", f.getName(true), f.getEntryPoint(), f.getBody().getNumAddresses());
+			if (f == null) { out.println("(no function)"); continue; }
+			out.printf("// %s @ %s size=%d%n", f.getName(true), f.getEntryPoint(), f.getBody().getNumAddresses());
 			DecompileResults r = di.decompileFunction(f, 60, monitor);
 			if (r.decompileCompleted()) {
 				out.println(r.getDecompiledFunction().getC());
 			} else {
-				out.println("(fallo al decompilar: " + r.getErrorMessage() + ")");
+				out.println("(decompilation failed: " + r.getErrorMessage() + ")");
 			}
 			if (asm) {
 				InstructionIterator ii = currentProgram.getListing().getInstructions(f.getBody(), true);

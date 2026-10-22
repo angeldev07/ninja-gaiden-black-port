@@ -1,36 +1,36 @@
-"""Jerarquía de errores de la herramienta XPR.
+"""Error hierarchy of the XPR tool.
 
-La CLI traduce cada familia a un código de salida:
+The CLI maps each family to an exit code:
 
-- 1, hallazgo de validación: un XPR0 roto (`XprFormatError`) o texturas que no se pueden
-  exportar (`UnsupportedTextureError`).
-- 2, error de uso o de entrada: el archivo no es lo que se pidió (`XprInputError`: no es
-  un XPR0, o con `--kmd` no es un chunk con un slot XPR0), E/S (`OSError`) y salida
-  dentro de un repo (`ngb_tools._paths.UnsafeOutputError`, común a las herramientas).
+- 1, validation finding: a broken XPR0 (`XprFormatError`) or textures that cannot be
+  exported (`UnsupportedTextureError`).
+- 2, usage or input error: the file is not what was asked for (`XprInputError`: not an
+  XPR0, or with `--kmd` not a chunk with an XPR0 slot), I/O (`OSError`) and output
+  inside a repo (`ngb_tools._paths.UnsafeOutputError`, common to the tools).
 """
 
 from __future__ import annotations
 
 
 class XprError(Exception):
-    """Raíz de todos los errores de `ngb_tools.xpr`."""
+    """Root of all `ngb_tools.xpr` errors."""
 
 
 class XprInputError(XprError):
-    """La entrada no es lo pedido: no empieza por XPR0, o no es un chunk con XPR0."""
+    """The input is not what was asked for: not XPR0, or not a chunk with an XPR0 slot."""
 
 
 class XprFormatError(XprError):
-    """Los bytes no forman un XPR0 válido (magia, tamaños o cabeceras de recurso)."""
+    """The bytes do not form a valid XPR0 (magic, sizes or resource headers)."""
 
 
 class XprTruncatedError(XprFormatError):
-    """El XPR0 o un recurso terminan más allá de los bytes disponibles."""
+    """The XPR0 or a resource ends beyond the available bytes."""
 
 
 class UnsupportedTextureError(XprError):
-    """Textura reconocida que no se sabe exportar (cubemap, volumen, formato o paleta)."""
+    """Recognized texture that cannot be exported (cubemap, volume, format or palette)."""
 
 
 class TextureTooLargeError(UnsupportedTextureError):
-    """Dimensiones por encima del tope de píxeles: se rechaza antes de reservar memoria."""
+    """Dimensions above the pixel cap: rejected before allocating memory."""

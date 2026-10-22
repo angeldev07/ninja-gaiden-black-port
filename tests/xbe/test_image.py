@@ -1,4 +1,4 @@
-"""Imagen cargada: mapa VA -> archivo, claves XOR, digests y validación."""
+"""Loaded image: VA -> file map, XOR keys, digests and validation."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ from .synthetic import (
     with_u32,
 )
 
-WHOLE_ADDRESS_SPACE = 0x100000000 - BASE  # size_of_image que llega justo a 2^32
+WHOLE_ADDRESS_SPACE = 0x100000000 - BASE  # size_of_image that reaches exactly 2^32
 
 
 class XorDecodingTests(unittest.TestCase):
@@ -60,7 +60,7 @@ class XorDecodingTests(unittest.TestCase):
         self.assertIsNone(xor.kernel_thunk_addr)
 
     def test_two_plausible_key_sets_give_unknown(self) -> None:
-        # Secciones en las VA que daría la clave debug: ya no hay una sola candidata.
+        # Sections at the VAs the debug key would give: there is no longer a single candidate.
         debug_entry = alias_under("debug", ENTRY_VA, ENTRY)
         debug_thunk = alias_under("debug", THUNK_VA, THUNK)
         extras = (
@@ -76,7 +76,7 @@ class XorDecodingTests(unittest.TestCase):
         self.assertIn("ambigu", issue)
 
     def test_entry_point_must_be_executable(self) -> None:
-        image = XbeImage.from_bytes(build_synthetic_xbe(text_flags=0x02))  # PRELOAD solo
+        image = XbeImage.from_bytes(build_synthetic_xbe(text_flags=0x02))  # PRELOAD only
         self.assertEqual(image.xor.build_kind, BuildKind.UNKNOWN)
         (issue,) = image.validation_issues()
         self.assertIn("XOR", issue)
@@ -106,7 +106,7 @@ class AddressMapTests(unittest.TestCase):
     def test_outside_image(self) -> None:
         self.assertIsNone(self.amap.to_offset(0x80000000))
         with self.assertRaises(UnmappedAddressError) as caught:
-            self.amap.require_offset(0x80000000, "prueba")
+            self.amap.require_offset(0x80000000, "test")
         self.assertEqual(caught.exception.va, 0x80000000)
 
     def test_bytes_past_end_of_file_are_not_backed(self) -> None:
@@ -153,7 +153,7 @@ class SectionTableLayoutTests(unittest.TestCase):
             XbeImage.from_bytes(data)
 
     def test_section_table_must_end_inside_headers(self) -> None:
-        # Empieza dentro de la cabecera, pero su única entrada cruza el final.
+        # Starts inside the header, but its only entry crosses the end.
         data = with_u32(build_synthetic_xbe(), 0x120, BASE + SIZE_OF_HEADERS - 0x10)
         with self.assertRaises(ImageLayoutError):
             XbeImage.from_bytes(data)
@@ -194,8 +194,8 @@ class SectionTableLayoutTests(unittest.TestCase):
 
 class VirtualReadTests(unittest.TestCase):
     def test_c_string_stops_at_end_of_backed_region(self) -> None:
-        # Sin NUL al final de .text, la lectura no debe invadir la sección siguiente
-        # del archivo: en memoria, tras los datos crudos solo hay BSS (ceros).
+        # With no NUL at the end of .text, the read must not spill into the next section
+        # of the file: in memory, after the raw data there is only BSS (zeros).
         image = XbeImage.from_bytes(build_synthetic_xbe(text_tail=b"TAILTEXT", inserted_file=True))
         tail_va = SECTION_VA + SECTION_RAW_SIZE - 8
         self.assertEqual(image.c_bytes_at(tail_va), b"TAILTEXT")
@@ -252,7 +252,7 @@ class ValidationTests(unittest.TestCase):
         extra = ExtraSection(b"HDR", BASE + 0xF00, 0x100, SECTION_RAW, 0x40, flags=0)
         image = XbeImage.from_bytes(build_synthetic_xbe(extra_sections=(extra,)))
         (issue,) = image.validation_issues()
-        self.assertIn("cabeceras", issue)
+        self.assertIn("headers", issue)
 
     def test_adjacent_sections_do_not_overlap(self) -> None:
         extra = ExtraSection(b"NEXT", SECTION_VA + SECTION_VSIZE, 0x40, SECTION_RAW, 0x40)

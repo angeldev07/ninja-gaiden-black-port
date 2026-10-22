@@ -1,4 +1,4 @@
-"""Punto de entrada de `python -m ngb_tools.kmd`."""
+"""Entry point for `python -m ngb_tools.kmd`."""
 
 from __future__ import annotations
 

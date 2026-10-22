@@ -1,5 +1,5 @@
-// H5: vuelca la tabla .XTLID (pares id de librería / dirección) con el nombre de la base de ghidra-xbe.
-// Uso: -process default.xbe -noanalysis -readOnly -postScript H5Xtlid.java <salida.csv>
+// H5: dumps the .XTLID table (library id / address pairs) with the name from the ghidra-xbe database.
+// Usage: -process default.xbe -noanalysis -readOnly -postScript H5Xtlid.java <output.csv>
 //@category NGB
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -33,6 +33,6 @@ public class H5Xtlid extends GhidraScript {
 				nn == null ? "" : nn[0], nn == null ? "" : nn[1], s == null ? "" : s.getName(true), f != null);
 		}
 		out.close();
-		println("H5Xtlid: entradas=" + n + " conocidas=" + known);
+		println("H5Xtlid: entries=" + n + " known=" + known);
 	}
 }

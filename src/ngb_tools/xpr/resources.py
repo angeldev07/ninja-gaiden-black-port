@@ -1,40 +1,40 @@
-"""Parseo de XPR0 (Xbox Packed Resource): cabecera, recursos tipados y región de datos.
+"""XPR0 (Xbox Packed Resource) parsing: header, typed resources and data region.
 
-Un XPR0 empaqueta objetos de Direct3D de Xbox listos para la GPU. Todo en u32 little endian:
+An XPR0 packs Xbox Direct3D objects ready for the GPU. Everything is little-endian u32:
 
     0x00  "XPR0"
-    0x04  total_size   bytes del XPR0 entero
-    0x08  header_size  donde empiezan los datos de GPU (relativo al inicio del XPR0)
-    0x0C  cabeceras de recurso, una tras otra, hasta un u32 0xFFFFFFFF
+    0x04  total_size   bytes of the whole XPR0
+    0x08  header_size  where the GPU data starts (relative to the start of the XPR0)
+    0x0C  resource headers, one after another, up to a u32 0xFFFFFFFF
 
-Cada cabecera de recurso es la estructura D3D que el juego usa tal cual en memoria. Empieza
-por `Common` (bits 0-15: contador de referencias; bits 16-18: tipo) y `Data`, el offset de
-los bytes del recurso **relativo a `header_size`** (verificado: en `ryu.kmd` el primer
-índice está en `header_size + 0` y la primera textura en un `header_size + Data` alineado a
-0x1000). Los tamaños de cada tipo salen de las estructuras de Cxbx-Reloaded:
+Each resource header is the D3D structure the game uses as-is in memory. It starts
+with `Common` (bits 0-15: reference count; bits 16-18: type) and `Data`, the offset of
+the resource bytes **relative to `header_size`** (verified: in `ryu.kmd` the first
+index is at `header_size + 0` and the first texture at a `header_size + Data` aligned to
+0x1000). The sizes of each type come from the Cxbx-Reloaded structures:
 
-    tipo  recurso        bytes  campos
+    type  resource       bytes  fields
     0     vertex buffer  12     Common, Data, Lock
     1     index buffer   12     Common, Data, Lock
     2     push buffer    24     Common, Data, Lock, Size, AllocationSize, ?
-    3     paleta         12     Common, Data, Lock   (bits 30-31: 256/128/64/32 entradas)
-    4     textura        20     Common, Data, Lock, Format, Size
+    3     palette        12     Common, Data, Lock   (bits 30-31: 256/128/64/32 entries)
+    4     texture        20     Common, Data, Lock, Format, Size
 
-El push buffer de Cxbx mide 20 bytes, pero en `ryu.kmd` y `r_ryu.kmd` cada uno ocupa 24:
-le sigue un u32 que siempre vale 0 (INFERRED: otra versión del XDK o un campo de fixup).
+Cxbx's push buffer is 20 bytes, but in `ryu.kmd` and `r_ryu.kmd` each one takes 24:
+a u32 that is always 0 follows (INFERRED: another XDK version or a fixup field).
 
-Team Ninja intercala además bloques propios `u32 0x80000000, u32 tamaño, carga útil`
-(USERDATA; observado, no documentado), con los materiales y las mallas del modelo.
+Team Ninja also interleaves its own blocks `u32 0x80000000, u32 size, payload`
+(USERDATA; observed, undocumented), with the model's materials and meshes.
 
-`Format` (textura) empaqueta: bits 0-1 canal DMA, 2 cubemap, 3 color de borde, 4-7
-dimensiones (2 o 3), 8-15 D3DFORMAT, 16-19 niveles de mip, 20-23/24-27/28-31 log2 del
-ancho, alto y profundidad. `Size` solo se usa en texturas lineales (no potencia de dos):
-bits 0-11 ancho-1, 12-23 alto-1 y 24-31 pitch/64-1.
+`Format` (texture) packs: bits 0-1 DMA channel, 2 cubemap, 3 border color, 4-7
+dimensions (2 or 3), 8-15 D3DFORMAT, 16-19 mip levels, 20-23/24-27/28-31 log2 of
+width, height and depth. `Size` is only used in linear (non-power-of-two) textures:
+bits 0-11 width-1, 12-23 height-1 and 24-31 pitch/64-1.
 
-Fuentes:
-- xboxdevwiki, formato XPR: https://xboxdevwiki.net/XPR
-- Cxbx-Reloaded, `X_D3DResource`, `X_D3DPixelContainer`, máscaras `X_D3DCOMMON_*`,
-  `X_D3DFORMAT_*` y `X_D3DSIZE_*`:
+Sources:
+- xboxdevwiki, XPR format: https://xboxdevwiki.net/XPR
+- Cxbx-Reloaded, `X_D3DResource`, `X_D3DPixelContainer`, `X_D3DCOMMON_*` masks,
+  `X_D3DFORMAT_*` and `X_D3DSIZE_*`:
   https://github.com/Cxbx-Reloaded/Cxbx-Reloaded/blob/master/src/core/hle/D3D8/XbD3D8Types.h
 """
 
@@ -53,9 +53,9 @@ XPR_MAGIC: Final = b"XPR0"
 XPR_HEADER_SIZE: Final = 12
 END_MARKER: Final = 0xFFFFFFFF
 USERDATA_MARKER: Final = 0x80000000
-# Tope de cabeceras de recurso antes del 0xFFFFFFFF. El máximo en los 1413 XPR0 del juego
-# (sueltos y dentro de KMD) es 767. 16384 deja margen de sobra y acota la memoria y el
-# tiempo ante una lista de cabeceras hostil o sin terminador.
+# Cap on resource headers before the 0xFFFFFFFF. The maximum across the game's 1413 XPR0s
+# (standalone and inside KMDs) is 767. 16384 leaves ample margin and bounds memory and
+# time against a hostile or unterminated header list.
 MAX_RESOURCES: Final = 16384
 
 _U32: Final = struct.Struct("<I")
@@ -65,7 +65,7 @@ _PUSH_BUFFER: Final = struct.Struct("<6I")
 
 
 class ResourceType(IntEnum):
-    """Bits 16-18 de `Common` (`X_D3DCOMMON_TYPE_*`)."""
+    """Bits 16-18 of `Common` (`X_D3DCOMMON_TYPE_*`)."""
 
     VERTEX_BUFFER = 0
     INDEX_BUFFER = 1
@@ -78,7 +78,7 @@ class ResourceType(IntEnum):
 
 @dataclass(frozen=True, slots=True)
 class FormatWord:
-    """Campo `Format` de una textura, decodificado por bits."""
+    """`Format` field of a texture, decoded by bits."""
 
     raw: int
 
@@ -100,7 +100,7 @@ class FormatWord:
 
     @property
     def code(self) -> int:
-        """D3DFORMAT de Xbox (ver `formats`)."""
+        """Xbox D3DFORMAT (see `formats`)."""
         return (self.raw >> 8) & 0xFF
 
     @property
@@ -134,7 +134,7 @@ class FormatWord:
 
 @dataclass(frozen=True, slots=True)
 class SizeWord:
-    """Campo `Size`: dimensiones y pitch de una textura lineal; 0 en las demás."""
+    """`Size` field: dimensions and pitch of a linear texture; 0 in the others."""
 
     raw: int
 
@@ -157,8 +157,8 @@ class SizeWord:
 
 @dataclass(frozen=True, slots=True)
 class Texture:
-    """`D3DTexture`. `index` es la posición en la lista de cabeceras y `offset`, la de la
-    cabecera dentro del XPR0; `data` es relativo a `header_size`."""
+    """`D3DTexture`. `index` is the position in the header list and `offset` that of the
+    header inside the XPR0; `data` is relative to `header_size`."""
 
     index: int
     offset: int
@@ -171,7 +171,7 @@ class Texture:
 
 @dataclass(frozen=True, slots=True)
 class Palette:
-    """`D3DPalette`: entradas D3DCOLOR (u32 ARGB) a partir de `data`."""
+    """`D3DPalette`: D3DCOLOR entries (ARGB u32) starting at `data`."""
 
     index: int
     offset: int
@@ -181,7 +181,7 @@ class Palette:
 
     @property
     def entries(self) -> int:
-        """`X_D3DPALETTE_COMMON_PALETTESIZE`: 0 = 256, 1 = 128, 2 = 64, 3 = 32 entradas."""
+        """`X_D3DPALETTE_COMMON_PALETTESIZE`: 0 = 256, 1 = 128, 2 = 64, 3 = 32 entries."""
         return 256 >> ((self.common >> 30) & 0x3)
 
     @property
@@ -191,7 +191,7 @@ class Palette:
 
 @dataclass(frozen=True, slots=True)
 class VertexBuffer:
-    """`D3DVertexBuffer`: vértices en `data`; su formato lo describe el USERDATA del KMD."""
+    """`D3DVertexBuffer`: vertices at `data`; their format is described by the KMD USERDATA."""
 
     index: int
     offset: int
@@ -202,7 +202,7 @@ class VertexBuffer:
 
 @dataclass(frozen=True, slots=True)
 class IndexBuffer:
-    """`D3DIndexBuffer`: índices u16 en `data` (en ryu.kmd, al principio de los datos)."""
+    """`D3DIndexBuffer`: u16 indices at `data` (in ryu.kmd, at the start of the data)."""
 
     index: int
     offset: int
@@ -213,9 +213,9 @@ class IndexBuffer:
 
 @dataclass(frozen=True, slots=True)
 class PushBuffer:
-    """`D3DPushBuffer`: comandos de GPU pregrabados (`size` bytes en `data`).
+    """`D3DPushBuffer`: prerecorded GPU commands (`size` bytes at `data`).
 
-    `trailing` es el sexto u32 observado en el juego (siempre 0); Cxbx no lo documenta.
+    `trailing` is the sixth u32 observed in the game (always 0); Cxbx does not document it.
     """
 
     index: int
@@ -230,7 +230,7 @@ class PushBuffer:
 
 @dataclass(frozen=True, slots=True)
 class UserData:
-    """Bloque propio de Team Ninja dentro de la lista de cabeceras."""
+    """Team Ninja's own block inside the header list."""
 
     index: int
     offset: int
@@ -241,10 +241,10 @@ type Resource = Texture | Palette | VertexBuffer | IndexBuffer | PushBuffer | Us
 
 
 class PaletteSource(StrEnum):
-    """Cómo se asoció la paleta a una textura P8 (ver `XprFile.palette_link`)."""
+    """How the palette was associated with a P8 texture (see `XprFile.palette_link`)."""
 
-    NEXT = "next"  # la cabecera siguiente a la textura (lo que hace todo el juego)
-    ONLY = "only"  # reserva: la única paleta del archivo
+    NEXT = "next"  # the header following the texture (what the whole game does)
+    ONLY = "only"  # fallback: the only palette in the file
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,10 +255,10 @@ class PaletteLink:
 
 @dataclass(frozen=True, slots=True)
 class XprFile:
-    """Un XPR0 parseado.
+    """A parsed XPR0.
 
-    `blob` es una vista (sin copia) de sus `total_size` bytes sobre lo que se pasó a
-    `parse_xpr`. `textures` y `palettes` se indexan una sola vez, al construirlo.
+    `blob` is a view (no copy) of its `total_size` bytes over whatever was passed to
+    `parse_xpr`. `textures` and `palettes` are indexed once, at construction.
     """
 
     total_size: int
@@ -271,7 +271,7 @@ class XprFile:
     def __post_init__(self) -> None:
         textures = tuple(r for r in self.resources if isinstance(r, Texture))
         palettes = tuple(r for r in self.resources if isinstance(r, Palette))
-        object.__setattr__(self, "textures", textures)  # dataclass congelada
+        object.__setattr__(self, "textures", textures)  # frozen dataclass
         object.__setattr__(self, "palettes", palettes)
 
     @property
@@ -279,27 +279,27 @@ class XprFile:
         return self.total_size - self.header_size
 
     def require_data(self, offset: int, length: int) -> None:
-        """Comprueba, sin copiar nada, que `[offset, offset + length)` cabe en los datos."""
+        """Check, without copying anything, that `[offset, offset + length)` fits in the data."""
         if offset < 0 or length < 0 or offset + length > self.data_size:
             raise XprTruncatedError(
-                f"datos [{offset:#x}, {offset + length:#x}) fuera de los {self.data_size:#x} "
-                "bytes de la región de datos"
+                f"data [{offset:#x}, {offset + length:#x}) outside the {self.data_size:#x} "
+                "bytes of the data region"
             )
 
     def data_bytes(self, offset: int, length: int) -> bytes:
-        """`length` bytes de la región de datos a partir de `offset` (un campo `Data`)."""
+        """`length` bytes of the data region starting at `offset` (a `Data` field)."""
         self.require_data(offset, length)
         start = self.header_size + offset
         return bytes(self.blob[start : start + length])
 
     def palette_link(self, texture: Texture) -> PaletteLink | None:
-        """Paleta de una textura P8 y cómo se dedujo.
+        """Palette of a P8 texture and how it was deduced.
 
-        Un XPR0 no enlaza textura y paleta: el juego llama a SetPalette en ejecución. En los
-        1413 XPR0 del juego, las 2959 texturas P8 van seguidas de su paleta (en las
-        cabeceras y en los datos), así que se usa la cabecera siguiente si es una paleta
-        (`NEXT`). Como reserva, la única paleta del archivo (`ONLY`, nunca visto en el
-        juego); si no, se desconoce (`None`). Coste O(1): las paletas ya están indexadas.
+        An XPR0 does not link texture and palette: the game calls SetPalette at run time. In the
+        game's 1413 XPR0s, the 2959 P8 textures are followed by their palette (in the
+        headers and in the data), so the next header is used if it is a palette
+        (`NEXT`). As a fallback, the only palette in the file (`ONLY`, never seen in the
+        game); otherwise it is unknown (`None`). O(1) cost: the palettes are already indexed.
         """
         following = texture.index + 1
         if following < len(self.resources):
@@ -317,20 +317,20 @@ _LAYOUTS: Final = MappingProxyType(
 
 
 def _parse_resource(blob: memoryview, index: int, pos: int, limit: int) -> tuple[Resource, int]:
-    """La cabecera de recurso en `pos` y la posición de la siguiente."""
+    """The resource header at `pos` and the position of the next one."""
     (common,) = _U32.unpack_from(blob, pos)
     if common == USERDATA_MARKER:
         if pos + 8 > limit:
-            raise XprFormatError(f"userdata en {pos:#x} sin tamaño antes de header_size")
+            raise XprFormatError(f"userdata at {pos:#x} has no size before header_size")
         (size,) = _U32.unpack_from(blob, pos + 4)
         end = pos + 8 + size
         if end > limit:
-            raise XprFormatError(f"userdata en {pos:#x} de {size:#x} bytes rebasa header_size")
+            raise XprFormatError(f"userdata at {pos:#x} of {size:#x} bytes runs past header_size")
         return UserData(index, pos, bytes(blob[pos + 8 : end])), end
     kind = (common >> 16) & 0x7
     layout = _LAYOUTS.get(kind, _BUFFER)
     if pos + layout.size > limit:
-        raise XprFormatError(f"cabecera de recurso en {pos:#x} cortada por header_size")
+        raise XprFormatError(f"resource header at {pos:#x} cut off by header_size")
     fields = layout.unpack_from(blob, pos)
     end = pos + layout.size
     match kind:
@@ -347,7 +347,7 @@ def _parse_resource(blob: memoryview, index: int, pos: int, limit: int) -> tuple
             return PushBuffer(index, pos, *fields), end
         case _:
             raise XprFormatError(
-                f"tipo de recurso {kind} no soportado en {pos:#x} (Common = {common:#010x})"
+                f"unsupported resource type {kind} at {pos:#x} (Common = {common:#010x})"
             )
 
 
@@ -358,31 +358,33 @@ def _parse_resources(blob: memoryview, header_size: int) -> tuple[Resource, ...]
         if _U32.unpack_from(blob, pos)[0] == END_MARKER:
             return tuple(resources)
         if len(resources) == MAX_RESOURCES:
-            raise XprFormatError(f"más de {MAX_RESOURCES} cabeceras de recurso sin la marca de fin")
+            raise XprFormatError(
+                f"more than {MAX_RESOURCES} resource headers without the end marker"
+            )
         resource, pos = _parse_resource(blob, len(resources), pos, header_size)
         resources.append(resource)
-    raise XprFormatError(f"sin marca de fin 0xFFFFFFFF antes de header_size = {header_size:#x}")
+    raise XprFormatError(f"no 0xFFFFFFFF end marker before header_size = {header_size:#x}")
 
 
 def parse_xpr(data: Buffer) -> XprFile:
-    """Parsea el XPR0 que empieza en `data[0]`; lo que sobre tras `total_size` se ignora.
+    """Parse the XPR0 that starts at `data[0]`; anything left after `total_size` is ignored.
 
-    No copia: el `XprFile` guarda una vista de `data` (bytes, o una vista de un KMD).
+    No copy: the `XprFile` keeps a view of `data` (bytes, or a view of a KMD).
     """
     view = memoryview(data).cast("B")
-    magic = bytes(view[: len(XPR_MAGIC)])  # solo se copian los 4 bytes de la magia
+    magic = bytes(view[: len(XPR_MAGIC)])  # only the 4 magic bytes are copied
     if len(view) < XPR_HEADER_SIZE or magic != XPR_MAGIC:
-        raise XprFormatError(f"magia inválida: {magic!r} (se esperaba {XPR_MAGIC!r})")
+        raise XprFormatError(f"invalid magic: {magic!r} (expected {XPR_MAGIC!r})")
     total_size, header_size = struct.unpack_from("<II", view, 4)
     if total_size < XPR_HEADER_SIZE + 4:
         raise XprFormatError(
-            f"total_size = {total_size:#x}: no caben la cabecera y la marca de fin"
+            f"total_size = {total_size:#x}: the header and the end marker do not fit"
         )
     if total_size > len(view):
-        raise XprTruncatedError(f"total_size = {total_size:#x} pero hay {len(view):#x} bytes")
+        raise XprTruncatedError(f"total_size = {total_size:#x} but there are {len(view):#x} bytes")
     if not XPR_HEADER_SIZE + 4 <= header_size <= total_size:
         raise XprFormatError(
-            f"header_size = {header_size:#x} fuera de [0x10, total_size = {total_size:#x}]"
+            f"header_size = {header_size:#x} outside [0x10, total_size = {total_size:#x}]"
         )
     blob = view[:total_size]
     return XprFile(total_size, header_size, _parse_resources(blob, header_size), blob)

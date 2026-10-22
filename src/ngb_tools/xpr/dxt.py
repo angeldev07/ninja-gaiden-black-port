@@ -1,39 +1,39 @@
-"""Decodificación S3TC: DXT1 (BC1), DXT2/3 (BC2) y DXT4/5 (BC3) a RGBA8.
+"""S3TC decoding: DXT1 (BC1), DXT2/3 (BC2) and DXT4/5 (BC3) to RGBA8.
 
-Los DXT dividen la imagen en bloques de 4x4 píxeles y comprimen cada uno por separado, a
-tamaño fijo. En la NV2A los bloques van en orden lineal (fila de bloques tras fila de
-bloques) y sin swizzle.
+DXT splits the image into 4x4-pixel blocks and compresses each one separately, at a
+fixed size. On the NV2A the blocks are in linear order (block row after block
+row) and not swizzled.
 
-**Mitad de color (8 bytes, común a los tres):** dos colores RGB565 `c0` y `c1` (u16 LE) y
-32 bits con un índice de 2 bits por píxel (el píxel 0 en los bits bajos, fila a fila). Los
-índices 2 y 3 son colores intermedios:
+**Color half (8 bytes, common to all three):** two RGB565 colors `c0` and `c1` (u16 LE) and
+32 bits holding a 2-bit index per pixel (pixel 0 in the low bits, row by row). Indices
+2 and 3 are intermediate colors:
 
-- `c0 > c1`: c2 = (2*c0 + c1) / 3, c3 = (c0 + 2*c1) / 3 (cuatro colores);
-- `c0 <= c1` y **solo en DXT1**: c2 = (c0 + c1) / 2 y c3 = negro transparente. Es el
-  "alfa de 1 bit" de DXT1 (`L_DXT1_A1R5G5B5` en la NV2A). DXT3/5 usan siempre 4 colores.
+- `c0 > c1`: c2 = (2*c0 + c1) / 3, c3 = (c0 + 2*c1) / 3 (four colors);
+- `c0 <= c1` and **DXT1 only**: c2 = (c0 + c1) / 2 and c3 = transparent black. This is
+  DXT1's "1-bit alpha" (`L_DXT1_A1R5G5B5` on the NV2A). DXT3/5 always use 4 colors.
 
-Los canales de 5 y 6 bits se amplían a 8 replicando sus bits altos en los bajos
-(`r8 = r5 << 3 | r5 >> 2`), así 0 -> 0 y 31 -> 255. Las divisiones truncan, como en xemu.
+The 5- and 6-bit channels are widened to 8 by replicating their high bits into the low ones
+(`r8 = r5 << 3 | r5 >> 2`), so 0 -> 0 and 31 -> 255. Divisions truncate, as in xemu.
 
-**DXT3 (16 bytes):** 64 bits de alfa explícito (4 bits por píxel, `a8 = a4 * 17`) y
-después la mitad de color.
+**DXT3 (16 bytes):** 64 bits of explicit alpha (4 bits per pixel, `a8 = a4 * 17`) and
+then the color half.
 
-**DXT5 (16 bytes):** dos alfas `a0`, `a1` de 8 bits, 48 bits con un índice de 3 bits por
-píxel y la mitad de color. Si `a0 > a1` hay 6 alfas interpolados; si no, 4 interpolados
-más 0 y 255.
+**DXT5 (16 bytes):** two 8-bit alphas `a0`, `a1`, 48 bits with a 3-bit index per
+pixel, and the color half. If `a0 > a1` there are 6 interpolated alphas; otherwise, 4
+interpolated plus 0 and 255.
 
-DXT2 y DXT4 son DXT3 y DXT5 con el color premultiplicado por el alfa. En la NV2A
-comparten código (`L_DXT23_A8R8G8B8` = 0x0E y `L_DXT45_A8R8G8B8` = 0x0F en xemu), así que
-la textura no dice cuál es: se decodifican como DXT3 y DXT5 (alfa recto), como xemu y Cxbx.
-El manifiesto lo deja escrito (`alpha`, ver `texture.alpha_mode`): un píxel con un canal
-mayor que su alfa descarta el premultiplicado. En el juego, de los 5510 DXT5 (0x0F),
-5134 lo descartan, 29 son opacos y 347 quedan sin decidir. El único 0x0E (dlcustom.xpr)
-queda sin decidir: es opaco al 99,9 % y sus píxeles translúcidos son oscuros.
+DXT2 and DXT4 are DXT3 and DXT5 with the color premultiplied by alpha. On the NV2A they
+share code (`L_DXT23_A8R8G8B8` = 0x0E and `L_DXT45_A8R8G8B8` = 0x0F in xemu), so the
+texture does not say which it is: they are decoded as DXT3 and DXT5 (straight alpha), like
+xemu and Cxbx. The manifest records this (`alpha`, see `texture.alpha_mode`): a pixel with a
+channel greater than its alpha rules out premultiplication. In the game, of the 5510 DXT5
+(0x0F), 5134 rule it out, 29 are opaque and 347 remain undecided. The only 0x0E
+(dlcustom.xpr) remains undecided: it is 99.9 % opaque and its translucent pixels are dark.
 
-Fuentes:
-- xemu, decodificador de referencia del emulador:
+Sources:
+- xemu, the emulator's reference decoder:
   https://github.com/xemu-project/xemu/blob/master/hw/xbox/nv2a/pgraph/s3tc.c
-- Microsoft, formatos BC1-BC3:
+- Microsoft, BC1-BC3 formats:
   https://learn.microsoft.com/en-us/windows/win32/direct3d10/d3d10-graphics-programming-guide-resources-block-compression
 """
 
@@ -56,7 +56,7 @@ def _expand565(color: int) -> Rgb:
 
 
 def _color_palette(c0: int, c1: int, *, four_colors: bool) -> tuple[Rgb, Rgb, Rgb, Rgb]:
-    """Los cuatro colores del bloque; en modo de tres, el cuarto es negro."""
+    """The four colors of the block; in three-color mode, the fourth is black."""
     rgb0, rgb1 = _expand565(c0), _expand565(c1)
     if four_colors:
         rgb2 = (
@@ -85,12 +85,12 @@ def _bc1_block(block: bytes) -> Sequence[bytes]:
     palette = _color_palette(c0, c1, four_colors=four_colors)
     texels = [bytes((*rgb, 255)) for rgb in palette]
     if not four_colors:
-        texels[3] = bytes(4)  # negro transparente
+        texels[3] = bytes(4)  # transparent black
     return [texels[i] for i in _color_indices(indices)]
 
 
 def _with_alpha(colors: bytes, alpha: Sequence[int]) -> Sequence[bytes]:
-    """Combina la mitad de color (siempre de 4 colores) con un alfa por píxel."""
+    """Combine the color half (always 4 colors) with a per-pixel alpha."""
     c0, c1, indices = _COLOR_HALF.unpack_from(colors)
     palette = _color_palette(c0, c1, four_colors=True)
     return [
@@ -118,7 +118,7 @@ def _bc3_block(block: bytes) -> Sequence[bytes]:
 
 
 def compressed_size(width: int, height: int, block_bytes: int) -> int:
-    """Bytes de una imagen DXT: los bloques cubren la imagen aunque no sea múltiplo de 4."""
+    """Bytes of a DXT image: the blocks cover the image even if it is not a multiple of 4."""
     return -(-width // BLOCK) * -(-height // BLOCK) * block_bytes
 
 
@@ -128,14 +128,14 @@ def _decode_blocks(
     blocks_x, blocks_y = -(-width // BLOCK), -(-height // BLOCK)
     needed = blocks_x * blocks_y * block_bytes
     if len(data) < needed:
-        raise ValueError(f"{len(data)} bytes; un DXT de {width}x{height} necesita {needed}")
+        raise ValueError(f"{len(data)} bytes; a {width}x{height} DXT needs {needed}")
     out = bytearray(width * height * 4)
     for by in range(blocks_y):
         for bx in range(blocks_x):
             start = (by * blocks_x + bx) * block_bytes
             texels = decode_block(data[start : start + block_bytes])
             x0 = bx * BLOCK
-            span = min(BLOCK, width - x0) * 4  # bytes visibles de cada fila del bloque
+            span = min(BLOCK, width - x0) * 4  # visible bytes of each block row
             for row in range(min(BLOCK, height - by * BLOCK)):
                 pos = ((by * BLOCK + row) * width + x0) * 4
                 out[pos : pos + span] = b"".join(texels[row * BLOCK : row * BLOCK + BLOCK])[:span]
@@ -143,15 +143,15 @@ def _decode_blocks(
 
 
 def decode_bc1(data: bytes, width: int, height: int) -> bytes:
-    """DXT1 a RGBA8 (8 bytes por bloque, alfa de 1 bit)."""
+    """DXT1 to RGBA8 (8 bytes per block, 1-bit alpha)."""
     return _decode_blocks(data, width, height, 8, _bc1_block)
 
 
 def decode_bc2(data: bytes, width: int, height: int) -> bytes:
-    """DXT2/DXT3 a RGBA8 (16 bytes por bloque, alfa explícito de 4 bits)."""
+    """DXT2/DXT3 to RGBA8 (16 bytes per block, explicit 4-bit alpha)."""
     return _decode_blocks(data, width, height, 16, _bc2_block)
 
 
 def decode_bc3(data: bytes, width: int, height: int) -> bytes:
-    """DXT4/DXT5 a RGBA8 (16 bytes por bloque, alfa interpolado)."""
+    """DXT4/DXT5 to RGBA8 (16 bytes per block, interpolated alpha)."""
     return _decode_blocks(data, width, height, 16, _bc3_block)

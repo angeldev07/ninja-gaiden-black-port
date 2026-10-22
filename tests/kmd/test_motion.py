@@ -1,4 +1,4 @@
-"""Tests del banco de motions: claves de 20 bits, duraciones, interpolación y errores."""
+"""Tests of the motion bank: 20-bit keys, durations, interpolation and errors."""
 
 from __future__ import annotations
 
@@ -9,11 +9,11 @@ from ngb_tools.kmd.motion import MotionFormatError, parse_motion_bank, parse_tra
 
 from .synthetic_motion import build_bank, chr_dat, constant, key
 
-# Pista de 20 frames con los cuatro tipos de clave:
-#   frame 0: tipo 1 (valor 0) -> lineal hasta 40 en 4 frames
-#   frame 4: tipo 3 (valor 40, pendientes A=160 y B=0) -> Hermite hasta 140 en 10 frames
-#   frame 14: tipo 2 (valor 140, pendiente 32) -> Hermite hasta 100 en 6 frames
-#   frame 20: fin (valor 100)
+# 20-frame track with the four key kinds:
+#   frame 0: kind 1 (value 0) -> linear up to 40 in 4 frames
+#   frame 4: kind 3 (value 40, slopes A=160 and B=0) -> Hermite up to 140 in 10 frames
+#   frame 14: kind 2 (value 140, slope 32) -> Hermite up to 100 in 6 frames
+#   frame 20: end (value 100)
 MIXED = key(1, 4, 0) + key(3, 10, 40, 160, 0) + key(2, 6, 140, 32) + key(0, 0, 100)
 
 
@@ -23,10 +23,10 @@ def track(data: bytes):  # type: ignore[no-untyped-def]
 
 class KeyTests(unittest.TestCase):
     def test_value_is_a_signed_20_bit_integer(self) -> None:
-        # -531 = 0xFFDED: los 4 bits altos (0xF) van en el control, como en ryu.mtn
+        # -531 = 0xFFDED: the 4 high bits (0xF) go in the control word, as in ryu.mtn
         self.assertEqual(key(1, 4, -531)[:2], struct.pack("<H", 0xF011))
         self.assertEqual(track(constant(-531, 4)).keys[0].value, -531)
-        # 62722 = 0x0F502: positivo aunque el u16 bajo tenga el bit 15 a 1
+        # 62722 = 0x0F502: positive even though the low u16 has bit 15 set
         self.assertEqual(track(constant(62722, 4)).keys[0].value, 62722)
 
     def test_frames_accumulate_and_the_end_key_closes_the_track(self) -> None:
@@ -49,15 +49,15 @@ class SampleTests(unittest.TestCase):
         self.assertEqual(self.t.sample(25), 100.0)
 
     def test_value_keys_are_linear(self) -> None:
-        self.assertAlmostEqual(self.t.sample(2), 20.0)  # mitad de 0 -> 40
+        self.assertAlmostEqual(self.t.sample(2), 20.0)  # midpoint of 0 -> 40
 
     def test_two_slopes_hermite(self) -> None:
-        # t = 0,5; m0 = 160 * 10 / 16 = 100; m1 = 0
-        # p = 0,5*40 + 0,125*100 + 0,5*140 - 0,125*0 = 102,5
+        # t = 0.5; m0 = 160 * 10 / 16 = 100; m1 = 0
+        # p = 0.5*40 + 0.125*100 + 0.5*140 - 0.125*0 = 102.5
         self.assertAlmostEqual(self.t.sample(9), 102.5)
 
     def test_one_slope_is_used_at_both_ends(self) -> None:
-        # t = 0,5; m0 = m1 = 32 * 6 / 16 = 12 -> se cancelan: 0,5*140 + 0,5*100 = 120
+        # t = 0.5; m0 = m1 = 32 * 6 / 16 = 12 -> they cancel: 0.5*140 + 0.5*100 = 120
         self.assertAlmostEqual(self.t.sample(17), 120.0)
 
 

@@ -1,22 +1,22 @@
-"""CLI de escenarios: `python -m ngb_tools.stage {info,export}`.
+"""Stage CLI: `python -m ngb_tools.stage {info,export}`.
 
-    info   <zona> [--game DIR]                    partes, variantes repetidas y recuentos
-    export <zona> [--parts 01,02,...|all] [--out DIR] [--format glb|gltf] [--collision]
+    info   <zone> [--game DIR]                    parts, repeated variants and counts
+    export <zone> [--parts 01,02,...|all] [--out DIR] [--format glb|gltf] [--collision]
                   [--game DIR]
 
-Las partes salen de `<zona>_NN.afs` y `<zona>_cmn.afs` en `--game` (por defecto
-`$NGB_DATA/game`; ver `ngb_tools.stage.zone`). `export` escribe `<zona>.glb` (o `.gltf` +
-`.bin`) en `--out`, por defecto `$NGB_DATA/extracted/stages/<zona>`, nunca dentro de un
-repo git. Las texturas son los PNG de `$NGB_DATA/extracted/textures/<parte>`; si faltan o
-no cuadran, se exportan ahí. Una parte idéntica a otra ya incluida se salta.
+The parts come from `<zone>_NN.afs` and `<zone>_cmn.afs` in `--game` (default
+`$NGB_DATA/game`; see `ngb_tools.stage.zone`). `export` writes `<zone>.glb` (or `.gltf` +
+`.bin`) to `--out`, by default `$NGB_DATA/extracted/stages/<zone>`, never inside a git repo.
+The textures are the PNGs in `$NGB_DATA/extracted/textures/<part>`; if they are missing or
+do not match, they are exported there. A part identical to one already included is skipped.
 
-Códigos de salida:
+Exit codes:
 
-- 0: todo correcto.
-- 1: hallazgo sobre los datos: alguna parte ilegible, invariantes incumplidas o partes saltadas.
-- 2: error de uso o de E/S: zona inexistente, argumentos, salida dentro del repo, archivos.
+- 0: all good.
+- 1: finding about the data: an unreadable part, violated invariants or skipped parts.
+- 2: usage or I/O error: nonexistent zone, arguments, output inside the repo, files.
 
-Sobre datos del juego se ejecuta en modo aislado (`-I`, o `-P -s` con PYTHONPATH=src).
+On game data it runs in isolated mode (`-I`, or `-P -s` with PYTHONPATH=src).
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ class ExitCode(IntEnum):
 
 
 def default_output_dir(zone: str, environ: Mapping[str, str] | None = None) -> Path:
-    """`<datos>/extracted/stages/<zona>`."""
+    """`<data>/extracted/stages/<zone>`."""
     return data_root(environ) / EXTRACTED_SUBDIR / STAGES_SUBDIR / check_zone_name(zone)
 
 
@@ -80,7 +80,7 @@ def _wanted(text: str | None) -> list[str] | None:
 
 
 def _node_names(loaded: Sequence[LoadedPart]) -> list[str]:
-    """Nombre de nodo (y de carpeta de texturas) único por parte."""
+    """Unique node name (and texture folder name) per part."""
     names: list[str] = []
     for item in loaded:
         name = item.part.name
@@ -113,19 +113,19 @@ def cmd_info(args: argparse.Namespace) -> ExitCode:
     for item in load_parts(parts):
         head = f"{item.part.name:<12} {_origin(item):<20} {len(item.data):>9} B"
         if item.duplicate_of is not None:
-            print(f"{head}  = {item.duplicate_of} (sha256 {item.sha256[:12]}, se salta)")
+            print(f"{head}  = {item.duplicate_of} (sha256 {item.sha256[:12]}, skipped)")
             continue
         try:
             model = _parse(item)
         except (StageError, KmdError, XprError) as error:
-            print(f"{head}  ! ilegible: {error}")
+            print(f"{head}  ! unreadable: {error}")
             findings += 1
             continue
         collision = sum(len(c.triangles) for c in model.collision.values())
         print(
-            f"{head}  {len(model.objects)} objetos, {model.part_count} VB, "
-            f"{_triangles(model)} triángulos, {len(model.textures)} texturas, "
-            f"colisión {collision} triángulos, {len(model.issues)} incidencias"
+            f"{head}  {len(model.objects)} objects, {model.part_count} VB, "
+            f"{_triangles(model)} triangles, {len(model.textures)} textures, "
+            f"collision {collision} triangles, {len(model.issues)} issues"
         )
         for issue in model.issues:
             print(f"  ! {issue}")
@@ -140,7 +140,7 @@ def _scene_part(item: LoadedPart, name: str, problems: list[str]) -> ScenePart |
             model, item.part.afs / f"{item.part.name}.kmd", texture_dir(name)
         )
     except (StageError, KmdError, XprError) as error:
-        problems.append(f"{name}: parte saltada: {error}")
+        problems.append(f"{name}: part skipped: {error}")
         return None
     problems += [f"{name}: {issue}" for issue in model.issues]
     extras = {
@@ -156,30 +156,30 @@ def _scene_part(item: LoadedPart, name: str, problems: list[str]) -> ScenePart |
 def cmd_export(args: argparse.Namespace) -> ExitCode:
     zone = check_zone_name(args.zone)
     out_dir: Path = args.out if args.out is not None else default_output_dir(zone)
-    ensure_outside_repos(out_dir)  # antes de leer nada: no dejar texturas a medias
+    ensure_outside_repos(out_dir)  # before reading anything: do not leave textures half-done
     parts = select_parts(find_zone_parts(_game_dir(args), zone), _wanted(args.parts))
     loaded = load_parts(parts)
     problems: list[str] = []
     scene: list[ScenePart] = []
     for item, name in zip(loaded, _node_names(loaded), strict=True):
         if item.duplicate_of is not None:
-            print(f"{name}: idéntica a {item.duplicate_of}, se salta")
+            print(f"{name}: identical to {item.duplicate_of}, skipped")
             continue
         part = _scene_part(item, name, problems)
         if part is not None:
             scene.append(part)
-            print(f"{name}: {len(part.model.objects)} objetos, {len(part.textures)} PNG")
+            print(f"{name}: {len(part.model.objects)} objects, {len(part.textures)} PNG")
     if not scene:
         for problem in problems:
             print(f"! {problem}")
-        print("error: ninguna parte exportable", file=sys.stderr)
+        print("error: no exportable part", file=sys.stderr)
         return ExitCode.FINDINGS
     fmt = SceneFormat(args.format)
     paths, stats = write_scene(zone, scene, out_dir, fmt=fmt, collision=args.collision)
     print(
-        f"{stats.parts} partes, {stats.objects} objetos, {stats.vertices} vértices, "
-        f"{stats.triangles} triángulos, {stats.primitives} primitivas, "
-        f"{stats.materials} materiales, colisión {stats.collision_triangles} triángulos"
+        f"{stats.parts} parts, {stats.objects} objects, {stats.vertices} vertices, "
+        f"{stats.triangles} triangles, {stats.primitives} primitives, "
+        f"{stats.materials} materials, collision {stats.collision_triangles} triangles"
     )
     for problem in (*problems, *stats.warnings):
         print(f"! {problem}")
@@ -193,32 +193,32 @@ _COMMANDS: Final = MappingProxyType({"info": cmd_info, "export": cmd_export})
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog=PROG, description="Escenarios de Team Ninja: una zona entera a glTF/glb."
+        prog=PROG, description="Team Ninja stages: a whole zone to glTF/glb."
     )
     sub = parser.add_subparsers(dest="command", required=True)
-    game_help = f"carpeta con los AFS; por defecto ${DATA_ENV_VAR}/{GAME_SUBDIR}"
+    game_help = f"folder with the AFS files; default ${DATA_ENV_VAR}/{GAME_SUBDIR}"
 
-    p = sub.add_parser("info", help="partes de la zona, variantes repetidas y recuentos")
-    p.add_argument("zone", metavar="zona")
+    p = sub.add_parser("info", help="zone parts, repeated variants and counts")
+    p.add_argument("zone", metavar="zone")
     p.add_argument("--game", type=Path, metavar="DIR", help=game_help)
 
-    p = sub.add_parser("export", help="exporta la zona a una escena glTF (fuera del repo)")
-    p.add_argument("zone", metavar="zona")
-    p.add_argument("--parts", metavar="01,02|all", help="partes por número; por defecto todas")
+    p = sub.add_parser("export", help="export the zone to a glTF scene (outside the repo)")
+    p.add_argument("zone", metavar="zone")
+    p.add_argument("--parts", metavar="01,02|all", help="parts by number; default all")
     p.add_argument(
         "--out",
         type=Path,
         metavar="DIR",
-        help=f"por defecto ${DATA_ENV_VAR}/extracted/stages/<zona>",
+        help=f"default ${DATA_ENV_VAR}/extracted/stages/<zone>",
     )
     p.add_argument("--format", choices=[f.value for f in SceneFormat], default=SceneFormat.GLB)
-    p.add_argument("--collision", action="store_true", help="añade HITMDL (malla translúcida)")
+    p.add_argument("--collision", action="store_true", help="add HITMDL (translucent mesh)")
     p.add_argument("--game", type=Path, metavar="DIR", help=game_help)
     return parser
 
 
 def tolerate_unencodable_output() -> None:
-    """Una consola que no sabe representar un carácter lo sustituye en vez de abortar."""
+    """A console that cannot represent a character substitutes it instead of aborting."""
     for stream in (sys.stdout, sys.stderr):
         if isinstance(stream, io.TextIOWrapper):
             stream.reconfigure(errors="replace")
@@ -241,6 +241,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def run() -> int:
-    """Entrada de consola (`python -m ngb_tools.stage`; el entry point lo añade el líder)."""
+    """Console entry (`python -m ngb_tools.stage`)."""
     tolerate_unencodable_output()
     return main()

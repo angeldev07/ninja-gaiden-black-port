@@ -1,4 +1,4 @@
-"""Tests de integración de la guardia contra repos git reales y desechables."""
+"""Integration tests of the guard against real, disposable git repos."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ def found(report: ScanReport) -> set[tuple[str, Rule]]:
 
 
 class TempRepo:
-    """Repo git desechable; la config del usuario queda fuera (ver `GitTestCase`)."""
+    """Disposable git repo; the user config is kept out (see `GitTestCase`)."""
 
     def __init__(self, root: Path) -> None:
         self.root = root
@@ -60,11 +60,11 @@ class TempRepo:
         self.git("add", "--", path)
 
     def hash_blob(self, content: bytes) -> str:
-        """Guarda un blob en la base de objetos y devuelve su oid."""
+        """Store a blob in the object database and return its oid."""
         return self.git("hash-object", "-w", "--stdin", stdin=content).decode("ascii").strip()
 
     def stage_entry(self, mode: str, path: str, content: bytes) -> None:
-        """Mete un blob en el índice sin tocar el disco (symlinks, cambios de tipo)."""
+        """Put a blob in the index without touching the disk (symlinks, type changes)."""
         oid = self.hash_blob(content)
         self.git("update-index", "--add", "--cacheinfo", f"{mode},{oid},{path}")
 
@@ -75,9 +75,9 @@ class TempRepo:
         return scan(GitRepo.discover(self.root), staged=staged)
 
 
-@unittest.skipUnless(GIT, "git no está en PATH")
+@unittest.skipUnless(GIT, "git is not on PATH")
 class GitTestCase(unittest.TestCase):
-    """Cada test tiene su repo temporal y un git aislado de la config y el entorno del usuario."""
+    """Each test gets its own temp repo and a git isolated from the user config and environment."""
 
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
@@ -85,7 +85,7 @@ class GitTestCase(unittest.TestCase):
         self.tmp = Path(tmp.name)
         empty_config = self.tmp / "gitconfig"
         empty_config.write_bytes(b"")
-        # Sin GIT_DIR, GIT_INDEX_FILE... heredados (p. ej. si los tests corren desde un hook).
+        # Without inherited GIT_DIR, GIT_INDEX_FILE... (e.g. when the tests run from a hook).
         env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
         env |= {
             "GIT_CONFIG_NOSYSTEM": "1",
@@ -98,7 +98,7 @@ class GitTestCase(unittest.TestCase):
         self.repo = TempRepo(self.tmp / "repo")
 
     def run_main(self, *args: str) -> tuple[int, str]:
-        """Ejecuta la CLI en proceso; devuelve el código y lo escrito en stderr."""
+        """Run the CLI in-process; return the exit code and what was written to stderr."""
         stdout, stderr = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             code = main(list(args))
@@ -108,7 +108,7 @@ class GitTestCase(unittest.TestCase):
 class StagedScanTest(GitTestCase):
     def test_staged_scan_judges_the_index_blob_not_the_worktree(self) -> None:
         self.repo.stage("notes.txt", XBE)
-        self.repo.write("notes.txt", b"solo texto\n")
+        self.repo.write("notes.txt", b"just text\n")
         self.assertEqual(found(self.repo.scan(staged=True)), {("notes.txt", Rule.SIGNATURE)})
 
     def test_type_change_from_symlink_to_file_is_checked(self) -> None:
@@ -120,7 +120,7 @@ class StagedScanTest(GitTestCase):
     def test_staged_scan_skips_paths_already_committed(self) -> None:
         self.repo.stage("old.afs", b"x")
         self.repo.commit()
-        self.repo.stage("new.txt", b"hola\n")
+        self.repo.stage("new.txt", b"hello\n")
         report = self.repo.scan(staged=True)
         self.assertEqual((report.checked, report.violations), (1, ()))
 
@@ -137,14 +137,14 @@ class IndexScanTest(GitTestCase):
         self.assertEqual(report.checked, 2)
 
     def test_paths_with_spaces_and_non_ascii_round_trip(self) -> None:
-        self.repo.stage("señal ñ.txt", XBE)
-        self.repo.stage("dir con espacios/nota final.md", b"# hola\n")
+        self.repo.stage("signal ñ.txt", XBE)
+        self.repo.stage("dir with spaces/final note.md", b"# hello\n")
         report = self.repo.scan(staged=False)
-        self.assertEqual(found(report), {("señal ñ.txt", Rule.SIGNATURE)})
+        self.assertEqual(found(report), {("signal ñ.txt", Rule.SIGNATURE)})
         self.assertEqual(report.checked, 2)
 
     def test_big_blob_is_read_through_a_cut_pipe(self) -> None:
-        # Mucho mayor que el búfer de un tubo: git sigue escribiendo cuando se corta.
+        # Much larger than a pipe buffer: git keeps writing when it is cut.
         image = bytes(0x10000) + b"MICROSOFT*XBOX*MEDIA" + bytes(4 * 1024 * 1024)
         self.repo.stage("disc.img", image)
         self.assertEqual(
@@ -178,10 +178,10 @@ class IndexScanTest(GitTestCase):
     def test_replace_refs_do_not_hide_the_real_blob(self) -> None:
         self.repo.stage("notes.txt", XBE)
         game_oid = self.repo.git("rev-parse", ":notes.txt").decode("ascii").strip()
-        self.repo.git("replace", game_oid, self.repo.hash_blob(b"texto\n"))
-        # Para un git normal el reemplazo está activo...
-        self.assertEqual(self.repo.git("cat-file", "blob", game_oid), b"texto\n")
-        # ...pero la guardia sigue viendo el blob real.
+        self.repo.git("replace", game_oid, self.repo.hash_blob(b"text\n"))
+        # For a normal git the replacement is active...
+        self.assertEqual(self.repo.git("cat-file", "blob", game_oid), b"text\n")
+        # ...but the guard still sees the real blob.
         for staged in (True, False):
             with self.subTest(staged=staged):
                 self.assertEqual(
@@ -190,9 +190,9 @@ class IndexScanTest(GitTestCase):
 
     def test_force_added_file_under_an_ignored_dir_is_rejected(self) -> None:
         self.repo.stage(".gitignore", b"game/\n")
-        self.repo.write("game/notas.txt", b"hola\n")
-        self.repo.git("add", "-f", "--", "game/notas.txt")
-        self.assertEqual(found(self.repo.scan(staged=True)), {("game/notas.txt", Rule.PATH)})
+        self.repo.write("game/notes.txt", b"hello\n")
+        self.repo.git("add", "-f", "--", "game/notes.txt")
+        self.assertEqual(found(self.repo.scan(staged=True)), {("game/notes.txt", Rule.PATH)})
 
 
 class AllowlistIntegrationTest(GitTestCase):
@@ -212,12 +212,12 @@ class AllowlistIntegrationTest(GitTestCase):
         self.assertEqual(found(self.repo.scan(staged=False)), {("tools/plain.bin", Rule.EXTENSION)})
 
     def test_allowlist_with_bom_and_non_ascii_paths(self) -> None:
-        self.repo.stage(".hygiene-allow", b"\xef\xbb\xbf" + "señal/ñ.bin\n".encode())
-        self.repo.stage("señal/ñ.bin", b"\x01\x02")
+        self.repo.stage(".hygiene-allow", b"\xef\xbb\xbf" + "signal/ñ.bin\n".encode())
+        self.repo.stage("signal/ñ.bin", b"\x01\x02")
         self.assertEqual(self.repo.scan(staged=False).violations, ())
 
     def test_allowlist_that_is_not_utf8_exits_2(self) -> None:
-        # PowerShell 5 escribe UTF-16 con `>`: mejor un error claro que ignorarlo.
+        # PowerShell 5 writes UTF-16 with `>`: better a clear error than ignoring it.
         self.repo.stage(".hygiene-allow", "tools/plain.bin\n".encode("utf-16"))
         code, stderr = self.run_main("--root", str(self.repo.root))
         self.assertEqual(code, 2)
@@ -239,7 +239,7 @@ class AllowlistIntegrationTest(GitTestCase):
         self.repo.commit()
         self.repo.stage(".hygiene-allow", b"tools/plain.bin\n")
         self.repo.stage("tools/plain.bin", b"\x01\x02")
-        # El hook usa la lista de HEAD; la CI, la del árbol de la PR (visible en la revisión).
+        # The hook uses the HEAD list; CI uses the PR tree one (visible in review).
         self.assertEqual(found(self.repo.scan(staged=True)), {("tools/plain.bin", Rule.EXTENSION)})
         self.assertEqual(self.repo.scan(staged=False).violations, ())
 
@@ -257,11 +257,12 @@ class AllowlistIntegrationTest(GitTestCase):
 
 
 class ProcessTimeoutTest(unittest.TestCase):
-    """Un git colgado (p. ej. esperando a la red) no puede bloquear el hook ni la CI."""
+    """A hung git (e.g. waiting on the network) cannot block the hook or CI."""
 
     SLOW = (sys.executable, "-c", "import time; time.sleep(30)")
-    # Un nieto que hereda stdout/stderr, como el git real bajo el lanzador `cmd\git.exe` de
-    # Windows: matar solo al hijo deja los tubos abiertos y la lectura colgada 30 s.
+    # A grandchild that inherits stdout/stderr, like the real git under the Windows
+    # `cmd\git.exe` launcher: killing only the child leaves the pipes open and the read
+    # hung for 30 s.
     SLOW_TREE = (
         sys.executable,
         "-c",
@@ -307,7 +308,7 @@ class MainTest(GitTestCase):
     def test_staged_flag_limits_the_scan_to_prepared_files(self) -> None:
         self.repo.stage("old.afs", b"x")
         self.repo.commit()
-        self.repo.stage("new.txt", b"hola\n")
+        self.repo.stage("new.txt", b"hello\n")
         self.assertEqual(self.run_main("--staged", "--root", str(self.repo.root))[0], 0)
         self.assertEqual(self.run_main("--root", str(self.repo.root))[0], 1)
 

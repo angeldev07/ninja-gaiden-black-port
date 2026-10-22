@@ -1,4 +1,4 @@
-"""Informes: JSON tipado (direcciones en hex) y resumen Markdown."""
+"""Reports: typed JSON (addresses in hex) and Markdown summary."""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ class JsonReportTests(unittest.TestCase):
         self.assertEqual(set(with_strings), REPORT_KEYS | {"strings"})
 
     def test_counts_keyed_by_free_text_stay_ints(self) -> None:
-        # Un prefijo de identificador acabado en "va" no es una dirección.
+        # An identifier prefix ending in "va" is not an address.
         data = build_synthetic_xbe(extra_strings=(b"nova_ring_01",))
         strings = build_report(analysis_of(data, with_strings=True))["strings"]
         self.assertEqual(strings["identifier_prefixes"], {"STG": 1, "nova": 1})
@@ -80,7 +80,7 @@ class JsonReportTests(unittest.TestCase):
     def test_render_json_round_trips_with_unicode(self) -> None:
         text = render_json(analysis_of(build_synthetic_xbe()))
         self.assertTrue(text.endswith("}\n"))
-        self.assertIn('"approved_text": "sí"', text)
+        self.assertIn('"approved_text": "yes"', text)
         self.assertEqual(json.loads(text)["file"]["name"], "synthetic.xbe")
 
 
@@ -97,23 +97,23 @@ class MarkdownTests(unittest.TestCase):
         self.assertIn("**TC-013**", markdown)
         self.assertIn("`DbgPrint`", markdown)
         self.assertIn("| 0 | `.text` | PRELOAD EXECUTABLE |", markdown)
-        self.assertIn("(codificado 0xA8FD47AB, sección `.text`) |", markdown)
-        self.assertNotIn("## Cadenas", markdown)
+        self.assertIn("(encoded 0xA8FD47AB, section `.text`) |", markdown)
+        self.assertNotIn("## Strings", markdown)
 
     def test_tampered_section_is_flagged(self) -> None:
         markdown = render_markdown(analysis_of(corrupt_text_section(build_synthetic_xbe())))
-        self.assertIn("| 0x200 | MAL |", markdown)
+        self.assertIn("| 0x200 | BAD |", markdown)
 
     def test_strings_section_when_requested(self) -> None:
         markdown = render_markdown(analysis_of(build_synthetic_xbe(), with_strings=True))
-        self.assertIn("## Cadenas", markdown)
+        self.assertIn("## Strings", markdown)
         self.assertIn("`Game::CPlayer`", markdown)
 
     def test_unknown_xor_keys_render(self) -> None:
         data = with_u32(build_synthetic_xbe(), 0x128, 0x12345678)
         markdown = render_markdown(analysis_of(data))
-        self.assertIn("| Tipo de build (XOR) | **unknown** |", markdown)
-        self.assertIn("## Imports del kernel (0)", markdown)
+        self.assertIn("| Build type (XOR) | **unknown** |", markdown)
+        self.assertIn("## Kernel imports (0)", markdown)
 
 
 if __name__ == "__main__":

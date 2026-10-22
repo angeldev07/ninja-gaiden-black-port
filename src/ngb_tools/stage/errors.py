@@ -1,21 +1,21 @@
-"""Jerarquía de errores de la herramienta de escenarios.
+"""Error hierarchy of the stage tool.
 
-La CLI traduce cada familia a un código de salida, igual que `ngb_tools.kmd`: unos datos
-ilegibles son un hallazgo (1); una zona inexistente o un fallo de E/S, un error de uso (2).
-Los errores de `ngb_tools.kmd` (`KmdError`) y de `ngb_tools.xpr` (`XprError`) se propagan
-tal cual: un escenario se lee con sus parsers.
+The CLI maps each family to an exit code, like `ngb_tools.kmd`: unreadable data is a
+finding (1); a nonexistent zone or an I/O failure is a usage error (2). Errors from
+`ngb_tools.kmd` (`KmdError`) and `ngb_tools.xpr` (`XprError`) propagate as they are: a stage
+is read with their parsers.
 """
 
 from __future__ import annotations
 
 
 class StageError(Exception):
-    """Raíz de todos los errores de `ngb_tools.stage`."""
+    """Root of all `ngb_tools.stage` errors."""
 
 
 class StageFormatError(StageError):
-    """Los bytes no forman un KMD de escenario legible (descriptor, HITMDL, emparejamiento)."""
+    """The bytes do not form a readable stage KMD (descriptor, HITMDL, pairing)."""
 
 
 class ZoneNotFoundError(StageError):
-    """No hay ningún AFS ni ninguna parte para la zona o las partes pedidas."""
+    """There is no AFS or part for the requested zone or parts."""

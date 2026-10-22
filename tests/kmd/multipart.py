@@ -1,9 +1,9 @@
-"""KMD de personaje sintético con un objeto de dos partes (nunca datos del juego).
+"""Synthetic character KMD with a two-part object (never game data).
 
-Como `doku.kmd` obj1 o `aruma.kmd`: el objeto 0 tiene una parte FVF 0x112 (posición,
-normal y UV) que lee del IB y otra FVF 0x142 (posición, color y UV, sin normal) que lee de
-un push buffer con basura en el u32 de relleno tras END; sus submallas van en orden
-inverso (primero la de la parte 1). El objeto 1 es una pieza de una parte, hija del 0.
+Like `doku.kmd` obj1 or `aruma.kmd`: object 0 has one FVF 0x112 part (position, normal and
+UV) that reads from the IB and another FVF 0x142 part (position, color and UV, no normal)
+that reads from a push buffer with garbage in the padding u32 after END; its submeshes are
+in reverse order (part 1's first). Object 1 is a one-part piece, a child of 0.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ STRIP = (0, 1, 2, 3)
 
 type Vec3 = tuple[float, float, float]
 
-# Quads en z = 0: los triángulos de la tira miran a +Z.
+# Quads at z = 0: the strip triangles face +Z.
 QUAD_A: tuple[Vec3, ...] = ((0, 0, 0), (1, 0, 0), (0, 1, 0), (1, 1, 0))
 QUAD_B: tuple[Vec3, ...] = ((2, 0, 0), (3, 0, 0), (2, 1, 0), (3, 1, 0))
 UVS = ((0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0))
@@ -65,7 +65,7 @@ def submesh(ordinal: int, part: int, push_buffer: bool) -> bytes:
 
 
 def two_part_descriptor() -> bytes:
-    """Dos partes; la submalla 0 es de la parte 1 (push buffer) y la 1 de la parte 0 (IB)."""
+    """Two parts; submesh 0 belongs to part 1 (push buffer) and submesh 1 to part 0 (IB)."""
     return (
         struct.pack("<2I", 2, 2)
         + part_header(FVF_NORMAL, 32, 4)
@@ -89,7 +89,7 @@ def objinfo_entry(n_sub: int, group: int = 1) -> bytes:
 
 
 def build_multipart_kmd(*, vb_count: int = 3, descriptor: bytes | None = None) -> bytes:
-    """KMD con OBJINFO, XPR0 (cabecera, 2 descriptores, 1 textura, 3 VB, 2 IB, 1 PB) y HIERARC."""
+    """KMD with OBJINFO, XPR0 (header, 2 descriptors, 1 texture, 3 VB, 2 IB, 1 PB) and HIERARC."""
     data = bytearray(solid_dxt1_block(0x07E0))
     headers = [texture_header(0, format_word(DXT1, 2, 2))]
     for payload, kind in (

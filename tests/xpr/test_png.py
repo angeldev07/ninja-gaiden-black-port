@@ -1,4 +1,4 @@
-"""Tests del escritor PNG: se relee con un lector estricto (chunks, CRC e IDAT)."""
+"""Tests of the PNG writer: it is read back with a strict reader (chunks, CRC and IDAT)."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ class EncodePngTests(unittest.TestCase):
 
     def test_corrupted_byte_is_caught_by_the_crc(self) -> None:
         png = bytearray(encode_png(2, 2, bytes(16)))
-        png[20] ^= 0xFF  # dentro de los datos de IHDR
+        png[20] ^= 0xFF  # inside the IHDR data
         with self.assertRaisesRegex(PngError, "CRC"):
             iter_chunks(bytes(png))
 

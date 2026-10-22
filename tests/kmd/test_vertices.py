@@ -1,4 +1,4 @@
-"""Tests de la disposición FVF y la decodificación de vértices."""
+"""Tests of the FVF layout and vertex decoding."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual((colored.normal, colored.diffuse, colored.texcoord), (None, 12, 16))
 
     def test_texcoord_size_bits_change_the_stride(self) -> None:
-        # TEX1 con coordenadas de 3 componentes (bits 16-17 = 1)
+        # TEX1 with 3-component coordinates (bits 16-17 = 1)
         self.assertEqual(vertex_layout(0x102 | (1 << 16)).stride, 24)
 
     def test_transformed_positions_and_unknown_bits_are_rejected(self) -> None:

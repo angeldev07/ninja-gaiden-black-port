@@ -1,4 +1,4 @@
-"""Tests de la cabecera de chunk de Team Ninja y de la búsqueda del slot XPR0."""
+"""Tests of the Team Ninja chunk header and of the XPR0 slot search."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ class ParseChunkTests(unittest.TestCase):
         self.assertEqual(chunk.slots[-1].end, len(data))
 
     def test_size_field_does_not_bound_the_slots(self) -> None:
-        # Como en r_ryu.kmd: el campo 0x0C vale menos que el offset del último slot.
+        # As in r_ryu.kmd: field 0x0C is smaller than the offset of the last slot.
         data = bytearray(build_chunk(b"KMD", [OBJINFO, XPR]))
         struct.pack_into("<I", data, 0x0C, 0x40)
         chunk = parse_chunk(bytes(data))
@@ -54,7 +54,7 @@ class ParseChunkTests(unittest.TestCase):
         self.assertEqual(chunk.slots[-1].end, len(data))
 
     def test_chunk_without_used_slots_has_no_slots(self) -> None:
-        # Como el HITMDL de los escenarios sin colisión: tabla entera a 0.
+        # Like the HITMDL of sceneries without collision: the whole table is 0.
         chunk = parse_chunk(build_chunk(b"HITMDL", [None, None]))
         self.assertEqual((chunk.n_slots, chunk.n_used, chunk.slots), (2, 0, ()))
 
@@ -88,7 +88,7 @@ class ParseChunkTests(unittest.TestCase):
 
 
 class HostileChunkTests(unittest.TestCase):
-    """Cabeceras manipuladas: error tipado sin leer una tabla gigante."""
+    """Tampered headers: typed error without reading a giant table."""
 
     def patched(self, offset: int, value: int) -> bytes:
         data = bytearray(build_chunk(b"KMD", [OBJINFO, XPR]))
@@ -108,7 +108,7 @@ class HostileChunkTests(unittest.TestCase):
         self.assertEqual(parse_chunk(data).n_slots, MAX_SLOTS)
 
     def test_table_position_beyond_the_data(self) -> None:
-        with self.assertRaisesRegex(ChunkFormatError, "tabla"):
+        with self.assertRaisesRegex(ChunkFormatError, "slot table"):
             parse_chunk(self.patched(0x18, 0xFFFFFFF0))
 
     def test_used_count_larger_than_the_table(self) -> None:

@@ -1,15 +1,15 @@
-"""Audio de Ninja Gaiden Black a WAV PCM16: ADX (CRI), Xbox ADPCM (`.wva`) y XACT (`.xwb`).
+"""Ninja Gaiden Black audio to PCM16 WAV: ADX (CRI), Xbox ADPCM (`.wva`) and XACT (`.xwb`).
 
-Módulos, de abajo arriba:
+Modules, bottom up:
 
-- `pcm`, `wav`, `png`: intercalado de canales, escritor WAV y escritor PNG mínimo.
-- `adx`: cabecera, coeficientes del predictor y decodificador ADPCM de CRI.
-- `xbox_adpcm`: decodificador de la variante IMA del XDK (WAVE_FORMAT 0x0069).
-- `wva`: bancos de efectos de Team Ninja (formato INFERRED).
-- `xwb`: wave banks de XACT de las versiones 2 y 3.
-- `analysis`: validación sin oír (RMS por segundo, saturación, forma de onda y
-  espectrograma en PNG).
-- `extract`: extracción por lotes con manifiesto, siempre fuera de cualquier repo git.
+- `pcm`, `wav`, `png`: channel interleaving, WAV writer and minimal PNG writer.
+- `adx`: header, predictor coefficients and CRI ADPCM decoder.
+- `xbox_adpcm`: decoder for the XDK's IMA variant (WAVE_FORMAT 0x0069).
+- `wva`: Team Ninja effect banks (INFERRED format).
+- `xwb`: XACT wave banks, versions 2 and 3.
+- `analysis`: validation without listening (RMS per second, clipping, waveform and
+  spectrogram as PNG).
+- `extract`: batch extraction with a manifest, always outside any git repo.
 - `cli`: `python -P -s -m ngb_tools.audio {adx,wva,xwb,analyze}`.
 """
 

@@ -1,7 +1,7 @@
-"""Constructores de audio sintético: ADX, bancos `.wva`, wave banks XWB y AFS.
+"""Synthetic audio builders: ADX, `.wva` banks, XWB wave banks and AFS.
 
-Las cabeceras se escriben campo a campo desde la especificación (no con el código bajo
-prueba), así que un test que las decodifica contrasta dos lecturas independientes.
+The headers are written field by field from the specification (not with the code under
+test), so a test that decodes them compares two independent readings.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ def adx_header(
     encoding: int = 3,
     loop: tuple[int, int] | None = None,
 ) -> bytes:
-    """Cabecera ADX de 0x24 bytes (sin loop) o 0x3C (con un loop de la versión 3)."""
+    """ADX header of 0x24 bytes (no loop) or 0x3C (with a version 3 loop)."""
     data_offset = 0x3C if loop is not None else 0x24
     header = bytearray(data_offset)
     struct.pack_into(">HH", header, 0, 0x8000, data_offset - 4)
@@ -31,23 +31,23 @@ def adx_header(
                      version, flags)  # fmt: skip
     if loop is not None:
         start, end = loop
-        # u16 relleno, u16 1, u32 flag, u32 muestra/offset inicial, u32 muestra/offset final
+        # u16 padding, u16 1, u32 flag, u32 start sample/offset, u32 end sample/offset
         struct.pack_into(">HHIIIII", header, 0x14, 0, 1, 1, start, 0x100, end, 0x200)
     header[data_offset - 6 : data_offset] = b"(c)CRI"
     return bytes(header)
 
 
 def adx_frame(scale: int, nibbles: Sequence[int]) -> bytes:
-    """Bloque ADX de 18 bytes: escala u16be y 32 nibbles con signo (el alto primero)."""
+    """18-byte ADX block: u16be scale and 32 signed nibbles (high first)."""
     padded = [n & 0x0F for n in nibbles] + [0] * (32 - len(nibbles))
     packed = bytes((padded[i] << 4) | padded[i + 1] for i in range(0, 32, 2))
     return struct.pack(">H", scale) + packed
 
 
 def xbox_block(headers: Sequence[tuple[int, int]], groups: Sequence[Sequence[bytes]]) -> bytes:
-    """Bloque Xbox ADPCM: cabeceras (muestra, índice) por canal y 8 grupos de 4 bytes.
+    """Xbox ADPCM block: (sample, index) headers per channel and 8 groups of 4 bytes.
 
-    `groups[c][g]` son los 4 bytes del grupo `g` del canal `c`; se intercalan c0, c1, ...
+    `groups[c][g]` is the 4 bytes of group `g` of channel `c`; they are interleaved c0, c1, ...
     """
     out = bytearray()
     for sample, index in headers:
@@ -61,7 +61,7 @@ def xbox_block(headers: Sequence[tuple[int, int]], groups: Sequence[Sequence[byt
 def wva_record(
     data: bytes, *, channels: int = 1, rate: int = 22050, long_params: bool = True, tag: int = 0x69
 ) -> bytes:
-    """Registro `.wva`: u32 tamaño, WAVEFORMATEX de 20 bytes, parámetros y datos."""
+    """`.wva` record: u32 size, 20-byte WAVEFORMATEX, parameters and data."""
     align = 36 * channels
     wfx = struct.pack("<HHIIHHHH", tag, channels, rate, rate * align // 64, align, 4, 2, 64)
     params = (b"\x00\x00\x80\xbf" * 6) if long_params else bytes(8)
@@ -69,7 +69,7 @@ def wva_record(
 
 
 def build_wva(slots: Sequence[tuple[bytes, bool] | None]) -> bytes:
-    """Banco `.wva`: `slots` = [(registro, parámetros largos) o None para un hueco]."""
+    """`.wva` bank: `slots` = [(record, long parameters) or None for an empty slot]."""
     table = 4 + 4 * len(slots)
     body = bytearray()
     pointers = []
@@ -84,7 +84,7 @@ def build_wva(slots: Sequence[tuple[bytes, bool] | None]) -> bytes:
 
 
 def build_xwb(entries: Sequence[tuple[int, int, int, int, bytes]], name: bytes = b"Bank") -> bytes:
-    """Wave bank XWB v3: `entries` = [(códec, canales, frecuencia, bits, datos)]."""
+    """XWB v3 wave bank: `entries` = [(codec, channels, sample rate, bits, data)]."""
     bank_off, bank_size = 0x28, 0x28
     meta_off, meta_size = bank_off + bank_size, 0x18 * len(entries)
     wave_off = meta_off + meta_size
@@ -105,7 +105,7 @@ def _align(n: int) -> int:
 
 
 def build_afs(files: Sequence[tuple[str, bytes]]) -> bytes:
-    """AFS con datos alineados a 0x800 y tabla de atributos (nombres) tras la TOC."""
+    """AFS with data aligned to 0x800 and an attribute table (names) after the TOC."""
     count = len(files)
     pos = _align(8 + 8 * count + 8)
     toc = []

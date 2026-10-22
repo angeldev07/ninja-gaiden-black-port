@@ -1,11 +1,11 @@
-"""Extracción a WAV de ADX (en AFS), bancos `.wva` (en AFS) y wave banks XWB.
+"""WAV extraction of ADX (in AFS), `.wva` banks (in AFS) and XWB wave banks.
 
-Toda la salida deriva de datos con copyright, así que la carpeta pasa por
-`ngb_tools._paths.ensure_outside_repos` sin excepciones (ni `build/`). Por defecto se
-escribe en `$NGB_DATA/extracted/audio/<ruta del origen dentro de game/, sin extensión>`.
-Cada WAV se escribe de forma atómica y, al final, `_manifest.json` con una ficha por pista:
-formato, duración, loop, estadísticas de señal y estado (`ok`, `encrypted`, `unsupported`
-o `error`). Una pista que no se puede decodificar se informa y se salta: no aborta el lote.
+All the output derives from copyrighted data, so the folder goes through
+`ngb_tools._paths.ensure_outside_repos` with no exceptions (not even `build/`). By default
+it writes to `$NGB_DATA/extracted/audio/<source path inside game/, without extension>`.
+Each WAV is written atomically and, at the end, `_manifest.json` with one card per track:
+format, duration, loop, signal statistics and status (`ok`, `encrypted`, `unsupported` or
+`error`). A track that cannot be decoded is reported and skipped: it does not abort the batch.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ from ngb_tools.audio.wav import iter_wav_chunks
 
 AUDIO_SUBDIR: Final = "audio"
 MANIFEST_NAME: Final = "_manifest.json"
-UNNAMED: Final = "sin_nombre"
+UNNAMED: Final = "unnamed"
 _BAD_CHARS: Final = frozenset('<>:"/\\|?*')
 
 Status = Literal["ok", "encrypted", "unsupported", "error"]
@@ -98,14 +98,14 @@ class _Format:
     loop: LoopRecord | None = None
 
 
-# --- Rutas --------------------------------------------------------------------------------
+# --- Paths --------------------------------------------------------------------------------
 
 
 def default_audio_dir(source: Path, environ: Mapping[str, str] | None = None) -> Path:
-    """`$NGB_DATA/extracted/audio/<ruta de source dentro de game/ sin extensión>`.
+    """`$NGB_DATA/extracted/audio/<path of source inside game/ without extension>`.
 
-    `game/bgm.afs` va a `extracted/audio/bgm` y `game/Media/Wave.xwb`, a
-    `extracted/audio/Media/Wave`. Un origen fuera de la raíz de datos usa solo su nombre.
+    `game/bgm.afs` goes to `extracted/audio/bgm` and `game/Media/Wave.xwb` to
+    `extracted/audio/Media/Wave`. A source outside the data root uses only its name.
     """
     root = data_root(environ)
     resolved = source.resolve()
@@ -117,7 +117,7 @@ def default_audio_dir(source: Path, environ: Mapping[str, str] | None = None) ->
 
 
 def safe_stem(name: str | None) -> str:
-    """Nombre sin extensión válido en Windows (sin reservados ni punto o espacio final)."""
+    """Extensionless name valid on Windows (no reserved characters nor trailing dot or space)."""
     if not name:
         return UNNAMED
     base = name.replace("\\", "/").rsplit("/", 1)[-1]
@@ -126,7 +126,7 @@ def safe_stem(name: str | None) -> str:
     return clean.rstrip(" .") or UNNAMED
 
 
-# --- Fichas -------------------------------------------------------------------------------
+# --- Cards -------------------------------------------------------------------------------
 
 
 def _record(
@@ -205,7 +205,7 @@ def _emit(tracks: list[TrackRecord], record: TrackRecord, on_track: OnTrack | No
         on_track(record)
 
 
-# --- Selección en AFS ---------------------------------------------------------------------
+# --- Selection in AFS ---------------------------------------------------------------------
 
 
 def _open(afs_path: Path) -> AfsArchive:
@@ -219,16 +219,16 @@ def _open(afs_path: Path) -> AfsArchive:
 def _select(
     archive: AfsArchive, indices: Sequence[int] | None, wanted: Callable[[AfsEntry], bool]
 ) -> list[AfsEntry]:
-    """Las entradas pedidas (sin repetir) o, sin `indices`, las que cumplen `wanted`."""
+    """The requested entries (without repeats) or, without `indices`, those satisfying `wanted`."""
     if indices is None:
         return [e for e in archive.data_entries() if wanted(e)]
     unknown = [i for i in indices if not 0 <= i < archive.count]
     if unknown:
-        raise AudioUsageError(f"índices fuera de rango 0..{archive.count - 1}: {unknown}")
+        raise AudioUsageError(f"indices out of range 0..{archive.count - 1}: {unknown}")
     chosen = [archive.entries[i] for i in dict.fromkeys(indices)]
     empty = [e.index for e in chosen if e.is_null or e.size == 0]
     if empty:
-        raise AudioUsageError(f"entradas vacías: {empty}")
+        raise AudioUsageError(f"empty entries: {empty}")
     return chosen
 
 
@@ -237,7 +237,7 @@ def _read_entry(afs_path: Path, entry: AfsEntry) -> bytes:
         try:
             return b"".join(iter_entry_chunks(source, entry))
         except AfsError as err:
-            raise AudioFormatError(f"entrada {entry.index}: {err}") from err
+            raise AudioFormatError(f"entry {entry.index}: {err}") from err
 
 
 def _is_adx_entry(afs_path: Path, entry: AfsEntry) -> bool:
@@ -291,7 +291,7 @@ def extract_adx(
     indices: Sequence[int] | None = None,
     on_track: OnTrack | None = None,
 ) -> AudioManifest:
-    """Decodifica a WAV los ADX del AFS (todos, o `indices`) y escribe el manifiesto."""
+    """Decode the AFS ADX entries (all, or `indices`) to WAV and write the manifest."""
     out = ensure_outside_repos(out_dir)
     archive = _open(afs_path)
     entries = _select(archive, indices, lambda e: _is_adx_entry(afs_path, e))
@@ -335,7 +335,7 @@ def extract_wva(
     indices: Sequence[int] | None = None,
     on_track: OnTrack | None = None,
 ) -> AudioManifest:
-    """Decodifica a WAV cada registro de los `.wva` del AFS (todos, o `indices`)."""
+    """Decode each record of the AFS `.wva` files (all, or `indices`) to WAV."""
     out = ensure_outside_repos(out_dir)
     archive = _open(afs_path)
     entries = _select(archive, indices, _is_wva_entry)
@@ -351,7 +351,7 @@ def extract_wva(
 
 
 def _xwb_samples(entry: xwb.XwbEntry, size: int) -> int:
-    """Bytes → muestras por canal según el códec de la entrada."""
+    """Bytes -> samples per channel according to the entry's codec."""
     if entry.channels == 0:
         return 0
     if entry.codec == xwb.CODEC_XBOX_ADPCM:
@@ -384,7 +384,7 @@ def _xwb_track(data: bytes, entry: xwb.XwbEntry, target_dir: Path) -> TrackRecor
 
 
 def extract_xwb(xwb_path: Path, out_dir: Path, on_track: OnTrack | None = None) -> AudioManifest:
-    """Decodifica a WAV todas las entradas del wave bank y escribe el manifiesto."""
+    """Decode all the wave bank entries to WAV and write the manifest."""
     out = ensure_outside_repos(out_dir)
     data = xwb_path.read_bytes()
     bank = xwb.parse_xwb(data)

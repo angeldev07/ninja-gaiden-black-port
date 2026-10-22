@@ -1,4 +1,4 @@
-"""Tests del parseo de XPR0: cabecera, recursos tipados, región de datos y paletas."""
+"""Tests of XPR0 parsing: header, typed resources, data region and palettes."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ from .synthetic import (
 )
 
 DXT1, P8 = 0x0C, 0x0B
-# Región de datos: DXT1 8x8 (4 bloques = 32 B), P8 4x4 (16 B) y su paleta (256 * 4 B).
+# Data region: DXT1 8x8 (4 blocks = 32 B), P8 4x4 (16 B) and its palette (256 * 4 B).
 DXT1_DATA = bytes(range(32))
 P8_DATA = bytes(range(16))
 PALETTE_DATA = bytes(1024)
@@ -42,7 +42,7 @@ DATA = DXT1_DATA + P8_DATA + PALETTE_DATA
 
 
 def sample_xpr() -> bytes:
-    """Dos texturas y una paleta, más userdata y buffers como en un KMD."""
+    """Two textures and a palette, plus userdata and buffers as in a KMD."""
     return build_xpr(
         [
             userdata(b"material"),
@@ -80,7 +80,7 @@ class ParseXprTests(unittest.TestCase):
         self.assertEqual(kinds, expected)
 
     def test_push_buffer_header_is_24_bytes(self) -> None:
-        # Observado en ryu.kmd y r_ryu.kmd: tras Size y AllocationSize viene un u32 a 0.
+        # Observed in ryu.kmd and r_ryu.kmd: a u32 of 0 follows Size and AllocationSize.
         resources = parse_xpr(sample_xpr()).resources
         self.assertEqual(resources[7].offset - resources[6].offset, 24)
         last = resources[7]
@@ -90,7 +90,7 @@ class ParseXprTests(unittest.TestCase):
     def test_resource_index_and_header_offset(self) -> None:
         resources = parse_xpr(sample_xpr()).resources
         self.assertEqual([r.index for r in resources], list(range(8)))
-        # 12 de cabecera XPR0 + 8 + 8 de userdata: la primera textura empieza en 0x1C.
+        # 12 of XPR0 header + 8 + 8 of userdata: the first texture starts at 0x1C.
         self.assertEqual(resources[1].offset, 0x1C)
         self.assertEqual(resources[2].offset, 0x1C + 20)
 
@@ -154,7 +154,7 @@ class PaletteTests(unittest.TestCase):
         self.assertIsNone(xpr.palette_link(xpr.textures[0]))
 
     def test_textures_and_palettes_are_indexed_once_at_parse_time(self) -> None:
-        # Antes se recalculaban en cada consulta: O(texturas x recursos) con muchas P8.
+        # They used to be recomputed on every query: O(textures x resources) with many P8s.
         xpr = parse_xpr(sample_xpr())
         self.assertIs(xpr.palettes, xpr.palettes)
         self.assertIs(xpr.textures, xpr.textures)
@@ -191,7 +191,7 @@ class FieldWordTests(unittest.TestCase):
 
 class MalformedXprTests(unittest.TestCase):
     def test_bad_magic(self) -> None:
-        with self.assertRaisesRegex(XprFormatError, "magia"):
+        with self.assertRaisesRegex(XprFormatError, "magic"):
             parse_xpr(b"XPR1" + sample_xpr()[4:])
 
     def test_total_size_beyond_the_data_is_truncation(self) -> None:
@@ -199,15 +199,15 @@ class MalformedXprTests(unittest.TestCase):
             parse_xpr(sample_xpr()[:-1])
 
     def test_missing_end_marker(self) -> None:
-        # La cabecera acaba justo tras la textura: no queda sitio para el 0xFFFFFFFF.
+        # The header ends right after the texture: there is no room for the 0xFFFFFFFF.
         header = texture_header(0, format_word(DXT1, 2, 2))
         raw = build_xpr([header], bytes(8), header_size=12 + len(header), end_marker=False)
-        with self.assertRaisesRegex(XprFormatError, "fin"):
+        with self.assertRaisesRegex(XprFormatError, "end marker"):
             parse_xpr(raw)
 
     def test_unknown_resource_type(self) -> None:
         raw = build_xpr([buffer_header(0x00060001, 0)], bytes(16))
-        with self.assertRaisesRegex(XprFormatError, "tipo"):
+        with self.assertRaisesRegex(XprFormatError, "resource type"):
             parse_xpr(raw)
 
     def test_userdata_overflowing_the_header(self) -> None:
@@ -224,7 +224,7 @@ class MalformedXprTests(unittest.TestCase):
 
 
 class HostileXprTests(unittest.TestCase):
-    """Cabeceras manipuladas: siempre un error tipado, nunca una excepción genérica."""
+    """Tampered headers: always a typed error, never a generic exception."""
 
     def patched(self, offset: int, value: int) -> bytes:
         raw = bytearray(sample_xpr())

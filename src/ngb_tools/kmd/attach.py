@@ -1,28 +1,28 @@
-"""Armas y objetos montados en un hueso: anclajes de los `.itm` y el nodo que va al glTF.
+"""Weapons and bone-mounted objects: `.itm` anchors and the node that goes into the glTF.
 
-Cada arma de Ryu está en `cmn.afs` como un par `<arma>.kmd` + `<arma>.itm`, por ejemplo
-`katana.kmd` (#70) y `katana.itm` (#192), `nchak` (#76/#193), `flail` (#128/#208), `rod`
-(#291/#290), `hammer` (#85/#196), `zanba` (#89/#197) o `yoto` (#109/#249). El `.itm` es un
-chunk `itm_dat2`. Su slot 0 son volúmenes de impacto (sin interpretar). Su slot 1 es la
-**tabla de anclajes**:
+Each of Ryu's weapons lives in `cmn.afs` as a `<weapon>.kmd` + `<weapon>.itm` pair, for
+example `katana.kmd` (#70) and `katana.itm` (#192), `nchak` (#76/#193), `flail` (#128/#208),
+`rod` (#291/#290), `hammer` (#85/#196), `zanba` (#89/#197) or `yoto` (#109/#249). The `.itm`
+is an `itm_dat2` chunk. Its slot 0 holds impact volumes (not interpreted). Its slot 1 is the
+**anchor table**:
 
-    +0x00  u32 offset de los registros (relativo al slot; 0x40 en todos los vistos)
-    +0x08  u32 bytes de la tabla
-    registros de 0x20 bytes hasta un u32 0xFFFFFF00:
-        u32 clave    16 bits bajos = estado y 16 altos = variante
-        u32 hueso    índice de objeto del personaje (en Ryu: 11 mano -x, 5 mano +x,
-                     0 pecho, 2 cadera)
-        f32 x3       posición en el espacio local del hueso (metros)
-        f32 x3       rotación en grados (Euler; orden INFERRED como el de las motions:
+    +0x00  u32 offset of the records (relative to the slot; 0x40 in all the ones seen)
+    +0x08  u32 table size in bytes
+    0x20-byte records up to a u32 0xFFFFFF00:
+        u32 key      low 16 bits = state and high 16 = variant
+        u32 bone     character object index (in Ryu: 11 hand -x, 5 hand +x,
+                     0 chest, 2 hip)
+        f32 x3       position in the bone's local space (meters)
+        f32 x3       rotation in degrees (Euler; order INFERRED like the motions':
                      R = Rz·Ry·Rx)
 
-Evidencia: las armas del mismo tipo comparten tabla (katana, yoto, boku y skata; hammer y
-zanba; nchak y flail). En todas, el estado 1 lleva el arma al pecho (la espada a la
-espalda) o a la cadera, y los estados 2 y 3, a la mano del hueso 11. Para un personaje que
-mira a +z en un sistema de mano derecha, el lado -x es el derecho, y Ryu empuña con la
-derecha. En la katana, el estado 2 pone la empuñadura a 5,8 cm de la muñeca, en la palma,
-con la hoja (+z del arma) saliendo del puño. Significado de los estados: INFERRED (1 =
-guardada, 2 = en la mano; 5-9 usan la mano 5).
+Evidence: weapons of the same type share a table (katana, yoto, boku and skata; hammer and
+zanba; nchak and flail). In all of them, state 1 puts the weapon on the chest (the sword on
+the back) or on the hip, and states 2 and 3 put it in the hand of bone 11. For a character
+facing +z in a right-handed system, the -x side is the right one, and Ryu wields with his
+right hand. On the katana, state 2 places the grip 5.8 cm from the wrist, in the palm, with
+the blade (the weapon's +z) coming out of the fist. Meaning of the states: INFERRED (1 =
+stowed, 2 = in hand; 5-9 use hand 5).
 """
 
 from __future__ import annotations
@@ -53,12 +53,12 @@ _RECORD: Final = struct.Struct("<II6f")
 
 
 class ItemFormatError(KmdError):
-    """Los bytes no forman un `.itm` con tabla de anclajes legible."""
+    """The bytes do not form an `.itm` with a readable anchor table."""
 
 
 @dataclass(frozen=True, slots=True)
 class ItemAnchor:
-    """Un registro de la tabla: estado, variante, hueso, posición y rotación (grados)."""
+    """One table record: state, variant, bone, position and rotation (degrees)."""
 
     state: int
     variant: int
@@ -74,9 +74,9 @@ class ItemAnchor:
 
 @dataclass(frozen=True, slots=True)
 class Attachment:
-    """Un modelo montado en un objeto del modelo principal, con su transformación local.
+    """A model mounted on an object of the main model, with its local transform.
 
-    El exportador lo cuelga como hijo del nodo de `parent`, así que hereda su animación.
+    The exporter hangs it as a child of the `parent` node, so it inherits its animation.
     """
 
     name: str
@@ -89,29 +89,29 @@ class Attachment:
 
 
 def parse_item_anchors(data: bytes) -> tuple[ItemAnchor, ...]:
-    """La tabla de anclajes (slot 1) de un `itm_dat2`."""
+    """The anchor table (slot 1) of an `itm_dat2`."""
     try:
         chunk = parse_chunk(data)
     except TeamNinjaError as error:
         raise ItemFormatError(f"itm: {error}") from error
     if chunk.tag != ITEM_TAG:
-        raise ItemFormatError(f"se esperaba un chunk {ITEM_TAG}, hay '{chunk.tag}'")
+        raise ItemFormatError(f"expected a {ITEM_TAG} chunk, found '{chunk.tag}'")
     slot = next((s for s in chunk.slots if s.index == ANCHOR_SLOT), None)
     if slot is None:
-        raise ItemFormatError(f"{ITEM_TAG} sin slot {ANCHOR_SLOT} (tabla de anclajes)")
+        raise ItemFormatError(f"{ITEM_TAG} without slot {ANCHOR_SLOT} (anchor table)")
     body = data[slot.offset : slot.end]
     if len(body) < 4:
-        raise ItemFormatError("tabla de anclajes vacía")
+        raise ItemFormatError("empty anchor table")
     (pos,) = struct.unpack_from("<I", body, 0)
     anchors: list[ItemAnchor] = []
     while True:
         if pos + 4 > len(body) or len(anchors) > MAX_RECORDS:
-            raise ItemFormatError(f"tabla de anclajes sin terminador {END_KEY:#x}")
+            raise ItemFormatError(f"anchor table without terminator {END_KEY:#x}")
         (key,) = struct.unpack_from("<I", body, pos)
         if key == END_KEY:
             return tuple(anchors)
         if pos + RECORD_SIZE > len(body):
-            raise ItemFormatError(f"registro de anclaje cortado en {pos:#x}")
+            raise ItemFormatError(f"anchor record truncated at {pos:#x}")
         _, bone, px, py, pz, rx, ry, rz = _RECORD.unpack_from(body, pos)
         anchors.append(ItemAnchor(key & 0xFFFF, key >> 16, bone, (px, py, pz), (rx, ry, rz)))
         pos += RECORD_SIZE
@@ -120,9 +120,9 @@ def parse_item_anchors(data: bytes) -> tuple[ItemAnchor, ...]:
 def find_anchor(
     anchors: tuple[ItemAnchor, ...], state: int = HELD_STATE, variant: int = 0
 ) -> ItemAnchor:
-    """El primer anclaje de ese estado y variante."""
+    """The first anchor with that state and variant."""
     for anchor in anchors:
         if anchor.state == state and anchor.variant == variant:
             return anchor
     states = sorted({(a.state, a.variant) for a in anchors})
-    raise ItemFormatError(f"no hay anclaje para el estado {state} (hay {states})")
+    raise ItemFormatError(f"no anchor for state {state} (available: {states})")

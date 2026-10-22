@@ -1,5 +1,5 @@
-// H5: métricas de cobertura de firmas (XbSymbolDatabase + FID), lista de D3D8, evaluación de las
-// APIs clave para un HLE de D3D8, escaneo de cabeceras de push buffer NV097 y export de símbolos.
+// H5: signature coverage metrics (XbSymbolDatabase + FID), D3D8 list, assessment of the key
+// APIs for a D3D8 HLE, scan of NV097 push buffer headers and symbol export.
 // Uso: -process default.xbe -noanalysis -readOnly -postScript H5Report.java <reportsDir> <nv097_methods.txt>
 //@category NGB
 import java.io.*;
@@ -22,11 +22,11 @@ public class H5Report extends GhidraScript {
 		"XAPILIB", "D3D8", "D3D8LTCG", "D3DX8", "DSOUND", "XACTENG", "XGRAPHC", "XGRAPHCL",
 		"XNET", "XNETN", "XNETS", "XONLINE", "XONLINES", "XONLINLS", "JVS"));
 
-	// Namespaces que crea el analizador de .XTLID de ghidra-xbe.
+	// Namespaces created by the ghidra-xbe .XTLID analyzer.
 	static final Set<String> XTLID_LIBS = new HashSet<>(Arrays.asList(
 		"D3D", "D3DX8", "DSOUND", "XAPILIB", "XGRAPHICS", "XACT", "DMUSIC", "XMV", "KEYBOARD", "XKBD"));
 
-	// Dirección del kernel thunk (des-XOR retail) y número de imports, de xbe-default.md.
+	// Address of the kernel thunk table (retail de-XOR) and number of imports, from xbe-default.md.
 	static final long KTHUNK = 0x003E3AE0L;
 	static final int KIMPORTS = 145;
 
@@ -39,7 +39,7 @@ public class H5Report extends GhidraScript {
 		return b == null ? "?" : b.getName();
 	}
 
-	/** Librería de una función: namespace de XbSymbolDatabase, "FID" o "" si no tiene nombre. */
+	/** Library of a function: XbSymbolDatabase namespace, "FID" or "" if it has no name. */
 	String libOf(Function f) {
 		Namespace ns = f.getParentNamespace();
 		while (ns != null && !ns.isGlobal()) {
@@ -54,7 +54,7 @@ public class H5Report extends GhidraScript {
 		if (f.getSymbol().getSource() == SourceType.DEFAULT) {
 			return "";
 		}
-		// Funciones creadas en una etiqueta de case: no son de librería.
+		// Functions created at a case label: not library functions.
 		if (f.getName().startsWith("caseD_") || f.getName().startsWith("switchD")) {
 			return "";
 		}
@@ -70,7 +70,7 @@ public class H5Report extends GhidraScript {
 		return "OTHER:" + f.getSymbol().getSource();
 	}
 
-	/** Familia de librería para agrupar: D3D8 y D3D8LTCG son la misma. */
+	/** Library family for grouping: D3D8 and D3D8LTCG are the same. */
 	static String family(String lib) {
 		if (lib.startsWith("D3D8") || lib.equals("XTLID:D3D")) return "D3D8";
 		if (lib.equals("XAPILIB") || lib.equals("XTLID:XAPILIB")) return "XAPI";
@@ -161,15 +161,15 @@ public class H5Report extends GhidraScript {
 		FunctionManager fm = currentProgram.getFunctionManager();
 		SymbolTable st = currentProgram.getSymbolTable();
 
-		// ---------- 1. Bloques ----------
-		m("# Bloques de memoria");
-		m("%-10s %-10s %-10s %10s %s", "bloque", "inicio", "fin", "tamaño", "flags");
+		// ---------- 1. Blocks ----------
+		m("# Memory blocks");
+		m("%-10s %-10s %-10s %10s %s", "block", "start", "end", "size", "flags");
 		for (MemoryBlock b : currentProgram.getMemory().getBlocks()) {
 			m("%-10s %s %s %10d %s%s%s", b.getName(), hex(b.getStart()), hex(b.getEnd()), b.getSize(),
 				b.isRead() ? "r" : "-", b.isWrite() ? "w" : "-", b.isExecute() ? "x" : "-");
 		}
 
-		// ---------- 2. Funciones por sección y librería ----------
+		// ---------- 2. Functions by section and library ----------
 		Map<String, Map<String, Integer>> perBlockLib = new TreeMap<>();
 		Map<String, Integer> perBlockTotal = new TreeMap<>();
 		Map<String, Long> perBlockNamedBytes = new TreeMap<>();
@@ -200,32 +200,32 @@ public class H5Report extends GhidraScript {
 		}
 		fcsv.close();
 		m("");
-		m("# Funciones");
-		m("total=%d con_nombre=%d sin_nombre=%d", total, named, total - named);
+		m("# Functions");
+		m("total=%d named=%d unnamed=%d", total, named, total - named);
 		m("");
-		m("## Funciones con nombre por librería (origen)");
+		m("## Named functions by library (origin)");
 		for (Map.Entry<String, Integer> e : perLib.entrySet()) m("%-14s %d", e.getKey(), e.getValue());
 		m("");
-		m("## Funciones con nombre por familia de librería");
+		m("## Named functions by library family");
 		Map<String, Integer> perFam = new TreeMap<>();
 		for (Map.Entry<String, Integer> e : perLib.entrySet()) perFam.merge(family(e.getKey()), e.getValue(), Integer::sum);
 		for (Map.Entry<String, Integer> e : perFam.entrySet()) m("%-22s %d", e.getKey(), e.getValue());
 		m("");
-		m("## Funciones por sección (total / bytes en funciones / con nombre por librería)");
+		m("## Functions by section (total / bytes in functions / named by library)");
 		for (MemoryBlock b : currentProgram.getMemory().getBlocks()) {
 			String n = b.getName();
 			if (!perBlockTotal.containsKey(n)) continue;
 			long nb = perBlockNamedBytes.getOrDefault(n, 0L);
 			long xb = perBlockXbBytes.getOrDefault(n, 0L);
 			long ab = perBlockAnyBytes.getOrDefault(n, 0L);
-			m("%-10s total=%5d bytes_func=%8d (%.1f%%) bytes_con_nombre=%8d (%.2f%%) bytes_xbsdb=%8d (%.2f%%) por_lib=%s",
+			m("%-10s total=%5d bytes_func=%8d (%.1f%%) bytes_named=%8d (%.2f%%) bytes_xbsdb=%8d (%.2f%%) by_lib=%s",
 				n, perBlockTotal.get(n), ab, 100.0 * ab / b.getSize(), nb, 100.0 * nb / b.getSize(),
 				xb, 100.0 * xb / b.getSize(), perBlockLib.getOrDefault(n, Map.of()));
 		}
 
-		// ---------- 3. Símbolos de XbSymbolDatabase (funciones y datos) ----------
+		// ---------- 3. XbSymbolDatabase symbols (functions and data) ----------
 		m("");
-		m("# Símbolos de XbSymbolDatabase por librería (función / dato / fuera de memoria)");
+		m("# XbSymbolDatabase symbols by library (function / data / outside memory)");
 		PrintWriter sym = open(dir, "symbols.csv");
 		sym.println("address,name,library,kind,section");
 		List<Symbol> d3dSyms = new ArrayList<>();
@@ -251,9 +251,9 @@ public class H5Report extends GhidraScript {
 				}
 				if (lib.startsWith("D3D8") || lib.equals("D3D")) d3dSyms.add(s);
 			}
-			m("%-10s funciones=%d datos=%d offsets=%d", lib, nf, nd, no);
+			m("%-10s functions=%d data=%d offsets=%d", lib, nf, nd, no);
 		}
-		// Imports del kernel (etiquetas del cargador en la tabla de thunks).
+		// Kernel imports (loader labels in the thunk table).
 		Address kt = toAddr(KTHUNK);
 		int nk = 0;
 		for (int i = 0; i < KIMPORTS; i++) {
@@ -264,7 +264,7 @@ public class H5Report extends GhidraScript {
 				nk++;
 			}
 		}
-		// Funciones con nombre de FID y el entry.
+		// Functions named by FID, and the entry point.
 		int nfid = 0;
 		for (Function f : fm.getFunctions(true)) {
 			String lib = libOf(f);
@@ -274,9 +274,9 @@ public class H5Report extends GhidraScript {
 			}
 		}
 		sym.close();
-		m("kernel_thunks_con_nombre=%d fid_funciones=%d", nk, nfid);
+		m("kernel_thunks_named=%d fid_functions=%d", nk, nfid);
 
-		// ---------- 4. Lista de D3D8 ----------
+		// ---------- 4. D3D8 list ----------
 		d3dSyms.sort(Comparator.comparing(Symbol::getAddress));
 		PrintWriter d3 = open(dir, "h5-d3d8.csv");
 		d3.println("address,name,library,kind,section,size,calls_from_text,jumps_from_text,callers_in_text,calls_from_d3d,calls_other,data_refs_text,data_refs_other");
@@ -292,14 +292,14 @@ public class H5Report extends GhidraScript {
 		}
 		d3.close();
 
-		// ---------- 5. Direcciones de interés ----------
+		// ---------- 5. Addresses of interest ----------
 		m("");
-		m("# Direcciones de interés");
+		m("# Addresses of interest");
 		for (long off : new long[] { 0x003D171BL, 0x003CE6CFL, 0x0032DA55L }) {
 			Address a = toAddr(off);
 			Function f = getFunctionContaining(a);
 			Instruction ins = getInstructionContaining(a);
-			m("%s bloque=%s instr=%s", hex(a), blockName(a), ins == null ? "(sin instrucción)" : (hex(ins.getAddress()) + " " + ins));
+			m("%s block=%s instr=%s", hex(a), blockName(a), ins == null ? "(no instruction)" : (hex(ins.getAddress()) + " " + ins));
 			if (ins != null) {
 				Instruction p = ins;
 				List<String> prev = new ArrayList<>();
@@ -310,15 +310,15 @@ public class H5Report extends GhidraScript {
 				for (String pv : prev) m("    %s", pv);
 			}
 			if (f == null) {
-				m("  función: (ninguna)");
+				m("  function: (none)");
 				continue;
 			}
-			m("  función: %s @ %s (lib=%s, tamaño=%d)", f.getName(true), hex(f.getEntryPoint()), libOf(f), f.getBody().getNumAddresses());
-			// Cadena de llamadores (3 niveles).
+			m("  function: %s @ %s (lib=%s, size=%d)", f.getName(true), hex(f.getEntryPoint()), libOf(f), f.getBody().getNumAddresses());
+			// Chain of callers (3 levels).
 			printCallers(f, 1, 3, new HashSet<>());
 		}
 
-		// ---------- 6. APIs clave ----------
+		// ---------- 6. Key APIs ----------
 		String[][] keys = {
 			{ "CreateDevice", "^Direct3D_CreateDevice" },
 			{ "Present", "^D3DDevice_Present" },
@@ -339,7 +339,7 @@ public class H5Report extends GhidraScript {
 			{ "DrawIndexedVertices", "^D3DDevice_DrawIndexedVertices($|_\\d)" },
 			{ "DrawVerticesUP", "^D3DDevice_DrawVerticesUP" },
 			{ "DrawIndexedVerticesUP", "^D3DDevice_DrawIndexedVerticesUP" },
-			{ "Begin/End (inmediato)", "^D3DDevice_(Begin|End)($|_\\d)" },
+			{ "Begin/End (immediate)", "^D3DDevice_(Begin|End)($|_\\d)" },
 			{ "BeginPush/EndPush", "^D3DDevice_(Begin|End)Push" },
 			{ "MakeSpace/MakeRequestedSpace", "MakeSpace|MakeRequestedSpace" },
 			{ "KickOff", "KickOff" },
@@ -358,7 +358,7 @@ public class H5Report extends GhidraScript {
 		PrintWriter kcsv = open(dir, "h5-key-apis.csv");
 		kcsv.println("api,symbol,address,section,size,calls_from_text,jumps_from_text,callers_in_text,calls_from_d3d,calls_other,data_refs_text,ltcg_regcall");
 		m("");
-		m("# APIs clave (símbolo, llamadas desde .text, funciones llamadoras en .text, llamadas internas D3D)");
+		m("# Key APIs (symbol, calls from .text, calling functions in .text, internal D3D calls)");
 		for (String[] k : keys) {
 			Pattern p = Pattern.compile(k[1]);
 			boolean any = false;
@@ -374,19 +374,19 @@ public class H5Report extends GhidraScript {
 				kcsv.printf("%s,%s,%s,%s,%d,%d,%d,%d,%d,%d,%d,%s%n", csv(k[0]), csv(s.getName()), hex(a), blockName(a),
 					f.getBody().getNumAddresses(), rc.callText, rc.jmpText, rc.callerFuncsText.size(), rc.callD3D,
 					rc.callOther, rc.dataText, reg ? "yes" : "no");
-				m("%-28s %-60s %s call_text=%d jmp_text=%d callers_text=%d d3d=%d otros=%d data_text=%d",
+				m("%-28s %-60s %s call_text=%d jmp_text=%d callers_text=%d d3d=%d other=%d data_text=%d",
 					k[0], s.getName(), hex(a), rc.callText, rc.jmpText, rc.callerFuncsText.size(), rc.callD3D, rc.callOther, rc.dataText);
 			}
 			if (!any) {
-				kcsv.printf("%s,(no identificada),,,,,,,,,,%n", csv(k[0]));
-				m("%-28s (no identificada)", k[0]);
+				kcsv.printf("%s,(not identified),,,,,,,,,,%n", csv(k[0]));
+				m("%-28s (not identified)", k[0]);
 			}
 		}
 		kcsv.close();
 
-		// ---------- 7. Referencias a las globales de D3D desde .text (señal de inlining) ----------
+		// ---------- 7. References to D3D globals from .text (sign of inlining) ----------
 		m("");
-		m("# Globales de D3D referenciadas desde .text (lecturas/escrituras directas = código inlineado)");
+		m("# D3D globals referenced from .text (direct reads/writes = inlined code)");
 		List<Symbol> dataSyms = new ArrayList<>();
 		for (Symbol s : d3dSyms) {
 			if (!currentProgram.getMemory().contains(s.getAddress())) continue;
@@ -422,11 +422,11 @@ public class H5Report extends GhidraScript {
 					if (cf != null) funcs.add(cf.getEntryPoint());
 				}
 			}
-			m("%-36s %s..%s text_lect=%d text_escr=%d funciones_text=%d refs_fuera_text=%d",
+			m("%-36s %s..%s text_reads=%d text_writes=%d text_functions=%d refs_outside_text=%d",
 				s.getName(), hex(start), hex(end), rd, wr, funcs.size(), other);
 		}
 
-		// ---------- 8. Llamadas desde .text a funciones de la sección D3D ----------
+		// ---------- 8. Calls from .text to functions in the D3D section ----------
 		MemoryBlock d3dBlk = currentProgram.getMemory().getBlock("D3D");
 		PrintWriter dct = open(dir, "h5-d3d-called-from-text.csv");
 		dct.println("address,name,library,size,calls_from_text,jumps_from_text,callers_in_text,data_refs_text");
@@ -445,15 +445,15 @@ public class H5Report extends GhidraScript {
 		}
 		dct.close();
 		m("");
-		m("# Superficie D3D usada por .text");
-		m("funciones_D3D_referenciadas_desde_text=%d con_nombre=%d sitios_de_llamada=%d (a funciones con nombre=%d)",
+		m("# D3D surface used by .text");
+		m("D3D_functions_referenced_from_text=%d named=%d call_sites=%d (to named functions=%d)",
 			surf, surfNamed, callSites, callSitesNamed);
 
-		// ---------- 9. Escaneo de cabeceras de push buffer NV097 ----------
+		// ---------- 9. Scan of NV097 push buffer headers ----------
 		scanPush(dir, fm);
 
 		metrics.close();
-		println("H5Report: informes en " + dir);
+		println("H5Report: reports in " + dir);
 	}
 
 	void printCallers(Function f, int depth, int max, Set<Function> seen) {
@@ -461,17 +461,17 @@ public class H5Report extends GhidraScript {
 		Set<Function> callers = f.getCallingFunctions(monitor);
 		String ind = "  ".repeat(depth + 1);
 		if (callers.isEmpty()) {
-			m("%s(sin llamadores directos; refs=%d)", ind, currentProgram.getReferenceManager().getReferenceCountTo(f.getEntryPoint()));
+			m("%s(no direct callers; refs=%d)", ind, currentProgram.getReferenceManager().getReferenceCountTo(f.getEntryPoint()));
 		}
 		int n = 0;
 		for (Function c : callers) {
-			if (n++ >= 6) { m("%s... (%d llamadores)", ind, callers.size()); break; }
+			if (n++ >= 6) { m("%s... (%d callers)", ind, callers.size()); break; }
 			m("%s<- %s @ %s [%s, lib=%s]", ind, c.getName(true), hex(c.getEntryPoint()), blockName(c.getEntryPoint()), libOf(c));
 			printCallers(c, depth + 1, max, seen);
 		}
 	}
 
-	/** Busca stores "mov [mem], imm32" cuyo inmediato es una cabecera NV097 válida de un método conocido. */
+	/** Finds "mov [mem], imm32" stores whose immediate is a valid NV097 header of a known method. */
 	Map<String, Integer> noiseSub = new TreeMap<>();
 
 	void scanPush(File dir, FunctionManager fm) throws IOException {
@@ -490,7 +490,7 @@ public class H5Report extends GhidraScript {
 				Scalar sc = ins.getScalar(1);
 				if (sc == null) continue;
 				long v = sc.getUnsignedValue() & 0xFFFFFFFFL;
-				if ((v & 0xA0000003L) != 0) continue; // sin JMP/CALL y alineado
+				if ((v & 0xA0000003L) != 0) continue; // no JMP/CALL and aligned
 				long count = (v >> 18) & 0x7FF;
 				if (count == 0) continue;
 				int method = (int) (v & 0x1FFC);
@@ -509,13 +509,13 @@ public class H5Report extends GhidraScript {
 			}
 		}
 		m("");
-		m("# Escaneo NV097: stores 'mov [mem], cabecera' (subcanal 0) de métodos conocidos, por sección");
-		m("descartados por subcanal!=0 (ruido): %s", noiseSub);
+		m("# NV097 scan: 'mov [mem], header' stores (subchannel 0) of known methods, by section");
+		m("discarded for subchannel!=0 (noise): %s", noiseSub);
 		for (Map.Entry<String, Integer> e : perBlock.entrySet()) {
-			m("%-10s %d stores; métodos distintos=%d", e.getKey(), e.getValue(), perBlockMethod.get(e.getKey()).size());
+			m("%-10s %d stores; distinct methods=%d", e.getKey(), e.getValue(), perBlockMethod.get(e.getKey()).size());
 		}
 		m("");
-		m("## Métodos de dibujo y flip por sección");
+		m("## Draw and flip methods by section");
 		String[] interesting = { "SET_BEGIN_END", "DRAW_ARRAYS", "INLINE_ARRAY", "ARRAY_ELEMENT16", "ARRAY_ELEMENT32",
 			"FLIP_STALL", "CLEAR_SURFACE", "SET_TEXTURE_OFFSET", "SET_VERTEX_DATA_ARRAY_FORMAT",
 			"SET_VERTEX_DATA_ARRAY_OFFSET", "SET_TRANSFORM_PROGRAM", "SET_TRANSFORM_CONSTANT", "SET_SHADER_STAGE_PROGRAM" };
@@ -559,19 +559,19 @@ public class H5Report extends GhidraScript {
 			pf.printf("%s,%s,%d,%d,%d,%s%n", hex(a), csv(f == null ? "?" : f.getName()), tot, draw, ms, csv(mm.toString()));
 		}
 		pf.close();
-		m("funciones_text_con_stores_NV097=%d con_metodos_de_dibujo=%d", fs.size(), withDraw);
+		m("text_functions_with_NV097_stores=%d with_draw_methods=%d", fs.size(), withDraw);
 	}
 
 	String methodName(int m) {
 		String n = nvMethods.get(m);
 		if (n != null) return n;
-		// Rangos con índice: texturas (0x1B00 + 0x40*i), arrays de vértices (+4*i), matrices y constantes.
+		// Indexed ranges: textures (0x1B00 + 0x40*i), vertex arrays (+4*i), matrices and constants.
 		if (m >= 0x1B00 && m < 0x1C00) { n = nvMethods.get(0x1B00 + (m - 0x1B00) % 0x40); if (n != null) return n; }
 		Integer best = null;
 		for (Integer k : nvMethods.keySet()) { if (k <= m) best = k; else break; }
 		if (best == null) return null;
 		String bn = nvMethods.get(best);
-		// Solo aceptamos métodos-array conocidos dentro de una ventana pequeña.
+		// Only accept known array methods within a small window.
 		if (m - best <= 0x3C && (bn.contains("ARRAY") || bn.contains("MATRIX") || bn.contains("CONSTANT")
 			|| bn.contains("PROGRAM") || bn.contains("LIGHT") || bn.contains("COMBINER") || bn.contains("TEXGEN"))) {
 			return bn;

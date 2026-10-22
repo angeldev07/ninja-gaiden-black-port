@@ -1,12 +1,12 @@
-"""Extracción por streaming de entradas AFS, siempre fuera de cualquier repo git.
+"""Streaming extraction of AFS entries, always outside any git repo.
 
-Los datos del juego tienen copyright y nunca deben acabar versionados, así que la ruta de
-salida pasa por `ngb_tools._paths.ensure_outside_repos` (sin excepciones: ni `build/`).
-Por defecto se extrae a `$NGB_DATA/extracted/<ruta del AFS dentro de game/, sin .afs>`.
+The game data is copyrighted and must never end up versioned, so the output path goes
+through `ngb_tools._paths.ensure_outside_repos` (no exceptions: not even `build/`). By
+default it extracts to `$NGB_DATA/extracted/<AFS path inside game/, without .afs>`.
 
-Antes de escribir nada se valida la petición entera (formato, índices y límites); cada
-archivo se escribe de forma atómica (`.part` y renombrado), así que un archivo con su
-nombre final siempre está completo.
+The whole request is validated (format, indices and bounds) before anything is written;
+each file is written atomically (`.part` and rename), so a file with its final name is
+always complete.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from ngb_tools.afs.classify import ENTROPY_WINDOW, classify
 from ngb_tools.afs.errors import AfsTruncatedError, AfsUsageError
 
 MANIFEST_NAME: Final = "_manifest.json"
-UNNAMED: Final = "sin_nombre"
+UNNAMED: Final = "unnamed"
 _BAD_CHARS: Final = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
@@ -58,16 +58,16 @@ class ExtractManifest(TypedDict):
     entries: list[ManifestEntry]
 
 
-# --- Rutas --------------------------------------------------------------------------------
+# --- Paths --------------------------------------------------------------------------------
 
 
 def default_extract_dir(afs_path: Path, environ: Mapping[str, str] | None = None) -> Path:
-    """Carpeta de extracción por defecto de `afs_path`, dentro de `$NGB_DATA/extracted/`.
+    """Default extraction folder for `afs_path`, inside `$NGB_DATA/extracted/`.
 
-    Se conserva la ruta relativa a `game/` (o, si no, a la raíz de datos) sin la extensión,
-    para que dos AFS con el mismo nombre en subcarpetas no se pisen: `game/cmn.afs` va a
-    `extracted/cmn` y `game/Media/cmn.afs`, a `extracted/Media/cmn`. Un AFS fuera de la raíz
-    de datos usa solo su nombre.
+    The path relative to `game/` (or, failing that, to the data root) is kept, without the
+    extension, so two AFS files with the same name in subfolders do not clobber each other:
+    `game/cmn.afs` goes to `extracted/cmn` and `game/Media/cmn.afs` to `extracted/Media/cmn`.
+    An AFS outside the data root uses only its name.
     """
     root = data_root(environ)
     resolved = afs_path.resolve()
@@ -78,28 +78,28 @@ def default_extract_dir(afs_path: Path, environ: Mapping[str, str] | None = None
 
 
 def safe_filename(name: str) -> str:
-    """Nombre válido en Windows: sin caracteres reservados ni punto o espacio final."""
+    """Valid Windows name: no reserved characters nor trailing dot or space."""
     return _BAD_CHARS.sub("_", name).rstrip(" .") or UNNAMED
 
 
 def entry_filename(entry: AfsEntry, guessed_ext: str) -> str:
-    """`NNNN_<nombre>`; si el nombre no trae extensión, se añade la deducida."""
+    """`NNNN_<name>`; if the name has no extension, the deduced one is added."""
     base = safe_filename(entry.name) if entry.name else UNNAMED
     stem = f"{entry.index:04d}_{base}"
     return stem if PurePosixPath(base).suffix else f"{stem}.{guessed_ext}"
 
 
-# --- Extracción ---------------------------------------------------------------------------
+# --- Extraction ---------------------------------------------------------------------------
 
 
 def _select(archive: AfsArchive, indices: Sequence[int] | None) -> list[AfsEntry]:
-    """Entradas pedidas, sin repetir y en el orden pedido; las nulas no tienen datos."""
+    """Requested entries, without repeats and in the requested order; null ones have no data."""
     if indices is None:
         wanted = list(archive.entries)
     else:
         unknown = [i for i in indices if not 0 <= i < archive.count]
         if unknown:
-            raise AfsUsageError(f"índices fuera de rango 0..{archive.count - 1}: {unknown}")
+            raise AfsUsageError(f"indices out of range 0..{archive.count - 1}: {unknown}")
         wanted = [archive.entries[i] for i in dict.fromkeys(indices)]
     return [e for e in wanted if not e.is_null]
 
@@ -107,19 +107,19 @@ def _select(archive: AfsArchive, indices: Sequence[int] | None) -> list[AfsEntry
 def _check_bounds(archive: AfsArchive, entries: Iterable[AfsEntry]) -> None:
     cut = [f"#{e.index}" for e in entries if e.rel_offset + e.size > archive.limit]
     if cut:
-        raise AfsTruncatedError(f"entradas más allá del final del archivo: {', '.join(cut)}")
+        raise AfsTruncatedError(f"entries past the end of the file: {', '.join(cut)}")
 
 
 def _write_manifest(out_dir: Path, manifest: ExtractManifest) -> None:
     text = json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
-    # Pequeño: el fsync es barato y el manifiesto es lo que da por buena la extracción.
+    # Small: fsync is cheap and the manifest is what vouches for the extraction.
     atomic_write_bytes(out_dir / MANIFEST_NAME, text.encode("utf-8"), fsync=True)
 
 
 def extract_archive(
     afs_path: Path, out_dir: Path, indices: Sequence[int] | None = None
 ) -> ExtractManifest:
-    """Extrae las entradas (todas, o `indices`) a `out_dir` y escribe el manifiesto."""
+    """Extract the entries (all, or `indices`) to `out_dir` and write the manifest."""
     out = ensure_outside_repos(out_dir)
     with afs_path.open("rb") as source:
         archive = open_afs(source, afs_path.name)

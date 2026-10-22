@@ -1,7 +1,7 @@
-"""Constructor de chunks de Team Ninja sintéticos: nunca se usan datos del juego en los tests.
+"""Builder of synthetic Team Ninja chunks: game data is never used in the tests.
 
-Reproduce la disposición observada en `ryu.kmd`: cabecera de 0x20 bytes, tabla de offsets
-en `table_pos` y cada carga útil alineada a 0x10 detrás de la tabla.
+Reproduces the layout observed in `ryu.kmd`: 0x20-byte header, offset table
+at `table_pos` and each payload aligned to 0x10 after the table.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ HEADER_SIZE = 0x20
 
 
 def align(n: int, alignment: int = 0x10) -> int:
-    """Redondea `n` hacia arriba al múltiplo de `alignment`."""
+    """Round `n` up to the multiple of `alignment`."""
     return (n + alignment - 1) // alignment * alignment
 
 
@@ -24,9 +24,9 @@ def build_chunk(
     table_pos: int = HEADER_SIZE,
     trailing: int = 0,
 ) -> bytes:
-    """Chunk con un slot por elemento de `payloads` (`None` = slot vacío, offset 0).
+    """Chunk with one slot per element of `payloads` (`None` = empty slot, offset 0).
 
-    `trailing` añade bytes de relleno tras el chunk, como el padding de sector de un AFS.
+    `trailing` appends padding bytes after the chunk, like the sector padding of an AFS.
     """
     pos = align(table_pos + 4 * len(payloads))
     offsets: list[int] = []

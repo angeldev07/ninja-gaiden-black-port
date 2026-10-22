@@ -1,23 +1,23 @@
-"""Des-swizzle de texturas de la NV2A (orden Morton o curva Z).
+"""Un-swizzling of NV2A textures (Morton order or Z-curve).
 
-Una textura *swizzled* no guarda los píxeles fila a fila: los ordena por la curva Z. La
-posición en memoria de (x, y) sale de intercalar sus bits, primero uno de x y luego uno de
-y, empezando por el menos significativo. Para una textura 4x4:
+A *swizzled* texture does not store pixels row by row: it orders them along the Z-curve. The
+memory position of (x, y) comes from interleaving their bits, first one from x and then one from
+y, starting at the least significant. For a 4x4 texture:
 
     x = x1 x0, y = y1 y0   ->   offset = y1 x1 y0 x0
 
-Así los píxeles vecinos en 2D quedan cerca en memoria y la caché de texturas acierta más
-al filtrar. Si una dimensión es mayor, sus bits sobrantes van seguidos en la parte alta:
-en 8x4 el offset es `x2 y1 x1 y0 x0`. Las dos dimensiones deben ser potencias de dos.
+This way neighboring pixels in 2D end up close in memory and the texture cache hits more
+when filtering. If one dimension is larger, its leftover bits follow in the high part:
+in 8x4 the offset is `x2 y1 x1 y0 x0`. Both dimensions must be powers of two.
 
-Lo que se permuta es el *elemento*: un píxel en los formatos sin comprimir (1, 2 o 4
-bytes), o el índice de paleta en P8. Los DXT no se swizzlean: la NV2A los lee como bloques
-4x4 en orden lineal (los formatos `L_DXT*`, "linear", de xemu).
+What is permuted is the *element*: a pixel in uncompressed formats (1, 2 or 4
+bytes), or the palette index in P8. DXT is not swizzled: the NV2A reads it as 4x4
+blocks in linear order (xemu's `L_DXT*` "linear" formats).
 
-Fuentes:
-- xemu, `generate_swizzle_masks` y `unswizzle_box`:
+Sources:
+- xemu, `generate_swizzle_masks` and `unswizzle_box`:
   https://github.com/xemu-project/xemu/blob/master/hw/xbox/nv2a/pgraph/swizzle.c
-- xemu, subida de DXT sin des-swizzle (`s3tc_decompress_2d` sobre los datos tal cual):
+- xemu, DXT upload without un-swizzling (`s3tc_decompress_2d` over the data as-is):
   https://github.com/xemu-project/xemu/blob/master/hw/xbox/nv2a/pgraph/gl/texture.c
 - F. Giesen, "Texture tiling and swizzling":
   https://fgiesen.wordpress.com/2011/01/17/texture-tiling-and-swizzling/
@@ -31,22 +31,22 @@ from operator import itemgetter
 from types import MappingProxyType
 from typing import Final
 
-# Elemento de 1, 2 o 4 bytes -> código de `array` del mismo tamaño. Los elementos se mueven
-# como unidades opacas, así que el orden de bytes de la máquina no importa.
+# 1-, 2- or 4-byte element -> `array` code of the same size. Elements are moved
+# as opaque units, so the machine's byte order does not matter.
 _FOUR_BYTES: Final = next(code for code in "IL" if array(code).itemsize == 4)
 _ARRAY_CODES: Final = MappingProxyType({1: "B", 2: "H", 4: _FOUR_BYTES})
 
 
 def _require_power_of_two(name: str, value: int) -> None:
     if value <= 0 or value & (value - 1):
-        raise ValueError(f"{name} = {value}: el swizzle exige una potencia de dos")
+        raise ValueError(f"{name} = {value}: swizzling requires a power of two")
 
 
 def swizzle_masks(width: int, height: int) -> tuple[int, int]:
-    """Máscaras de bits de x y de y dentro del offset swizzled (como en xemu).
+    """Bit masks of x and y within the swizzled offset (as in xemu).
 
-    En cada vuelta se reparte un bit de offset a x y luego otro a y, mientras a cada
-    dimensión le queden bits por colocar.
+    On each turn one offset bit is given to x and then another to y, while each
+    dimension still has bits left to place.
     """
     _require_power_of_two("width", width)
     _require_power_of_two("height", height)
@@ -65,10 +65,10 @@ def swizzle_masks(width: int, height: int) -> tuple[int, int]:
 
 
 def _spread(count: int, mask: int) -> list[int]:
-    """Los valores 0..count-1 con sus bits depositados en las posiciones de `mask`.
+    """The values 0..count-1 with their bits deposited at the positions of `mask`.
 
-    Truco de xemu: `(v - mask) & mask` suma 1 dentro de la máscara, dejando que el acarreo
-    salte los bits que no son suyos.
+    xemu trick: `(v - mask) & mask` adds 1 within the mask, letting the carry
+    skip the bits that are not its own.
     """
     values = [0] * count
     for i in range(1, count):
@@ -77,10 +77,10 @@ def _spread(count: int, mask: int) -> list[int]:
 
 
 def morton_order(width: int, height: int) -> Iterator[int]:
-    """Para cada píxel en orden lineal (fila a fila), su índice en la memoria swizzled.
+    """For each pixel in linear order (row by row), its index in swizzled memory.
 
-    Es un iterador: solo guarda los desplazamientos de una fila y de una columna
-    (`width + height` enteros), nunca uno por píxel.
+    It is an iterator: it only stores the offsets of one row and one column
+    (`width + height` integers), never one per pixel.
     """
     mask_x, mask_y = swizzle_masks(width, height)
     xs = _spread(width, mask_x)
@@ -89,27 +89,27 @@ def morton_order(width: int, height: int) -> Iterator[int]:
 
 
 def unswizzle(data: bytes, width: int, height: int, element_size: int) -> bytes:
-    """Reordena una imagen swizzled de `width`x`height` elementos a orden lineal.
+    """Reorder a swizzled image of `width`x`height` elements into linear order.
 
-    Como los bits de x y de y no se mezclan, el offset de (x, y) es `xs[x] | ys[y]`: cada
-    fila lineal reúne los elementos `ys[y] | xs[x]`. Se reúnen fila a fila con
-    `itemgetter` sobre un `array` de elementos (bucles en C, sin un objeto por píxel).
+    Since the x and y bits do not mix, the offset of (x, y) is `xs[x] | ys[y]`: each linear
+    row gathers the elements `ys[y] | xs[x]`. They are gathered row by row with
+    `itemgetter` over an `array` of elements (C loops, no object per pixel).
 
-    Memoria: copia de trabajo, salida y `bytes` final, unas 3 veces la imagen, más una tupla
-    de `width` enteros por fila. Medido en 1024x1024 ARGB (4 MiB): ver los tests.
+    Memory: working copy, output and final `bytes`, about 3 times the image, plus a tuple
+    of `width` integers per row. Measured on 1024x1024 ARGB (4 MiB): see the tests.
     """
     code = _ARRAY_CODES.get(element_size)
     if code is None:
-        raise ValueError(f"elementos de {element_size} bytes: solo 1, 2 o 4")
+        raise ValueError(f"{element_size}-byte elements: only 1, 2 or 4")
     expected = width * height * element_size
     if len(data) != expected:
-        raise ValueError(f"{len(data)} bytes para {width}x{height}x{element_size} = {expected}")
+        raise ValueError(f"{len(data)} bytes for {width}x{height}x{element_size} = {expected}")
     mask_x, mask_y = swizzle_masks(width, height)
     xs = _spread(width, mask_x)
     elements = array(code, data)
     linear = array(code)
     for row in _spread(height, mask_y):
         picked = itemgetter(*map(row.__or__, xs))(elements)
-        # Con un solo índice, itemgetter devuelve el elemento y no una tupla.
+        # With a single index, itemgetter returns the element and not a tuple.
         linear.extend(picked if width > 1 else (picked,))
     return linear.tobytes()

@@ -1,9 +1,9 @@
-"""Constructor de KMD de escenario sintéticos: nunca se usan datos del juego en los tests.
+"""Builder of synthetic stage KMDs: game data is never used in the tests.
 
-Reproduce lo observado en los escenarios (`ngb_tools.stage.model`): objetos con varias
-partes (un par VB/IB por parte, FVF 0x142 con color de vértice), S = (0, 0, 0), grupo 0,
-sin HIERARC, push buffers detrás de los buffers de su objeto y HITMDL con un registro
-`VHD` por objeto.
+It reproduces what was observed in stages (`ngb_tools.stage.model`): objects with several
+parts (one VB/IB pair per part, FVF 0x142 with vertex color), S = (0, 0, 0), group 0, no
+HIERARC, push buffers after the buffers of their object and HITMDL with one `VHD` record
+per object.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ QUAD_STRIP = (0, 1, 2, 3)
 
 @dataclass
 class SynthPart:
-    """Una parte con una submalla: un quad (desplazado `offset`) y su tira."""
+    """A part with one submesh: a quad (shifted by `offset`) and its strip."""
 
     offset: Vec3 = (0.0, 0.0, 0.0)
     strip: Sequence[int] = QUAD_STRIP
@@ -55,7 +55,7 @@ class SynthPart:
 @dataclass
 class SynthStageObject:
     parts: Sequence[SynthPart] = field(default_factory=lambda: [SynthPart()])
-    order: Sequence[int] | None = None  # orden de las submallas (una por parte)
+    order: Sequence[int] | None = None  # submesh order (one per part)
     scale: Vec3 = (0.0, 0.0, 0.0)
     group: int = 0
     collision: Sequence[tuple[Sequence[Vec3], Sequence[Triangle]]] = ()
@@ -69,7 +69,7 @@ def vertex_bytes(part: SynthPart) -> bytes:
 
 
 def push_buffer_bytes(indices: Sequence[int], garbage: int = 0) -> bytes:
-    """BEGIN(strip), ARRAY_ELEMENT16, ARRAY_ELEMENT32 si sobra uno, END y el u32 de relleno."""
+    """BEGIN(strip), ARRAY_ELEMENT16, ARRAY_ELEMENT32 if one is left, END and the padding u32."""
     words = [0x000417FC, 6]
     pairs = [indices[i] | (indices[i + 1] << 16) for i in range(0, len(indices) - 1, 2)]
     if pairs:
@@ -114,7 +114,7 @@ def objinfo_entry(obj: SynthStageObject) -> bytes:
 
 
 def vhd_record(blocks: Sequence[tuple[Sequence[Vec3], Sequence[Triangle]]], attr: int = 0) -> bytes:
-    """Registro `VHD` con un bloque por elemento; planos (0, 1, 0, -y) y superficie = bloque."""
+    """`VHD` record with one block per element; planes (0, 1, 0, -y) and surface = block."""
     head = struct.pack("<4sBBHI", b"VHD\0", 1, 0x0A, len(blocks), attr) + bytes(4)
     head += struct.pack("<8f", 0, 0, 0, 1, 1, 1, 1, 0)
     body = bytearray(head)
@@ -177,7 +177,7 @@ def build_xpr0(objects: Sequence[SynthStageObject], textures: int) -> bytes:
 def build_stage_kmd(
     objects: Sequence[SynthStageObject], *, textures: int = 1, collision: bool = True
 ) -> bytes:
-    """KMD de escenario: OBJINFO, XPR0 y (opcional) HITMDL en el slot 3, como en el juego."""
+    """Stage KMD: OBJINFO, XPR0 and (optionally) HITMDL in slot 3, as in the game."""
     objinfo = build_chunk(b"OBJINFO", [objinfo_entry(o) for o in objects])
     slots: list[bytes | None] = [objinfo, build_xpr0(objects, textures), None]
     slots.append(hitmdl(objects) if collision else None)
@@ -185,7 +185,7 @@ def build_stage_kmd(
 
 
 def two_part_object(offset: Vec3 = (0.0, 0.0, 0.0)) -> SynthStageObject:
-    """Un objeto con dos partes: la 0 por IB y la 1 por push buffer, submallas al revés."""
+    """An object with two parts: 0 via IB and 1 via push buffer, submeshes reversed."""
     ox, oy, oz = offset
     floor = ((ox, oy, oz), (ox + 1, oy, oz), (ox, oy, oz + 1))
     return SynthStageObject(

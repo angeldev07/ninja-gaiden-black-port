@@ -1,23 +1,23 @@
-"""OBJINFO: una entrada por objeto del modelo, con su transformación local y sus volúmenes.
+"""OBJINFO: one entry per model object, with its local transform and its volumes.
 
-El subchunk OBJINFO lleva la cabecera de chunk de Team Ninja (`ngb_tools.teamninja`) y un
-slot por objeto. Cada entrada (u32 y f32 little endian, verificado en `ryu.kmd`):
+The OBJINFO subchunk carries the Team Ninja chunk header (`ngb_tools.teamninja`) and one
+slot per object. Each entry (little-endian u32 and f32, verified on `ryu.kmd`):
 
-    0x00  "OI\\x01\\x01"   magia
-    0x04  header_size    0x90: donde empiezan los registros por submalla
-    0x08  n_sub          submallas; igual que en el descriptor de malla del XPR0
-    0x0C  group          1 detalle, 2 sombra, 3 efecto, 4 skin, 5 LOD (nombres INFERRED)
-    0x10  flags          0x201 / 0xa01 / 0x200 (sin interpretar)
+    0x00  "OI\\x01\\x01"   magic
+    0x04  header_size    0x90: where the per-submesh records start
+    0x08  n_sub          submeshes; same as in the XPR0 mesh descriptor
+    0x0C  group          1 detail, 2 shadow, 3 effect, 4 skin, 5 LOD (names INFERRED)
+    0x10  flags          0x201 / 0xa01 / 0x200 (not interpreted)
     0x18  f32 1.0
-    0x30  T  f32 x3      traslación local respecto al nodo padre de HIERARC
-    0x40  R  f32 x3      rotación: 0 en todos los objetos observados, orden desconocido
-    0x50  S  f32 x3      escala: 1, o 0 en los objetos de efecto ocultos
-    0x60  bbox_min x3    coincide con el mínimo de los vértices
-    0x70  bbox_size x3   máximo = min + size
-    0x80  esfera x4      centro y radio
-    header_size + 0x20 * i: u32 flags, 12 bytes de relleno y la esfera de la submalla i
+    0x30  T  f32 x3      local translation relative to the HIERARC parent node
+    0x40  R  f32 x3      rotation: 0 in every observed object, order unknown
+    0x50  S  f32 x3      scale: 1, or 0 in hidden effect objects
+    0x60  bbox_min x3    matches the minimum of the vertices
+    0x70  bbox_size x3   maximum = min + size
+    0x80  sphere x4      center and radius
+    header_size + 0x20 * i: u32 flags, 12 bytes of padding and the sphere of submesh i
 
-OBJINFO no apunta a buffers: el objeto k usa el descriptor, el VB y el IB k-ésimos del XPR0.
+OBJINFO does not point to buffers: object k uses the k-th descriptor, VB and IB of the XPR0.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ OBJINFO_TAG: Final = "OBJINFO"
 ENTRY_MAGIC: Final = b"OI\x01\x01"
 MIN_HEADER_SIZE: Final = 0x90
 SUBMESH_RECORD_SIZE: Final = 0x20
-# Tope de submallas por objeto: el máximo observado es 8 (la cabeza de Ryu).
+# Cap on submeshes per object: the maximum observed is 8 (Ryu's head).
 MAX_SUBMESHES: Final = 256
 
 type Vec3 = tuple[float, float, float]
@@ -46,7 +46,7 @@ _SPHERE: Final = struct.Struct("<4f")
 
 
 class ObjectGroup(IntEnum):
-    """Campo 0x0C. Los nombres son INFERRED por lo que se ve al renderizar cada grupo."""
+    """Field 0x0C. The names are INFERRED from what each group looks like when rendered."""
 
     DETAIL = 1
     SHADOW = 2
@@ -59,12 +59,12 @@ def group_name(group: int) -> str:
     try:
         return ObjectGroup(group).name.lower()
     except ValueError:
-        return f"grupo{group}"
+        return f"group{group}"
 
 
 @dataclass(frozen=True, slots=True)
 class ObjectInfo:
-    """Una entrada de OBJINFO."""
+    """One OBJINFO entry."""
 
     index: int
     submesh_count: int
@@ -90,20 +90,22 @@ def _sphere(data: bytes, offset: int) -> Sphere:
 
 
 def parse_object_entry(index: int, entry: bytes) -> ObjectInfo:
-    """Parsea una entrada; `entry` son los bytes de su slot."""
+    """Parse one entry; `entry` is the bytes of its slot."""
     if len(entry) < MIN_HEADER_SIZE:
-        raise KmdFormatError(f"OBJINFO {index}: {len(entry):#x} bytes, mínimo {MIN_HEADER_SIZE:#x}")
+        raise KmdFormatError(
+            f"OBJINFO {index}: {len(entry):#x} bytes, minimum {MIN_HEADER_SIZE:#x}"
+        )
     magic, header_size, n_sub, group, flags = _HEAD.unpack_from(entry)
     if magic != ENTRY_MAGIC:
-        raise KmdFormatError(f"OBJINFO {index}: magia {magic!r}, se esperaba {ENTRY_MAGIC!r}")
+        raise KmdFormatError(f"OBJINFO {index}: magic {magic!r}, expected {ENTRY_MAGIC!r}")
     if n_sub > MAX_SUBMESHES:
         raise KmdFormatError(
-            f"OBJINFO {index}: {n_sub} submallas supera el tope de {MAX_SUBMESHES}"
+            f"OBJINFO {index}: {n_sub} submeshes exceeds the cap of {MAX_SUBMESHES}"
         )
     end = header_size + SUBMESH_RECORD_SIZE * n_sub
     if header_size < MIN_HEADER_SIZE or end > len(entry):
         raise KmdFormatError(
-            f"OBJINFO {index}: cabecera {header_size:#x} y {n_sub} submallas no caben en "
+            f"OBJINFO {index}: header {header_size:#x} and {n_sub} submeshes do not fit in "
             f"{len(entry):#x} bytes"
         )
     spheres = tuple(
@@ -125,20 +127,20 @@ def parse_object_entry(index: int, entry: bytes) -> ObjectInfo:
 
 
 def parse_objinfo(data: bytes) -> tuple[ObjectInfo, ...]:
-    """Todas las entradas del subchunk OBJINFO que empieza en `data[0]`.
+    """All entries of the OBJINFO subchunk that starts at `data[0]`.
 
-    Cada slot es un objeto, así que no puede haber slots vacíos: el índice del slot es el
-    índice del objeto en el resto del KMD.
+    Each slot is an object, so there can be no empty slots: the slot index is the object
+    index in the rest of the KMD.
     """
     try:
         chunk = parse_chunk(data)
     except TeamNinjaError as error:
         raise KmdFormatError(f"OBJINFO: {error}") from error
     if chunk.tag != OBJINFO_TAG:
-        raise KmdFormatError(f"se esperaba el subchunk {OBJINFO_TAG}, hay '{chunk.tag}'")
+        raise KmdFormatError(f"expected subchunk {OBJINFO_TAG}, found '{chunk.tag}'")
     if chunk.n_used != chunk.n_slots:
         raise KmdFormatError(
-            f"OBJINFO: {chunk.n_slots - chunk.n_used} slots vacíos; cada slot es un objeto"
+            f"OBJINFO: {chunk.n_slots - chunk.n_used} empty slots; each slot is an object"
         )
     return tuple(
         parse_object_entry(slot.index, data[slot.offset : slot.end]) for slot in chunk.slots

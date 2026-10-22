@@ -1,40 +1,40 @@
-"""Rig humanoide de Team Ninja: de las 44 pistas de una motion a la pose de los huesos.
+"""Team Ninja humanoid rig: from the 44 tracks of a motion to the bone pose.
 
-Las motions de `ryu.mtn` no guardan una rotación por hueso. Mezclan FK para el tronco con
-IK para los miembros. Disposición de las pistas, en unidades de 1e-4 m y 1e-4 rad (INFERRED
-fuerte: dentro de una motion hay saltos exactos de 62831 = 2π·1e4, y en la pose estática la
-cadera queda a 0,99 m, su altura real):
+The motions in `ryu.mtn` do not store one rotation per bone. They mix FK for the trunk with
+IK for the limbs. Track layout, in units of 1e-4 m and 1e-4 rad (strongly INFERRED: inside a
+motion there are exact jumps of 62831 = 2π·1e4, and in the static pose the hip sits at
+0.99 m, its real height):
 
-    0-2    posición de la raíz (cadera) en el espacio del modelo, con el suelo en y = 0
-    3-5    rotación de la cadera, Euler XYZ (R = Rz·Ry·Rx, INFERRED)
-    6-8    rotación del pecho, local a la cadera
-    9-11   rotación de la cabeza, local al pecho
-    12-19  miembro A, brazo del lado -x
-    20-27  miembro B, brazo +x
-    28-35  miembro C, pierna -x
-    36-43  miembro D, pierna +x
+    0-2    root (hip) position in model space, with the ground at y = 0
+    3-5    hip rotation, Euler XYZ (R = Rz·Ry·Rx, INFERRED)
+    6-8    chest rotation, local to the hip
+    9-11   head rotation, local to the chest
+    12-19  limb A, -x side arm
+    20-27  limb B, +x arm
+    28-35  limb C, -x leg
+    36-43  limb D, +x leg
 
-Cada miembro: objetivo IK de la muñeca o el tobillo en el espacio del modelo (xyz),
-orientación absoluta de la mano o el pie (Euler) y dos ángulos G y H. Con H se orienta el
-polo: polo = R_padre · Ry(H) · (lado, 0, 0), así que las rodillas miran hacia delante y los
-codos hacia atrás. G no se usa: su semántica es desconocida. Evidencia de esta disposición:
-los objetivos de los cuatro miembros tienen los mismos rangos que la raíz, porque viajan con
-ella; en la pose estática los pies quedan a 0,11 m, la altura del tobillo de bind; y los
-renders de idle, andar, correr, saltar y los tajos de katana salen coherentes.
+Each limb: IK target of the wrist or ankle in model space (xyz), absolute orientation of
+the hand or foot (Euler) and two angles G and H. H orients the pole: pole = R_parent ·
+Ry(H) · (side, 0, 0), so the knees point forward and the elbows backward. G is unused: its
+semantics are unknown. Evidence for this layout: the targets of the four limbs have the same
+ranges as the root, because they travel with it; in the static pose the feet sit at 0.11 m,
+the bind ankle height; and the renders of idle, walk, run, jump and katana slashes come out
+coherent.
 
-**IK.** Dos huesos con las longitudes de bind, resuelto en el plano que forman el hombro
-o la cadera, el objetivo y el polo, con la ley de los cosenos. Si el objetivo no está a su
-alcance, la distancia se recorta.
+**IK.** Two bones with the bind lengths, solved in the plane formed by the shoulder or
+hip, the target and the pole, with the law of cosines. If the target is out of reach, the
+distance is clamped.
 
-**Esqueleto.** Se deduce del KMD (objetos del grupo de detalle):
+**Skeleton.** Deduced from the KMD (objects of the detail group):
 
-- raíz: la de HIERARC;
-- pecho: el hijo de la raíz más alto;
-- cabeza: el hijo del pecho centrado en x;
-- miembros: cadenas de 3 huesos (superior, inferior, extremo) bajo el pecho (brazos) y
-  bajo la raíz (piernas), con el lado según el signo de x del superior.
+- root: the one from HIERARC;
+- chest: the highest child of the root;
+- head: the x-centered child of the chest;
+- limbs: chains of 3 bones (upper, lower, end) under the chest (arms) and under the root
+  (legs), with the side given by the sign of x of the upper bone.
 
-En la pose de bind los huesos no tienen rotación: la del modelo es la pose T.
+In the bind pose the bones have no rotation: the model's pose is the T-pose.
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ from ngb_tools.kmd.objinfo import ObjectGroup, Vec3
 
 TRACK_COUNT: Final = 44
 UNIT: Final = 1e-4
-MOTION_FPS: Final = 60.0  # INFERRED: el juego va a 60 fps
+MOTION_FPS: Final = 60.0  # INFERRED: the game runs at 60 fps
 ROOT_POSITION: Final = 0
 ROOT_ROTATION: Final = 3
 CHEST_ROTATION: Final = 6
@@ -71,12 +71,12 @@ type Pose = dict[int, tuple[Mat3, Vec3]]
 
 
 class RigError(KmdError):
-    """El KMD no tiene el esqueleto humanoide que esperan las motions, o la motion no cuadra."""
+    """The KMD lacks the humanoid skeleton the motions expect, or the motion does not match."""
 
 
 @dataclass(frozen=True, slots=True)
 class Limb:
-    """Cadena de 3 huesos con su lado (-1 o +1) y la dirección de flexión en bind."""
+    """Chain of 3 bones with its side (-1 or +1) and the bend direction in bind."""
 
     upper: int
     lower: int
@@ -101,7 +101,7 @@ class HumanoidRig:
         return (self.root, self.chest, self.head, *chains)
 
 
-# --- álgebra 3x3 con tuplas ---------------------------------------------------------------
+# --- 3x3 algebra with tuples ---------------------------------------------------------------
 
 IDENTITY: Final[Mat3] = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
 
@@ -165,12 +165,12 @@ def rot_z(t: float) -> Mat3:
 
 
 def euler_xyz(x: float, y: float, z: float) -> Mat3:
-    """R = Rz·Ry·Rx: primero X, luego Y y luego Z (orden INFERRED)."""
+    """R = Rz·Ry·Rx: X first, then Y and then Z (order INFERRED)."""
     return mat_mul(rot_z(z), mat_mul(rot_y(y), rot_x(x)))
 
 
 def _frame(direction: Vec3, normal: Vec3) -> Mat3:
-    """Base ortonormal con columnas (dirección, normal ortogonalizada, dirección × normal)."""
+    """Orthonormal basis with columns (direction, orthogonalized normal, direction x normal)."""
     d = _unit(direction, (1.0, 0.0, 0.0))
     n = _unit(_sub(normal, _scale(d, _dot(normal, d))), _any_perpendicular(d))
     w = _cross(d, n)
@@ -183,7 +183,7 @@ def _any_perpendicular(d: Vec3) -> Vec3:
 
 
 def quaternion(m: Mat3) -> Quat:
-    """Cuaternión glTF (x, y, z, w) de una matriz de rotación."""
+    """glTF quaternion (x, y, z, w) of a rotation matrix."""
     trace = m[0][0] + m[1][1] + m[2][2]
     if trace > 0:
         s = 2.0 * math.sqrt(trace + 1.0)
@@ -201,7 +201,7 @@ def quaternion(m: Mat3) -> Quat:
     return (q[0] / n, q[1] / n, q[2] / n, q[3] / n)
 
 
-# --- esqueleto ------------------------------------------------------------------------------
+# --- skeleton ------------------------------------------------------------------------------
 
 
 def _detail_children(model: KmdModel, obj: int) -> list[int]:
@@ -209,7 +209,7 @@ def _detail_children(model: KmdModel, obj: int) -> list[int]:
 
 
 def _chain(model: KmdModel, upper: int) -> tuple[int, int, int] | None:
-    """(superior, inferior, extremo): el inferior es el hijo de detalle con hijos de detalle."""
+    """(upper, lower, end): the lower is the detail child that has detail children."""
     lowers = [c for c in _detail_children(model, upper) if _detail_children(model, c)]
     if not lowers:
         return None
@@ -220,10 +220,10 @@ def _chain(model: KmdModel, upper: int) -> tuple[int, int, int] | None:
 
 
 def _limbs_under(model: KmdModel, parent: int, candidates: Sequence[int], kind: str) -> list[Limb]:
-    """Un miembro por lado (-x y +x) entre `candidates`, en ese orden."""
+    """One limb per side (-x and +x) among `candidates`, in that order."""
     by_side: dict[int, Limb] = {}
-    # Flexión en bind: codos hacia atrás (-z), rodillas hacia delante (+z).
-    bend = (0.0, 0.0, -1.0) if kind == "brazo" else (0.0, 0.0, 1.0)
+    # Bend in bind: elbows backward (-z), knees forward (+z).
+    bend = (0.0, 0.0, -1.0) if kind == "arm" else (0.0, 0.0, 1.0)
     for upper in candidates:
         x = model.objects[upper].info.translation[0]
         chain = _chain(model, upper)
@@ -231,33 +231,33 @@ def _limbs_under(model: KmdModel, parent: int, candidates: Sequence[int], kind: 
             continue
         side = 1 if x > 0 else -1
         if side in by_side:
-            raise RigError(f"dos {kind} del lado {side:+d} bajo obj{parent}")
+            raise RigError(f"two {kind}s on side {side:+d} under obj{parent}")
         by_side[side] = Limb(*chain, side=side, parent=parent, bend=bend)
     if set(by_side) != {-1, 1}:
-        raise RigError(f"no hay un {kind} a cada lado bajo obj{parent}")
+        raise RigError(f"no {kind} on each side under obj{parent}")
     return [by_side[-1], by_side[1]]
 
 
 def find_rig(model: KmdModel) -> HumanoidRig:
-    """Deduce el rig humanoide del KMD, o `RigError` si no lo tiene."""
+    """Deduce the humanoid rig from the KMD, or `RigError` if it has none."""
     if model.hierarchy is None:
-        raise RigError("el KMD no tiene HIERARC")
+        raise RigError("the KMD has no HIERARC")
     root = model.hierarchy.root
     below_root = _detail_children(model, root)
     upward = [c for c in below_root if model.objects[c].info.translation[1] > 0]
     if not upward:
-        raise RigError(f"obj{root} no tiene un pecho por encima")
+        raise RigError(f"obj{root} has no chest above it")
     chest = max(upward, key=lambda c: model.objects[c].info.translation[1])
     below_chest = _detail_children(model, chest)
     centred = [
         c for c in below_chest if abs(model.objects[c].info.translation[0]) < CENTER_TOLERANCE
     ]
     if not centred:
-        raise RigError(f"obj{chest} no tiene cabeza")
+        raise RigError(f"obj{chest} has no head")
     head = max(centred, key=lambda c: model.objects[c].info.translation[1])
-    arms = _limbs_under(model, chest, below_chest, "brazo")
+    arms = _limbs_under(model, chest, below_chest, "arm")
     legs = [c for c in below_root if c != chest]
-    limbs = (*arms, *_limbs_under(model, root, legs, "pierna"))
+    limbs = (*arms, *_limbs_under(model, root, legs, "leg"))
     bones = (root, chest, head, *(b for limb in limbs for b in (limb.upper, limb.lower, limb.end)))
     bind = {b: model.objects[b].info.translation for b in bones}
     parents = {b: p for b in bones if (p := model.parent(b)) is not None}
@@ -304,9 +304,9 @@ def _solve_limb(
 
 
 def pose(rig: HumanoidRig, values: Sequence[float]) -> Pose:
-    """Rotación y posición de cada hueso en el espacio del modelo (valores brutos de pista)."""
+    """Rotation and position of each bone in model space (raw track values)."""
     if len(values) != TRACK_COUNT:
-        raise RigError(f"la motion tiene {len(values)} pistas; el rig humanoide necesita 44")
+        raise RigError(f"the motion has {len(values)} tracks; the humanoid rig needs 44")
     out: Pose = {}
     root_r = euler_xyz(*_vec(values, ROOT_ROTATION))
     out[rig.root] = (root_r, _vec(values, ROOT_POSITION))
@@ -320,7 +320,7 @@ def pose(rig: HumanoidRig, values: Sequence[float]) -> Pose:
 
 
 def local_rotations(rig: HumanoidRig, world: Pose) -> dict[int, Quat]:
-    """Rotación de cada hueso relativa a su padre (la raíz, en el espacio del modelo)."""
+    """Rotation of each bone relative to its parent (the root, in model space)."""
     local: dict[int, Quat] = {}
     for bone in rig.bones:
         rotation = world[bone][0]
@@ -332,7 +332,7 @@ def local_rotations(rig: HumanoidRig, world: Pose) -> dict[int, Quat]:
 
 
 def _continuous(previous: Quat | None, q: Quat) -> Quat:
-    """Mismo hemisferio que la muestra anterior, para que LINEAR no dé la vuelta larga."""
+    """Same hemisphere as the previous sample, so LINEAR does not take the long way round."""
     if previous is not None and sum(a * b for a, b in zip(previous, q, strict=True)) < 0:
         return (-q[0], -q[1], -q[2], -q[3])
     return q
@@ -341,9 +341,9 @@ def _continuous(previous: Quat | None, q: Quat) -> Quat:
 def motion_clip(
     rig: HumanoidRig, motion: Motion, name: str, *, fps: float = MOTION_FPS
 ) -> AnimationClip:
-    """Muestrea la motion en cada frame: traslación de la raíz y rotación de cada hueso."""
+    """Sample the motion at every frame: root translation and rotation of each bone."""
     if len(motion.tracks) != TRACK_COUNT:
-        raise RigError(f"{name}: {len(motion.tracks)} pistas; el rig humanoide necesita 44")
+        raise RigError(f"{name}: {len(motion.tracks)} tracks; the humanoid rig needs 44")
     frames = range(motion.frames + 1)
     rotations: dict[int, list[Quat]] = {bone: [] for bone in rig.bones}
     translations: list[tuple[float, ...]] = []

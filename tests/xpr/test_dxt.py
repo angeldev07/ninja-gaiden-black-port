@@ -1,11 +1,11 @@
-"""Tests de los decodificadores DXT1/DXT3/DXT5 con bloques cuyo resultado se calcula a mano.
+"""Tests of the DXT1/DXT3/DXT5 decoders with blocks whose result is computed by hand.
 
-Colores de referencia en RGB565 (little endian en el bloque):
-    0xF800 = rojo puro  -> (255, 0, 0)
-    0x001F = azul puro  -> (0, 0, 255)
-    0x8410 = r=16, g=32, b=16 -> (132, 130, 132) por replicación de bits:
+Reference colors in RGB565 (little-endian in the block):
+    0xF800 = pure red   -> (255, 0, 0)
+    0x001F = pure blue  -> (0, 0, 255)
+    0x8410 = r=16, g=32, b=16 -> (132, 130, 132) by bit replication:
              r8 = 16<<3 | 16>>2 = 132, g8 = 32<<2 | 32>>4 = 130.
-Interpolación con truncado, como xemu: c2 = (2*c0 + c1) // 3, c3 = (c0 + 2*c1) // 3.
+Truncating interpolation, as in xemu: c2 = (2*c0 + c1) // 3, c3 = (c0 + 2*c1) // 3.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ Pixel = tuple[int, int, int, int]
 
 
 def color_block(c0: int, c1: int, index_bytes: bytes) -> bytes:
-    """Mitad de color de un bloque: dos colores 565 y 16 índices de 2 bits (4 bytes)."""
+    """Color half of a block: two 565 colors and 16 2-bit indices (4 bytes)."""
     return struct.pack("<HH", c0, c1) + index_bytes
 
 
@@ -34,7 +34,7 @@ def alphas(rgba: bytes) -> list[int]:
 
 class Bc1Tests(unittest.TestCase):
     def test_four_color_block_when_c0_greater_than_c1(self) -> None:
-        # Índices por fila (2 bits por píxel, el píxel 0 en los bits bajos):
+        # Indices per row (2 bits per pixel, pixel 0 in the low bits):
         # [0,1,2,3] = 0xE4, [3,2,1,0] = 0x1B, [0,0,0,0] = 0x00, [3,3,3,3] = 0xFF.
         block = color_block(RED, BLUE, bytes([0xE4, 0x1B, 0x00, 0xFF]))
         p0, p1 = (255, 0, 0, 255), (0, 0, 255, 255)
@@ -44,8 +44,8 @@ class Bc1Tests(unittest.TestCase):
         self.assertEqual(pixels(decode_bc1(block, 4, 4)), expected)
 
     def test_three_color_block_has_transparent_black(self) -> None:
-        # c0 <= c1: c2 = (c0 + c1) // 2 y el índice 3 es negro transparente.
-        # Píxel 0 con índice 3 y el resto con 2: 0b10101011 = 0xAB, luego 0xAA.
+        # c0 <= c1: c2 = (c0 + c1) // 2 and index 3 is transparent black.
+        # Pixel 0 with index 3 and the rest with 2: 0b10101011 = 0xAB, then 0xAA.
         block = color_block(BLUE, RED, bytes([0xAB, 0xAA, 0xAA, 0xAA]))
         decoded = pixels(decode_bc1(block, 4, 4))
         self.assertEqual(decoded[0], (0, 0, 0, 0))
@@ -74,14 +74,14 @@ class Bc1Tests(unittest.TestCase):
 
 
 class Bc3Tests(unittest.TestCase):
-    # Índices de alfa 0,1,...,7,0,...,7 (3 bits por píxel): 0o76543210 = 0xFAC688 por mitad.
+    # Alpha indices 0,1,...,7,0,...,7 (3 bits per pixel): 0o76543210 = 0xFAC688 per half.
     ALPHA_INDICES = bytes([0x88, 0xC6, 0xFA, 0x88, 0xC6, 0xFA])
-    # Color con c0 < c1 e índice 2 en todos: en DXT3/5 el color es SIEMPRE de 4 colores.
+    # Color with c0 < c1 and index 2 everywhere: in DXT3/5 the color is ALWAYS 4-color.
     COLOR = color_block(BLUE, RED, bytes([0xAA] * 4))
 
     def test_eight_alpha_mode_when_a0_greater_than_a1(self) -> None:
         block = bytes([255, 0]) + self.ALPHA_INDICES + self.COLOR
-        # a_i = ((8-i)*a0 + (i-1)*a1) // 7 para i = 2..7.
+        # a_i = ((8-i)*a0 + (i-1)*a1) // 7 for i = 2..7.
         palette = [255, 0, 218, 182, 145, 109, 72, 36]
         self.assertEqual(alphas(decode_bc3(block, 4, 4)), palette * 2)
 
@@ -98,7 +98,7 @@ class Bc3Tests(unittest.TestCase):
 
 class Bc2Tests(unittest.TestCase):
     def test_explicit_four_bit_alpha(self) -> None:
-        # Alfa del píxel i = i (4 bits, el píxel par en el nibble bajo); se expande * 17.
+        # Alpha of pixel i = i (4 bits, the even pixel in the low nibble); expanded * 17.
         alpha = bytes([0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE])
         block = alpha + color_block(BLUE, RED, bytes([0xAA] * 4))
         decoded = decode_bc2(block, 4, 4)
@@ -107,36 +107,36 @@ class Bc2Tests(unittest.TestCase):
 
 
 GREEN = 0x07E0
-# Píxeles de referencia de los recortes 6x5 (cuatro bloques: arriba izq/der, abajo izq/der).
+# Reference pixels of the 6x5 crops (four blocks: top left/right, bottom left/right).
 R17, R0, B255, G136 = (255, 0, 0, 17), (255, 0, 0, 0), (0, 0, 255, 255), (0, 255, 0, 136)
 
 
 class EqualEndpointTests(unittest.TestCase):
     def test_bc1_with_c0_equal_to_c1_uses_the_three_color_mode(self) -> None:
-        # c0 == c1 cuenta como c0 <= c1: índice 2 = (c0 + c1) // 2 = rojo; índice 3 = transparente.
-        # Píxel 0 con índice 3 y píxel 1 con índice 2: 0b1011 = 0x0B.
+        # c0 == c1 counts as c0 <= c1: index 2 = (c0 + c1) // 2 = red; index 3 = transparent.
+        # Pixel 0 with index 3 and pixel 1 with index 2: 0b1011 = 0x0B.
         block = color_block(RED, RED, bytes([0x0B, 0, 0, 0]))
         decoded = pixels(decode_bc1(block, 4, 4))
         self.assertEqual(decoded[0], (0, 0, 0, 0))
         self.assertEqual(decoded[1:], [(255, 0, 0, 255)] * 15)
 
     def test_bc3_with_a0_equal_to_a1_uses_the_six_alpha_mode(self) -> None:
-        # a0 == a1 = 100: los interpolados valen 100 y los índices 6 y 7 dan 0 y 255.
+        # a0 == a1 = 100: the interpolated ones are 100 and indices 6 and 7 give 0 and 255.
         block = bytes([100, 100]) + Bc3Tests.ALPHA_INDICES + Bc3Tests.COLOR
         palette = [100, 100, 100, 100, 100, 100, 0, 255]
         self.assertEqual(alphas(decode_bc3(block, 4, 4)), palette * 2)
 
 
 class CroppedMultiBlockTests(unittest.TestCase):
-    """6x5 ocupa 2x2 bloques (8x8): se ven 2 columnas de los bloques derechos y 1 fila abajo."""
+    """6x5 takes 2x2 blocks (8x8): 2 columns of the right blocks and 1 bottom row are visible."""
 
     def test_bc2_6x5(self) -> None:
-        top_right_color = color_block(RED, BLUE, bytes([0xE4, 0, 0, 0]))  # fila 0: 0, 1, 2, 3
+        top_right_color = color_block(RED, BLUE, bytes([0xE4, 0, 0, 0]))  # row 0: 0, 1, 2, 3
         blocks = (
-            bytes([0x11] * 8) + color_block(RED, RED, bytes(4)),  # alfa 1 * 17 = 17
-            bytes([0x32, 0x54]) + bytes(6) + top_right_color,  # fila 0: alfas 2, 3, 4, 5
+            bytes([0x11] * 8) + color_block(RED, RED, bytes(4)),  # alpha 1 * 17 = 17
+            bytes([0x32, 0x54]) + bytes(6) + top_right_color,  # row 0: alphas 2, 3, 4, 5
             bytes([0xFF] * 8) + color_block(BLUE, BLUE, bytes(4)),
-            bytes([0x88] * 8) + color_block(GREEN, GREEN, bytes(4)),  # alfa 8 * 17 = 136
+            bytes([0x88] * 8) + color_block(GREEN, GREEN, bytes(4)),  # alpha 8 * 17 = 136
         )
         expected = [
             [R17, R17, R17, R17, (255, 0, 0, 34), (0, 0, 255, 51)],
@@ -149,9 +149,9 @@ class CroppedMultiBlockTests(unittest.TestCase):
         self.assertEqual(decoded, [pixel for row in expected for pixel in row])
 
     def test_bc3_6x5(self) -> None:
-        # Arriba a la derecha: a0 = 200 > a1 = 100 y alfas de la fila 0 con índices 0, 1, 2, 3:
+        # Top right: a0 = 200 > a1 = 100 and row-0 alphas with indices 0, 1, 2, 3:
         # 0 | 1 << 3 | 2 << 6 | 3 << 9 = 0x688. a2 = 1300 // 7 = 185, a3 = 1200 // 7 = 171,
-        # pero solo se ven las columnas 0 y 1 (alfas 200 y 100).
+        # but only columns 0 and 1 are visible (alphas 200 and 100).
         top_right_color = color_block(RED, BLUE, bytes([0xE4, 0, 0, 0]))
         blocks = (
             bytes([17, 17]) + bytes(6) + color_block(RED, RED, bytes(4)),

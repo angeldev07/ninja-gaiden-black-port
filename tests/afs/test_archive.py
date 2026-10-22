@@ -1,4 +1,4 @@
-"""Tests del parseo de cabecera, TOC y tabla de atributos, y de la lectura por streaming."""
+"""Tests of header, TOC and attribute table parsing, and of streaming reads."""
 
 from __future__ import annotations
 
@@ -59,12 +59,12 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(open_bytes(bytes(data)).magic, MAGIC_VARIANT)
 
     def test_truncated_header_is_a_format_error(self) -> None:
-        with self.assertRaisesRegex(AfsFormatError, "cabecera truncada"):
+        with self.assertRaisesRegex(AfsFormatError, "truncated header"):
             open_bytes(b"AFS\x00\x01")
 
     def test_toc_that_does_not_fit_is_a_format_error(self) -> None:
         data = struct.pack("<4sI", b"AFS\x00", 1000) + bytes(16)
-        with self.assertRaisesRegex(AfsFormatError, "no cabe"):
+        with self.assertRaisesRegex(AfsFormatError, "does not fit"):
             open_bytes(data)
 
     def test_attr_pointer_outside_file_means_no_names(self) -> None:

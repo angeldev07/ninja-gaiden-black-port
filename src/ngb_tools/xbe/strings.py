@@ -1,15 +1,15 @@
-"""Cadenas ASCII de las secciones y su clasificación heurística.
+"""ASCII strings of the sections and their heuristic classification.
 
-Un ejecutable sin símbolos todavía habla: rutas del árbol de fuentes, asserts,
-mensajes de error, nombres de assets, sellos de versión del middleware,
-identificadores del motor y nombres de clase RTTI de MSVC. Las heurísticas son
-baratas y explicables; se prefiere perder alguna cadena real a llenar el
-informe de ruido salido de código x86 o de gráficos.
+A stripped executable still talks: source-tree paths, asserts,
+error messages, asset names, middleware version stamps,
+engine identifiers and MSVC RTTI class names. The heuristics are
+cheap and explainable; losing some real string is preferred to filling the
+report with noise from x86 code or graphics.
 
-Coste acotado ante un XBE hostil: todas las expresiones regulares son lineales en
-la longitud de la cadena (las de rutas y assets solo empiezan a probar al inicio de
-un token, ver `PATH_RE`), y además las rachas de más de `MAX_CLASSIFIED_LEN`
-caracteres se cuentan pero no se clasifican.
+Bounded cost against a hostile XBE: all regular expressions are linear in
+the string length (the path and asset ones only start trying at the beginning of
+a token, see `PATH_RE`), and in addition runs longer than `MAX_CLASSIFIED_LEN`
+characters are counted but not classified.
 """
 
 from __future__ import annotations
@@ -25,25 +25,25 @@ from typing import Final
 from ngb_tools.xbe.image import XbeImage
 
 DEFAULT_MIN_LEN = 6
-# Las cadenas reales más largas de NGB rondan los 1700 caracteres (el texto legal de la
-# pantalla WARNING); una racha más larga es una tabla, relleno o un intento de agotar las
-# heurísticas, y se cuenta pero no se clasifica.
+# The longest real NGB strings are around 1700 characters (the legal text of the
+# WARNING screen); a longer run is a table, padding or an attempt to exhaust the
+# heuristics, and it is counted but not classified.
 MAX_CLASSIFIED_LEN: Final = 4096
 
 SOURCE_FILE_RE = re.compile(r"[\w\-]\.(?:c|cc|cpp|cxx|h|hh|hpp|hxx|inl|asm)\b", re.IGNORECASE)
-# Un intento que empieza a mitad de un token (carácter de ruta precedido de otro) nunca da
-# la primera coincidencia de `finditer`: el intento desde el inicio del token llega al mismo
-# separador. La excepción es la letra de unidad (`xc:\`), porque ':' corta el token. Así que
-# solo se prueba al inicio de un token, en un separador o en una letra de unidad: la búsqueda
-# es lineal y las coincidencias, las mismas. Sin esto, una racha larga sin separadores
-# cuesta O(n²).
+# An attempt that starts in the middle of a token (a path character preceded by another) never
+# gives the first match of `finditer`: the attempt from the start of the token reaches the same
+# separator. The exception is the drive letter (`xc:\`), because ':' cuts the token. So
+# it is only tried at the start of a token, at a separator or at a drive letter: the search
+# is linear and the matches are the same. Without this, a long run without separators
+# costs O(n^2).
 PATH_RE = re.compile(
     r"(?:(?<![\w.\-~$%])|(?=[\\/]|[A-Za-z]:))"
     r"(?:[A-Za-z]:)?[\\/]{0,2}(?:[\w.\-~$%]{2,}[\\/])+[\w.\-~$%]*"
 )
 ASSERT_RE = re.compile(r"\bassert|\b\w+\s+(?:==|!=|<=|>=|&&|\|\|)\s+\w+", re.IGNORECASE)
-# Palabras de depuración "fuertes" (casi siempre mensajes de desarrollador) y "débiles"
-# (también aparecen en textos de UI o diálogo; exigen además una pista técnica).
+# "Strong" debug words (almost always developer messages) and "weak" ones
+# (they also appear in UI or dialogue text; they additionally require a technical hint).
 DEBUG_STRONG_RE = re.compile(
     r"\b(?:error|warning|fail(?:ed|ure)?|invalid|illegal|overflow|out of memory|fatal|abort|"
     r"exception|unsupported|timeout|leak|parameter|assert)\b|status=",
@@ -52,30 +52,30 @@ DEBUG_STRONG_RE = re.compile(
 DEBUG_WEAK_RE = re.compile(
     r"\b(?:cannot|can't|couldn't|unable|not found|unknown|missing|bad|debug)\b", re.IGNORECASE
 )
-TECH_PRINTF_RE = re.compile(r"%[-+ 0#]*\d*l?[xXp]")  # %x, %08x, %p: volcados técnicos
-# Pista técnica: printf, código de error (E1234), identificador_con_guiones, Camel/llamada().
+TECH_PRINTF_RE = re.compile(r"%[-+ 0#]*\d*l?[xXp]")  # %x, %08x, %p: technical dumps
+# Technical hint: printf, error code (E1234), identifier_with_underscores, Camel/call().
 DEV_HINT_RE = re.compile(r"%[-+ 0#]*\d*[sdiuxXp]|\bE?\d{4,}\b|\w_\w|[a-z][A-Z]\w*|\w\(\)|::")
-# Marcado de botones de la UI de NGB ('@BA' = botón A): delata texto de interfaz.
+# NGB UI button markup ('@BA' = button A): gives away interface text.
 UI_MARKUP_RE = re.compile(r"@B[A-Z]")
-REPEAT_OK = frozenset(" -=_.*0#~")  # caracteres que sí se repiten en texto real
+REPEAT_OK = frozenset(" -=_.*0#~")  # characters that do repeat in real text
 ASSET_EXTENSIONS = (
     "afs|xpr|xbr|xwb|xsb|xap|wav|wma|adx|aix|sfd|bin|dat|tex|tmc|mdl|dds|bmp|tga|png|jpg|"
     "jpeg|xmv|wmv|def|ins|ini|txt|xbe|ttf|fnt|cfg|lst|tbl|mot|anm|sav|xbx|xsv|xmp|fx|vsh|psh|xvu"
 )
-# Mismo truco que en PATH_RE: solo se prueba al inicio de un token.
+# Same trick as in PATH_RE: it is only tried at the start of a token.
 ASSET_RE = re.compile(rf"(?<![\w\-%])[\w\-%]+\.(?:{ASSET_EXTENSIONS})\b", re.IGNORECASE)
-# Descriptor de tipo RTTI de MSVC: '.?AV' (class), '.?AU' (struct), '.?AW' (enum).
+# MSVC RTTI type descriptor: '.?AV' (class), '.?AU' (struct), '.?AW' (enum).
 RTTI_RE = re.compile(r"\.\?A[VUW]([A-Za-z_]\w*(?:@[A-Za-z_]\w*)*)@@")
 VERSION_STAMP_RE = re.compile(r"\bVer(?:sion)?\.?\s*\d+\.\d+|\bBuild\s*:", re.IGNORECASE)
 IDENTIFIER_RE = re.compile(r"^(?:[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+|[a-z][a-z0-9]*(?:_[a-z0-9]+)+)$")
 REPEAT_RUN_RE = re.compile(r"(.)\1{3,}")
 TEXT_CHARS = frozenset(" _.-/\\:%()[],'=<>!&|*+?\"~$")
-MAX_DISTINCT_PUNCTUATION = 8  # más signos distintos: tabla o código máquina
+MAX_DISTINCT_PUNCTUATION = 8  # more distinct marks: table or machine code
 MIN_TEXT_RATIO = 0.85
 
 
 class StringCategory(StrEnum):
-    """Categorías del informe, en el orden en que se presentan."""
+    """Report categories, in the order they are presented."""
 
     SOURCE_PATHS = "source_paths"
     ASSERTS = "asserts"
@@ -88,17 +88,17 @@ class StringCategory(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class FoundString:
-    """Racha imprimible encontrada en una sección."""
+    """Printable run found in a section."""
 
     section: str
     va: int
     text: str
-    terminated: bool  # acaba en NUL, como toda cadena C real
+    terminated: bool  # ends in NUL, like any real C string
 
 
 @dataclass(frozen=True, slots=True)
 class CategorizedString:
-    """Cadena relevante de una categoría (RTTI incluye el nombre desmanglado)."""
+    """Relevant string of a category (RTTI includes the demangled name)."""
 
     section: str
     va: int
@@ -108,7 +108,7 @@ class CategorizedString:
 
 @dataclass(frozen=True, slots=True)
 class StringSummary:
-    """Totales y cadenas relevantes por categoría."""
+    """Totals and relevant strings per category."""
 
     total: int
     unique: int
@@ -122,22 +122,22 @@ class StringSummary:
 
     @property
     def identifier_prefixes(self) -> dict[str, int]:
-        """Histograma de prefijos ('STG_TOWER_05' -> 'STG'): sugiere subsistemas del motor."""
+        """Prefix histogram ('STG_TOWER_05' -> 'STG'): hints at engine subsystems."""
         identifiers = self.categories.get(StringCategory.ENGINE_IDENTIFIERS, ())
         return dict(Counter(item.text.split("_", 1)[0] for item in identifiers).most_common())
 
 
 def extract_strings(image: XbeImage, min_len: int = DEFAULT_MIN_LEN) -> list[FoundString]:
-    """Rachas ASCII imprimibles (admite \\t \\n \\r) de `min_len`+ caracteres.
+    """Printable ASCII runs (allows \\t \\n \\r) of `min_len`+ characters.
 
-    Solo se escanean los bytes que el archivo respalda (`backed_size`). Se omiten
-    las secciones INSERTED_FILE: son binarios embebidos (iconos, IDs) y solo
-    aportan ruido. Las rachas que no acaban en un NUL dentro de la sección (también
-    las que llegan a su final) suelen ser trozos de código o de gráficos; se
-    cuentan, pero no se clasifican.
+    Only the bytes the file backs (`backed_size`) are scanned. INSERTED_FILE
+    sections are skipped: they are embedded binaries (icons, IDs) and only
+    add noise. Runs that do not end in a NUL inside the section (including
+    those reaching its end) tend to be chunks of code or graphics; they are
+    counted, but not classified.
     """
     if min_len < 1:
-        raise ValueError(f"min_len debe ser >= 1 (es {min_len})")
+        raise ValueError(f"min_len must be >= 1 (got {min_len})")
     pattern = re.compile(rb"[\x20-\x7E\t\n\r]{%d,}" % min_len)
     found: list[FoundString] = []
     for section in image.sections:
@@ -159,12 +159,12 @@ def extract_strings(image: XbeImage, min_len: int = DEFAULT_MIN_LEN) -> list[Fou
 
 
 def looks_like_text(text: str) -> bool:
-    """Filtro anti-basura para rachas imprimibles que salen de código, tablas o gráficos.
+    """Anti-garbage filter for printable runs coming from code, tables or graphics.
 
-    1. Al menos 3 letras y un 85 % o más de caracteres "normales".
-    2. Pocos signos de puntuación distintos (tablas ASCII, código x86).
-    3. Diversidad: los datos de píxeles repiten pocos caracteres ('UUU\\UeU\\').
-    4. Sin rachas de 4+ caracteres iguales (salvo espacios, guiones, ceros...).
+    1. At least 3 letters and 85 % or more "normal" characters.
+    2. Few distinct punctuation marks (ASCII tables, x86 code).
+    3. Diversity: pixel data repeats few characters ('UUU\\UeU\\').
+    4. No runs of 4+ equal characters (except spaces, dashes, zeros...).
     """
     stripped = text.strip()
     if not stripped:
@@ -184,13 +184,14 @@ def looks_like_text(text: str) -> bool:
 
 
 def is_path_like(text: str) -> bool:
-    """Ruta plausible: 2+ segmentos, alguno con 3+ letras seguidas, y que no sea prosa.
+    """Plausible path: 2+ segments, one with 3+ consecutive letters, and not prose.
 
-    Con '\\' basta; con '/' la ruta debe ocupar casi toda la cadena (evita 'On/Off').
-    Debe estar anclada: raíz ('c:\\', '\\', '/', '%s') o extensión/placeholder al final
-    ('x.afs', 'movie\\%s'); así se descartan trozos de gráficos como 'gwv\\gwv_'.
-    Descarta basura x86: un segmento acabado en '$' es el byte SIB de `[esp+disp]`
-    (p. ej. 'D$\\PQR'), y un último segmento de 1 carácter no es un nombre real.
+    With '\\' it is enough; with '/' the path must take up almost the whole string (avoids
+    'On/Off').
+    It must be anchored: root ('c:\\', '\\', '/', '%s') or extension/placeholder at the end
+    ('x.afs', 'movie\\%s'); this discards graphics chunks such as 'gwv\\gwv_'.
+    Discards x86 garbage: a segment ending in '$' is the SIB byte of `[esp+disp]`
+    (e.g. 'D$\\PQR'), and a last segment of 1 character is not a real name.
     """
     stripped = text.strip()
     for match in PATH_RE.finditer(stripped):
@@ -211,21 +212,21 @@ def is_path_like(text: str) -> bool:
 
 
 def demangle_rtti(mangled: str) -> str:
-    """'CPlayer@Game' (de '.?AVCPlayer@Game@@') -> 'Game::CPlayer'."""
+    """'CPlayer@Game' (from '.?AVCPlayer@Game@@') -> 'Game::CPlayer'."""
     return "::".join(reversed(mangled.split("@")))
 
 
 def rtti_type_name(text: str) -> str | None:
-    """Nombre desmanglado si `text` contiene un descriptor RTTI de MSVC."""
+    """Demangled name if `text` contains an MSVC RTTI descriptor."""
     match = RTTI_RE.search(text)
     return demangle_rtti(match.group(1)) if match else None
 
 
 def is_debug_message(text: str) -> bool:
-    """Mensaje de desarrollador, no texto de UI.
+    """Developer message, not UI text.
 
-    Basta una palabra fuerte; una débil necesita además una pista técnica; o un
-    formato printf técnico (%x, %08x, %p...) dentro de una frase.
+    One strong word is enough; a weak one also needs a technical hint; or a
+    technical printf format (%x, %08x, %p...) inside a sentence.
     """
     if UI_MARKUP_RE.search(text):
         return False
@@ -237,9 +238,9 @@ def is_debug_message(text: str) -> bool:
 
 
 def classify_string(text: str) -> list[StringCategory]:
-    """Categorías a las que pertenece una cadena (puede ser más de una).
+    """Categories a string belongs to (may be more than one).
 
-    Las de más de `MAX_CLASSIFIED_LEN` caracteres no pertenecen a ninguna.
+    Those longer than `MAX_CLASSIFIED_LEN` characters belong to none.
     """
     if len(text) > MAX_CLASSIFIED_LEN:
         return []
@@ -259,9 +260,9 @@ def classify_string(text: str) -> list[StringCategory]:
 
 
 def summarize_strings(found: Sequence[FoundString]) -> StringSummary:
-    """Totales y cadenas por categoría, deduplicadas por texto (o por tipo, en RTTI).
+    """Totals and strings per category, deduplicated by text (or by type, for RTTI).
 
-    Solo se clasifican las cadenas terminadas en NUL (ver `extract_strings`).
+    Only NUL-terminated strings are classified (see `extract_strings`).
     """
     categories: dict[StringCategory, list[CategorizedString]] = {c: [] for c in StringCategory}
     seen: dict[StringCategory, set[str]] = {category: set() for category in StringCategory}

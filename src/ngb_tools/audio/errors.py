@@ -1,8 +1,8 @@
-"""Jerarquía de errores de la herramienta de audio.
+"""Error hierarchy of the audio tool.
 
-La CLI traduce cada familia a un código de salida: los errores de formato son un hallazgo
-sobre los datos (1) y los de uso son un fallo de quien invoca (2). `UnsafeOutputError`
-(salida dentro de un repo) viene de `ngb_tools._paths` y la CLI la trata como uso (2).
+The CLI maps each family to an exit code: format errors are a finding about the data (1)
+and usage errors are a failure of the caller (2). `UnsafeOutputError` (output inside a
+repo) comes from `ngb_tools._paths` and the CLI treats it as usage (2).
 """
 
 from __future__ import annotations
@@ -21,24 +21,24 @@ __all__ = [
 
 
 class AudioError(Exception):
-    """Raíz de los errores propios de `ngb_tools.audio`."""
+    """Root of the errors specific to `ngb_tools.audio`."""
 
 
 class AudioFormatError(AudioError):
-    """Los bytes no forman un flujo de audio válido (magia, cabecera o tamaños imposibles)."""
+    """The bytes do not form a valid audio stream (impossible magic, header or sizes)."""
 
 
 class AudioTruncatedError(AudioFormatError):
-    """El flujo termina antes de lo que declara su cabecera."""
+    """The stream ends before what its header declares."""
 
 
 class UnsupportedCodecError(AudioFormatError):
-    """Formato reconocido, pero con un códec o variante que no se decodifica."""
+    """Recognized format, but with a codec or variant that is not decoded."""
 
 
 class EncryptedAdxError(UnsupportedCodecError):
-    """ADX cifrado (byte 0x13 = 0x08 o 0x09): se informa y se salta, nunca se descifra."""
+    """Encrypted ADX (byte 0x13 = 0x08 or 0x09): reported and skipped, never decrypted."""
 
 
 class AudioUsageError(AudioError):
-    """La petición no tiene sentido para este archivo (p. ej. un índice inexistente)."""
+    """The request makes no sense for this file (e.g. a nonexistent index)."""

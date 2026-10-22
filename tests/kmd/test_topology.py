@@ -1,4 +1,4 @@
-"""Tests de tiras a triángulos: orden alternado, degenerados y orientación CCW."""
+"""Tests of strips to triangles: alternating order, degenerates and CCW orientation."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ class StripTests(unittest.TestCase):
             self.assertGreater(n[2], 0, tri)
 
     def test_degenerate_joins_are_dropped_and_parity_is_kept(self) -> None:
-        # Dos tiras unidas con degenerados: 0 1 2 3 | 3 4 | 4 5 6 7
+        # Two strips joined with degenerates: 0 1 2 3 | 3 4 | 4 5 6 7
         strip = [0, 1, 2, 3, 3, 4, 4, 5, 6, 7]
         self.assertEqual(
             strip_to_triangles(strip),

@@ -1,4 +1,4 @@
-"""Extracción de cadenas ASCII de las secciones y su clasificación heurística."""
+"""Extraction of ASCII strings from the sections and their heuristic classification."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ from .synthetic import (
     build_synthetic_xbe,
 )
 
-# Racha hostil: texto plausible (pasa looks_like_text) sin separadores ni puntos.
+# Hostile run: plausible text (passes looks_like_text) with no separators or dots.
 HOSTILE_RUN = "abcdefghij" * 20_000
 
 
@@ -70,7 +70,7 @@ class ExtractionTests(unittest.TestCase):
         self.assertIn("src\\engine\\player.cpp", texts)
 
     def test_min_len_must_be_positive(self) -> None:
-        # Con 0, la expresión regular aceptaría la cadena vacía en cada byte.
+        # With 0, the regular expression would accept the empty string at every byte.
         with self.assertRaises(ValueError):
             extract_strings(XbeImage.from_bytes(build_synthetic_xbe()), min_len=0)
 
@@ -80,7 +80,7 @@ class ExtractionTests(unittest.TestCase):
         self.assertFalse(tail.terminated)
 
     def test_section_with_zero_virtual_size_is_not_scanned(self) -> None:
-        # Sin tamaño virtual no se carga nada, aunque declare datos crudos.
+        # With no virtual size nothing is loaded, even if it declares raw data.
         extra = ExtraSection(b"EMPTY", SECTION_VA + SECTION_VSIZE, 0, SECTION_RAW, 0x40)
         found = extract_strings(XbeImage.from_bytes(build_synthetic_xbe(extra_sections=(extra,))))
         self.assertNotIn("EMPTY", {item.section for item in found})
@@ -162,7 +162,7 @@ class HeuristicTests(unittest.TestCase):
         self.assertLess(time.perf_counter() - start, 1.0)
 
     def test_path_matches_may_start_mid_token(self) -> None:
-        # Tras 'ab\c', la ruta '\dev\file' empieza en el separador; y 'c:' tras una letra.
+        # After 'ab\c', the path '\dev\file' starts at the separator; and 'c:' after a letter.
         self.assertTrue(is_path_like("ab\\c\\dev\\file"))
         self.assertTrue(is_path_like("xc:\\foo\\bar"))
 

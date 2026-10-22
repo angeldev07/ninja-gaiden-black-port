@@ -1,19 +1,19 @@
-"""Vértices según el FVF (Flexible Vertex Format) de Direct3D 8 de Xbox.
+"""Vertices according to the Xbox Direct3D 8 FVF (Flexible Vertex Format).
 
-Los VB de un KMD no traen declaración de vértice: el formato es el FVF del descriptor de
-malla. Los bits son los de D3D8 (Cxbx-Reloaded, `XbD3D8Types.h`: `X_D3DFVF_*`) y los datos
-van intercalados en este orden:
+The VBs of a KMD carry no vertex declaration: the format is the FVF of the mesh descriptor.
+The bits are the D3D8 ones (Cxbx-Reloaded, `XbD3D8Types.h`: `X_D3DFVF_*`) and the data is
+interleaved in this order:
 
-    posición    XYZ 0x002 (3 f32) o XYZB1-B3 0x006/0x008/0x00A (3 f32 + 1-3 pesos f32)
-    0x010 NORMAL    3 f32 (en los KMD vistos, siempre unitarias: nada de NORMPACKED3)
+    position    XYZ 0x002 (3 f32) or XYZB1-B3 0x006/0x008/0x00A (3 f32 + 1-3 f32 weights)
+    0x010 NORMAL    3 f32 (always unit length in the KMDs seen: no NORMPACKED3)
     0x020 PSIZE     1 f32
     0x040 DIFFUSE   D3DCOLOR (u32 ARGB)
     0x080 SPECULAR  D3DCOLOR
-    bits 8-11       número de juegos de coordenadas de textura; bits 16+2i, tamaño del juego i
+    bits 8-11       number of texture coordinate sets; bits 16+2i, size of set i
                     (0 = 2 f32, 1 = 3, 2 = 4, 3 = 1)
 
-Observado en `ryu.kmd`: 0x112 (stride 32), 0x116 (36, un peso de mezcla) y 0x042 (16).
-XYZRHW (ya transformado) y cualquier bit desconocido se rechazan.
+Observed in `ryu.kmd`: 0x112 (stride 32), 0x116 (36, one blend weight) and 0x042 (16).
+XYZRHW (already transformed) and any unknown bit are rejected.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ type Vec3 = tuple[float, float, float]
 
 @dataclass(frozen=True, slots=True)
 class VertexLayout:
-    """Disposición de un vértice: offsets en bytes de cada atributo (None = ausente)."""
+    """Layout of a vertex: byte offset of each attribute (None = absent)."""
 
     fvf: int
     stride: int
@@ -54,19 +54,19 @@ class VertexLayout:
 
 
 def vertex_layout(fvf: int) -> VertexLayout:
-    """Disposición del FVF, o `UnsupportedVertexFormatError` si no se sabe leer."""
+    """Layout of the FVF, or `UnsupportedVertexFormatError` if it cannot be read."""
     position = fvf & FVF_POSITION_MASK
     if position == FVF_XYZRHW:
-        raise UnsupportedVertexFormatError(f"FVF {fvf:#x}: posición ya transformada (XYZRHW)")
+        raise UnsupportedVertexFormatError(f"FVF {fvf:#x}: already-transformed position (XYZRHW)")
     if position not in _BLEND_WEIGHTS:
-        raise UnsupportedVertexFormatError(f"FVF {fvf:#x}: posición {position:#x} no admitida")
+        raise UnsupportedVertexFormatError(f"FVF {fvf:#x}: unsupported position {position:#x}")
     tex_count = (fvf & FVF_TEXCOUNT_MASK) >> FVF_TEXCOUNT_SHIFT
     known = FVF_POSITION_MASK | FVF_NORMAL | FVF_PSIZE | FVF_DIFFUSE | FVF_SPECULAR
     known |= FVF_TEXCOUNT_MASK
     for i in range(tex_count):
         known |= 0x3 << (16 + 2 * i)
     if fvf & ~known:
-        raise UnsupportedVertexFormatError(f"FVF {fvf:#x}: bits desconocidos {fvf & ~known:#x}")
+        raise UnsupportedVertexFormatError(f"FVF {fvf:#x}: unknown bits {fvf & ~known:#x}")
     weight_count = _BLEND_WEIGHTS[position]
     offset = 12 + 4 * weight_count
     normal = diffuse = texcoord = None
@@ -89,10 +89,10 @@ def vertex_layout(fvf: int) -> VertexLayout:
 
 @dataclass(frozen=True, slots=True)
 class VertexData:
-    """Atributos decodificados; los ausentes en el FVF son None.
+    """Decoded attributes; those absent from the FVF are None.
 
-    `weights` es el primer peso de mezcla (XYZB1); `colors`, D3DCOLOR en u32 ARGB; `uvs`, el
-    primer juego de coordenadas (sus dos primeras componentes).
+    `weights` is the first blend weight (XYZB1); `colors`, D3DCOLOR as u32 ARGB; `uvs`, the
+    first coordinate set (its first two components).
     """
 
     positions: tuple[Vec3, ...]
@@ -115,10 +115,10 @@ def _column3(data: bytes, offset: int, stride: int, count: int) -> tuple[Vec3, .
 
 
 def decode_vertices(data: bytes, layout: VertexLayout, count: int) -> VertexData:
-    """Decodifica `count` vértices de `data` (al menos `count * stride` bytes)."""
+    """Decode `count` vertices from `data` (at least `count * stride` bytes)."""
     stride = layout.stride
     if len(data) < count * stride:
-        raise KmdFormatError(f"VB de {len(data)} bytes para {count} vértices de {stride}")
+        raise KmdFormatError(f"VB of {len(data)} bytes for {count} vertices of {stride}")
     positions = _column3(data, 0, stride, count)
     normals = None if layout.normal is None else _column3(data, layout.normal, stride, count)
     uvs: tuple[Vec2, ...] | None = None

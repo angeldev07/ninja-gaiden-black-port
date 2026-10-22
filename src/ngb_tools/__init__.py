@@ -1,5 +1,5 @@
-"""Herramientas de ingeniería inversa del port de Ninja Gaiden Black.
+"""Reverse-engineering tools for the Ninja Gaiden Black port.
 
-Cada módulo es una herramienta con su propia CLI (`python -I -m ngb_tools.<módulo>`).
-Ninguna escribe dentro del repo: los datos del juego viven en `NGB_DATA`.
+Each module is a tool with its own CLI (`python -I -m ngb_tools.<module>`).
+None of them writes inside the repo: the game data lives in `NGB_DATA`.
 """

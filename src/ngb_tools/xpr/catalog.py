@@ -1,7 +1,7 @@
-"""Catálogo de las texturas de un XPR0: qué hay, cómo está dispuesto y si se puede exportar.
+"""Catalog of the textures in an XPR0: what is there, its layout and whether it can be exported.
 
-Lo comparten `list` (que solo informa) y `export` (que además decodifica). Cada textura se
-valida con `check_texture`, que no decodifica, así que listar es barato.
+Shared by `list` (which only reports) and `export` (which also decodes). Each texture is
+validated with `check_texture`, which does not decode, so listing is cheap.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from ngb_tools.xpr.texture import TextureCheck, TextureLayout, check_texture, te
 
 @dataclass(frozen=True, slots=True)
 class CatalogEntry:
-    """Una textura: su número de orden, su cabecera y su disposición o el motivo de rechazo."""
+    """One texture: its sequence number, its header and its layout or the reason for rejection."""
 
     ordinal: int
     texture: Texture
@@ -26,13 +26,13 @@ class CatalogEntry:
 
     @property
     def warnings(self) -> list[str]:
-        """Avisos de una textura que sí se exporta (p. ej. mips que faltan)."""
+        """Warnings for a texture that is exported (e.g. missing mips)."""
         if self.check is None or not self.check.missing_levels:
             return []
         total = len(self.check.layout.levels)
         return [
-            f"faltan {self.check.missing_levels} de {total} niveles de mip fuera del XPR0: "
-            "se exporta el nivel 0"
+            f"{self.check.missing_levels} of {total} mip levels are missing outside the XPR0: "
+            "level 0 is exported"
         ]
 
     @property
@@ -50,14 +50,14 @@ class CatalogEntry:
 
     @property
     def filename(self) -> str | None:
-        """`NNNN_<formato>_<ancho>x<alto>.png`, o `None` si no se exporta."""
+        """`NNNN_<format>_<width>x<height>.png`, or `None` if it is not exported."""
         if self.issue is not None:
             return None
         return f"{self.ordinal:04d}_{self.format_name}_{self.width}x{self.height}.png"
 
 
 def catalog(xpr: XprFile) -> tuple[CatalogEntry, ...]:
-    """Todas las texturas, en el orden de las cabeceras."""
+    """All the textures, in header order."""
     entries: list[CatalogEntry] = []
     for ordinal, texture in enumerate(xpr.textures):
         try:
@@ -65,7 +65,7 @@ def catalog(xpr: XprFile) -> tuple[CatalogEntry, ...]:
         except UnsupportedTextureError as error:
             entries.append(CatalogEntry(ordinal, texture, None, str(error)))
             continue
-        # Con disposición conocida, un rechazo posterior (paleta, datos cortados) la conserva.
+        # With a known layout, a later rejection (palette, truncated data) keeps it.
         try:
             check = check_texture(xpr, texture)
         except (UnsupportedTextureError, XprTruncatedError) as error:

@@ -1,7 +1,7 @@
-"""Ejecuta el loader nativo compilado sobre XBE sintéticos y comprueba el log.
+"""Run the compiled native loader over synthetic XBEs and check the log.
 
-Necesita Windows y el loader compilado (`port\\build.cmd` deja `build\\port\\ngb-loader.exe`;
-`NGB_LOADER` puede apuntar a otro). Si falta cualquiera de las dos cosas, se salta.
+Needs Windows and the compiled loader (`port\\build.cmd` leaves `build\\port\\ngb-loader.exe`;
+`NGB_LOADER` may point to another). If either is missing, the test is skipped.
 """
 
 from __future__ import annotations
@@ -17,10 +17,10 @@ from .synthetic_loader import (
     ANSI_VA,
     DBG_PRINT,
     HAL_READ_SMC_TRAY_STATE,
-    HOLA_VA,
     KE_QUERY_PERFORMANCE_FREQUENCY,
     PB_PUT,
     RTL_INIT_ANSI_STRING,
+    TEST_STR_VA,
     THREAD_EXIT_STATUS,
     THREAD_IMPORTS,
     boot_code,
@@ -41,7 +41,9 @@ PUSHBUF_TEST = LOADER.parent / "pushbuf_test.exe"
 RASTER_TEST = LOADER.parent / "raster_test.exe"
 
 
-@unittest.skipUnless(os.name == "nt" and LOADER.is_file(), "requiere Windows y el loader compilado")
+@unittest.skipUnless(
+    os.name == "nt" and LOADER.is_file(), "requires Windows and the compiled loader"
+)
 class LoaderRunTest(unittest.TestCase):
     pgraph_log = ""
 
@@ -50,7 +52,7 @@ class LoaderRunTest(unittest.TestCase):
             path = Path(tmp) / "synthetic.xbe"
             log = Path(tmp) / "run.log"
             path.write_bytes(xbe)
-            env = {**os.environ, "NGB_DATA": tmp}  # el HDD virtual también cae en tmp
+            env = {**os.environ, "NGB_DATA": tmp}  # the virtual HDD also lands in tmp
             result = subprocess.run(
                 [str(LOADER), str(path), "--log", str(log), "--timeout", "20", *extra_args],
                 capture_output=True,
@@ -64,8 +66,8 @@ class LoaderRunTest(unittest.TestCase):
             return result.returncode, log.read_text(encoding="utf-8", errors="replace")
 
     def test_log_inside_a_git_repo_is_refused(self) -> None:
-        # Junto al log se vuelcan PNG del juego: un --log dentro de un repo se rechaza antes de
-        # ejecutar nada.
+        # Game PNGs are dumped next to the log: a --log inside a repo is rejected before
+        # running anything.
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
             (repo / ".git").mkdir(parents=True)
@@ -84,8 +86,9 @@ class LoaderRunTest(unittest.TestCase):
         self.assertFalse(log.exists())
 
     def test_exited_thread_is_signalled_with_its_status(self) -> None:
-        # GetExitCodeThread de XAPI lee SignalState y ExitStatus del ETHREAD: si el kernel no
-        # los escribe, el juego espera para siempre a sus hilos (pantalla negra tras los avisos).
+        # XAPI's GetExitCodeThread reads SignalState and ExitStatus from the ETHREAD: if the
+        # kernel does not write them, the game waits forever for its threads (black screen
+        # after the warnings).
         xbe = build_loader_xbe(thread_exit_code(), THREAD_IMPORTS, thread_exit_extra())
         code, log = self.run_xbe(xbe)
         self.assertEqual(code, EXIT_OK, log)
@@ -102,13 +105,14 @@ class LoaderRunTest(unittest.TestCase):
         )
         self.assertIsNotNone(freq, log)
         assert freq is not None
-        self.assertEqual(int(freq.group(1), 16), 733333333)  # 64 bits en EDX:EAX
+        self.assertEqual(int(freq.group(1), 16), 733333333)  # 64 bits in EDX:EAX
         self.assertIn("DbgPrint: ngb synthetic 42", log)
         self.assertRegex(log, rf"\[2\] T1 @\w+ {DBG_PRINT} DbgPrint\(0x\w+, 0x0000002A, ")
         self.assertIn(
-            f"{RTL_INIT_ANSI_STRING} RtlInitAnsiString(0x{ANSI_VA:08X}, 0x{HOLA_VA:08X})", log
+            f"{RTL_INIT_ANSI_STRING} RtlInitAnsiString(0x{ANSI_VA:08X}, 0x{TEST_STR_VA:08X})", log
         )
-        self.assertIn("DbgPrint: len=4", log)  # la pila stdcall quedó bien: siguió ejecutando
+        # The stdcall stack was left right: execution continued.
+        self.assertIn("DbgPrint: len=4", log)
         self.assertIn("the entry point returned", log)
         self.assertIn("STOP OK", log)
         self.assertIn("summary: 3 distinct functions called (3 implemented)", log)
@@ -121,7 +125,7 @@ class LoaderRunTest(unittest.TestCase):
         self.assertIn("first unimplemented: 9 HalReadSMCTrayState", log)
 
     def test_unmodelled_mmio_is_reported_as_crash(self) -> None:
-        """Con --mmio-strict, un acceso a la APU para la ejecución con informe."""
+        """With --mmio-strict, an APU access stops execution with a report."""
         xbe = build_loader_xbe(mmio_code(0xFE820010), imports=())
         code, log = self.run_xbe(xbe, "--mmio-strict")
         self.assertEqual(code, EXIT_CRASH, log)
@@ -130,7 +134,7 @@ class LoaderRunTest(unittest.TestCase):
         self.assertIn("XBE code", log)
 
     def test_nv2a_registers_and_push_buffer(self) -> None:
-        """H7a: PMC_BOOT_0, flush de PFB que termina solo y un push buffer decodificado."""
+        """H7a: PMC_BOOT_0, a PFB flush that finishes by itself and a decoded push buffer."""
         xbe = build_loader_xbe(gpu_code(), imports=(DBG_PRINT,), extra=gpu_extra())
         code, log = self.run_xbe(xbe)
         self.assertEqual(code, EXIT_OK, log)
@@ -142,10 +146,10 @@ class LoaderRunTest(unittest.TestCase):
         self.assertIn("end of frame 0", pg)
 
 
-@unittest.skipUnless(os.name == "nt" and HOSTPATH_TEST.is_file(), "requiere el test C compilado")
+@unittest.skipUnless(os.name == "nt" and HOSTPATH_TEST.is_file(), "requires the compiled C test")
 class HostPathTest(unittest.TestCase):
     def test_paths_never_leave_root(self) -> None:
-        """hostpath_test.exe: '..', rutas absolutas y ':' no salen de la raíz."""
+        """hostpath_test.exe: '..', absolute paths and ':' do not leave the root."""
         result = subprocess.run(
             [str(HOSTPATH_TEST)], capture_output=True, text=True, timeout=30, check=False
         )
@@ -153,10 +157,10 @@ class HostPathTest(unittest.TestCase):
         self.assertIn("hostpath_test: OK", result.stdout)
 
 
-@unittest.skipUnless(os.name == "nt" and PUSHBUF_TEST.is_file(), "requiere el test C compilado")
+@unittest.skipUnless(os.name == "nt" and PUSHBUF_TEST.is_file(), "requires the compiled C test")
 class PushBufferTest(unittest.TestCase):
     def test_decoder(self) -> None:
-        """pushbuf_test.exe: cabeceras, saltos, llamadas y errores del push buffer."""
+        """pushbuf_test.exe: push buffer headers, jumps, calls and errors."""
         result = subprocess.run(
             [str(PUSHBUF_TEST)], capture_output=True, text=True, timeout=30, check=False
         )
@@ -164,10 +168,10 @@ class PushBufferTest(unittest.TestCase):
         self.assertIn("pushbuf_test: OK", result.stdout)
 
 
-@unittest.skipUnless(os.name == "nt" and RASTER_TEST.is_file(), "requiere el test C compilado")
+@unittest.skipUnless(os.name == "nt" and RASTER_TEST.is_file(), "requires the compiled C test")
 class RasterTest(unittest.TestCase):
     def test_software_rasterizer(self) -> None:
-        """raster_test.exe: cobertura de un triángulo, textura 2x2, paleta, mezcla y alfa."""
+        """raster_test.exe: triangle coverage, 2x2 texture, palette, blending and alpha."""
         result = subprocess.run(
             [str(RASTER_TEST)], capture_output=True, text=True, timeout=30, check=False
         )

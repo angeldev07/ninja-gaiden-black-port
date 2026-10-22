@@ -1,4 +1,4 @@
-"""Tests de la clasificación por cabecera, las etiquetas de Team Ninja y la entropía."""
+"""Tests of header classification, Team Ninja tags and entropy."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ class ClassifyTests(unittest.TestCase):
             b"DDS " + bytes(12): "DDS",
             b"WBND" + bytes(12): "XWB",
             b"\x1f\x8b\x08\x00" + bytes(12): "gzip",
-            zlib.compress(b"hola" * 100): "zlib",
+            zlib.compress(b"hello" * 100): "zlib",
             make_adx(): "ADX",
             b"Hello world, this is plain text.\r\n": "text",
             b"chr_dat\x00\x00\x00\x00\x00" + bytes(8): "tag:chr_dat",
@@ -63,10 +63,10 @@ class TeamNinjaTagTests(unittest.TestCase):
 
     def test_tag_kinds_are_described_as_team_ninja_chunks(self) -> None:
         self.assertIn("Team Ninja", describe_kind("tag:chr_dat"))
-        self.assertEqual(describe_kind("hex:01000000"), "desconocido")
+        self.assertEqual(describe_kind("hex:01000000"), "unknown")
 
     def test_shared_kind_keeps_its_first_description(self) -> None:
-        self.assertEqual(describe_kind("AFS"), "contenedor AFS (anidado)")
+        self.assertEqual(describe_kind("AFS"), "AFS container (nested)")
 
 
 class EntropyTests(unittest.TestCase):

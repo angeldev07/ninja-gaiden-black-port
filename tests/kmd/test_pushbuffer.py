@@ -1,4 +1,4 @@
-"""Tests del decodificador de push buffers: solo BEGIN_END y ARRAY_ELEMENT16/32."""
+"""Tests of the push buffer decoder: only BEGIN_END and ARRAY_ELEMENT16/32."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ class DecodeTests(unittest.TestCase):
         self.assertEqual(decode_push_buffer(data), (0, 1, 2, 3))
 
     def test_garbage_in_the_padding_word_after_end_is_ignored(self) -> None:
-        # Como ssato_02.kmd res236: el u32 que sigue a END trae 0xc2f916e6.
+        # Like ssato_02.kmd res236: the u32 following END holds 0xc2f916e6.
         data = push_buffer_bytes([0, 1, 2])[:-4] + words(0xC2F916E6) + bytes(4)
         self.assertEqual(decode_push_buffer(data), (0, 1, 2))
 
@@ -38,7 +38,7 @@ class RejectTests(unittest.TestCase):
             decode_push_buffer(data)
 
     def test_other_methods_are_rejected(self) -> None:
-        # SET_VERTEX_DATA_ARRAY_FORMAT (0x1760) dentro de la tira
+        # SET_VERTEX_DATA_ARRAY_FORMAT (0x1760) inside the strip
         self.assert_rejected(words(0x000417FC, 6, 0x00041760, 0x2042, 0x000417FC, 0))
 
     def test_jumps_are_rejected(self) -> None:
@@ -60,7 +60,7 @@ class RejectTests(unittest.TestCase):
         self.assert_rejected(push_buffer_bytes([0, 1, 2])[:-4] + words(0xC2F916E6, 7))
 
     def test_garbage_before_end_is_a_command(self) -> None:
-        # Sin END, la palabra suelta se lee como cabecera de comando y se rechaza.
+        # Without END, the stray word is read as a command header and rejected.
         self.assert_rejected(words(0x000417FC, 6, 0x00041800, 0x00010000, 0xC2F916E6))
 
     def test_truncated_arguments_are_rejected(self) -> None:

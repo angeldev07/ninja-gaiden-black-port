@@ -1,12 +1,12 @@
-"""Galería de personajes: todos los `chr_*.afs` a GLB, hoja de contactos e informe.
+"""Character gallery: every `chr_*.afs` to GLB, contact sheet and report.
 
-Usa `ngb_tools.kmd` como biblioteca (parseo, texturas, rig y GLB) sin tocar su CLI.
-Módulos:
+Uses `ngb_tools.kmd` as a library (parsing, textures, rig and GLB) without touching its CLI.
+Modules:
 
-- `sources`: AFS de personajes, KMD principal y búsqueda del banco de motions.
-- `build`: exportación por personaje con registro de fallos (nunca aborta la galería).
-- `raster`, `font`, `sheet`: render de frente, fuente 5x7 propia y `gallery.png`.
-- `report`: `gallery.md` y `gallery.json`.
+- `sources`: character AFS files, main KMD and motion bank lookup.
+- `build`: per-character export with failure logging (never aborts the gallery).
+- `raster`, `font`, `sheet`: front render, own 5x7 font and `gallery.png`.
+- `report`: `gallery.md` and `gallery.json`.
 - `cli`: `python -m ngb_tools.gallery build`.
 """
 

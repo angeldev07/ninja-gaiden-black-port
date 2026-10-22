@@ -1,4 +1,4 @@
-"""Tests de la CLI y de la escena glTF: zona de 2 partes (+ una repetida y una de `_cmn`)."""
+"""Tests of the CLI and the glTF scene: a 2-part zone (+ one repeated and one from `_cmn`)."""
 
 from __future__ import annotations
 
@@ -65,7 +65,7 @@ class ExportGlbTests(CliTestCase):
     def test_zone_is_one_scene_with_a_node_per_part(self) -> None:
         code, out = self.export("--collision")
         self.assertEqual(code, ExitCode.OK, out)
-        self.assertIn("boff_03: idéntica a boff_01, se salta", out)
+        self.assertIn("boff_03: identical to boff_01, skipped", out)
         gltf, data = read_glb(self.out / "boff.glb")
         self.assertEqual(validate(gltf, data), [])
         nodes = gltf["nodes"]
@@ -78,7 +78,7 @@ class ExportGlbTests(CliTestCase):
         self.export()
         gltf, _ = read_glb(self.out / "boff.glb")
         objects = [n for n in gltf["nodes"] if "_obj" in n["name"]]
-        self.assertEqual(len(objects), 4)  # 1 + 1 + 2 (boff_03 se salta)
+        self.assertEqual(len(objects), 4)  # 1 + 1 + 2 (boff_03 is skipped)
         for node in objects:
             self.assertNotIn("scale", node)
             self.assertNotIn("translation", node)
@@ -150,14 +150,14 @@ class CommandTests(CliTestCase):
             "export", "tomb", "--game", str(self.game), "--out", str(self.out)
         )
         self.assertEqual(code, ExitCode.ERROR)
-        self.assertIn("no hay AFS", err)
+        self.assertIn("no AFS", err)
 
     def test_output_inside_the_repo_is_refused(self) -> None:
         code, _, err = self.run_cli(
             "export", "boff", "--game", str(self.game), "--out", str(REPO / "build-x")
         )
         self.assertEqual(code, ExitCode.ERROR)
-        self.assertIn("prohibida", err)
+        self.assertIn("repo", err)
 
     def test_default_output_dir(self) -> None:
         with mock.patch.dict(os.environ, {"NGB_DATA": str(self.root)}):

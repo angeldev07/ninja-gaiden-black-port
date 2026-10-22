@@ -1,14 +1,14 @@
-"""Vectores de prueba de port/src/gl/texconv.c generados con ngb_tools.xpr (la referencia).
+"""Test vectors for port/src/gl/texconv.c generated with ngb_tools.xpr (the reference).
 
-Cada caso es una textura sintética (bytes pseudoaleatorios con semilla fija, nunca datos del
-juego) y lo que tiene que dar texconv_convert, calculado con las funciones de Python:
-des-swizzle (swizzle.py), canales (pixels.py), paleta (pixels.py), S3TC (dxt.py) y campos con
-signo de V8U8 y L6V5U5 (bump.py). Lo escribe en port/tests/texconv_vectors.h:
+Each case is a synthetic texture (pseudo-random bytes with a fixed seed, never game
+data) and what texconv_convert must produce, computed with the Python functions:
+un-swizzle (swizzle.py), channels (pixels.py), palette (pixels.py), S3TC (dxt.py) and signed
+fields of V8U8 and L6V5U5 (bump.py). It writes port/tests/texconv_vectors.h:
 
-    PYTHONPATH=src python -m port.texconv_vectors          (desde tests/)
-    python tests/port/texconv_vectors.py --write           (desde la raíz, con PYTHONPATH=src)
+    PYTHONPATH=src python -m port.texconv_vectors          (from tests/)
+    python tests/port/texconv_vectors.py --write           (from the root, with PYTHONPATH=src)
 
-`test_texconv_vectors.py` comprueba que el .h está al día.
+`test_texconv.py` checks that the .h is up to date.
 """
 
 from __future__ import annotations
@@ -88,7 +88,7 @@ def format_word(case: Case) -> int:
 
 
 def level_sizes(case: Case) -> list[tuple[int, int, int]]:
-    """(ancho, alto, bytes) de cada nivel en el origen."""
+    """(width, height, bytes) of each level at the source."""
     out = []
     for level in range(case.levels):
         w, h = max(1, case.width >> level), max(1, case.height >> level)
@@ -134,7 +134,7 @@ def convert_level(case: Case, chunk: bytes, w: int, h: int, palette: bytes) -> b
 
 
 def build(case: Case, rng: random.Random) -> tuple[bytes, bytes, bytes]:
-    """Origen, paleta y lo esperado."""
+    """Source, palette and expected output."""
     sizes = level_sizes(case)
     face_size = sum(size for _, _, size in sizes)
     faces = CUBE_FACES if case.cube else 1
@@ -193,7 +193,7 @@ def main(argv: list[str]) -> int:
     text = render()
     if "--write" in argv:
         HEADER.write_text(text, encoding="ascii", newline="\n")
-        print(f"{len(CASES)} casos -> {HEADER}")
+        print(f"{len(CASES)} cases -> {HEADER}")
     else:
         sys.stdout.write(text)
     return 0

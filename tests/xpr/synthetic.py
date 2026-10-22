@@ -1,8 +1,8 @@
-"""Constructores de XPR0 sintéticos: nunca se usan datos del juego en los tests.
+"""Builders of synthetic XPR0s: game data is never used in the tests.
 
-Reproducen lo observado en los XPR0 de Ninja Gaiden Black: cabeceras de recurso seguidas
-de la marca 0xFFFFFFFF, relleno 0xAD hasta `header_size` y los datos de GPU detrás, con
-los campos `Data` relativos al inicio de esos datos.
+They reproduce what is observed in Ninja Gaiden Black's XPR0s: resource headers followed
+by the 0xFFFFFFFF marker, 0xAD padding up to `header_size` and the GPU data after it, with
+the `Data` fields relative to the start of that data.
 """
 
 from __future__ import annotations
@@ -35,8 +35,8 @@ def format_word(
     log2_p: int = 0,
     dma: int = 0x9,
 ) -> int:
-    """Campo `Format`: dma/borde 0-3, cubemap 2, dimensiones 4-7, formato 8-15, mips 16-19,
-    log2 U 20-23, log2 V 24-27 y log2 P 28-31."""
+    """`Format` field: dma/border 0-3, cubemap 2, dimensions 4-7, format 8-15, mips 16-19,
+    log2 U 20-23, log2 V 24-27 and log2 P 28-31."""
     return (
         dma
         | (int(cubemap) << 2)
@@ -50,7 +50,7 @@ def format_word(
 
 
 def size_word(width: int, height: int, pitch: int) -> int:
-    """Campo `Size` de una textura lineal: ancho-1, alto-1 y pitch/64-1."""
+    """`Size` field of a linear texture: width-1, height-1 and pitch/64-1."""
     return (width - 1) | ((height - 1) << 12) | ((pitch // 64 - 1) << 24)
 
 
@@ -67,7 +67,7 @@ def buffer_header(common: int, data: int) -> bytes:
 
 
 def push_header(data: int, size: int) -> bytes:
-    """Push buffer como en los KMD del juego: 6 u32, el último a 0 (Cxbx documenta 5)."""
+    """Push buffer as in the game's KMDs: 6 u32s, the last one 0 (Cxbx documents 5)."""
     return struct.pack("<6I", PUSH_COMMON, data, 0, size, size, 0)
 
 
@@ -82,7 +82,7 @@ def build_xpr(
     header_size: int | None = None,
     end_marker: bool = True,
 ) -> bytes:
-    """XPR0 con esas cabeceras de recurso y `data` como región de datos de GPU."""
+    """XPR0 with those resource headers and `data` as the GPU data region."""
     table = b"".join(headers) + (struct.pack("<I", END_MARKER) if end_marker else b"")
     size = align(12 + len(table), 0x800) if header_size is None else header_size
     header_pad = bytes([PAD]) * (size - 12 - len(table))
@@ -91,10 +91,10 @@ def build_xpr(
 
 
 def solid_dxt1_block(color565: int) -> bytes:
-    """Bloque DXT1 de un solo color: c0 = c1 = color e índices 0."""
+    """Single-color DXT1 block: c0 = c1 = color and indices 0."""
     return struct.pack("<HHI", color565, color565, 0)
 
 
 def d3dcolor(red: int, green: int, blue: int, alpha: int = 255) -> bytes:
-    """Entrada de paleta D3DCOLOR (u32 ARGB little endian: B, G, R, A en memoria)."""
+    """D3DCOLOR palette entry (little-endian ARGB u32: B, G, R, A in memory)."""
     return bytes((blue, green, red, alpha))

@@ -1,21 +1,21 @@
-"""Validador estructural de glTF 2.0, propio y sencillo, solo para los tests.
+"""Simple home-grown structural validator for glTF 2.0, for the tests only.
 
-No sustituye al validador oficial de Khronos: comprueba lo que un exportador puede romper
-sin darse cuenta. Lo que revisa:
+It does not replace the official Khronos validator: it checks what an exporter can break
+without noticing. What it checks:
 
-- índices válidos en las referencias entre objetos (escenas, nodos, mallas, accessors...);
-- rangos de bufferViews y accessors dentro del buffer;
-- alineación de los accessors a su tamaño de componente;
-- que POSITION tenga min/max y coincidan con los datos;
-- conteos iguales en los atributos de una primitiva;
-- índices de triángulos múltiplos de 3 y menores que el número de vértices;
-- un árbol de nodos sin ciclos ni hijos con dos padres;
-- skins con una matriz por joint;
-- imágenes incrustadas (GLB) con bufferView y mimeType;
-- animaciones: samplers con tiempos crecientes y conteos iguales, y canales hacia nodos
-  existentes con salida del tipo de su ruta.
+- valid indices in references between objects (scenes, nodes, meshes, accessors...);
+- bufferView and accessor ranges within the buffer;
+- accessor alignment to their component size;
+- that POSITION has min/max and they match the data;
+- equal counts across the attributes of a primitive;
+- triangle indices that are multiples of 3 and below the vertex count;
+- a node tree without cycles or children with two parents;
+- skins with one matrix per joint;
+- embedded images (GLB) with bufferView and mimeType;
+- animations: samplers with increasing times and equal counts, and channels to existing
+  nodes with an output of the type of their path.
 
-`read_accessor` decodifica un accessor y lo reutiliza el render de validación.
+`read_accessor` decodes an accessor and the validation render reuses it.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ TRIANGLES = 4
 
 
 def load_gltf(path: Path) -> tuple[dict[str, Any], bytes]:
-    """El JSON y el contenido del único buffer (externo, por URI relativa)."""
+    """The JSON and the contents of the single buffer (external, by relative URI)."""
     gltf = json.loads(path.read_text(encoding="utf-8"))
     uri = gltf["buffers"][0]["uri"]
     return gltf, (path.parent / unquote(uri)).read_bytes()
@@ -54,7 +54,7 @@ def read_accessor(gltf: dict[str, Any], data: bytes, index: int) -> list[tuple[f
 
 def _check_ref(errors: list[str], where: str, value: Any, items: Sequence[Any]) -> bool:
     if not isinstance(value, int) or not 0 <= value < len(items):
-        errors.append(f"{where}: referencia {value!r} fuera de [0, {len(items)})")
+        errors.append(f"{where}: reference {value!r} outside [0, {len(items)})")
         return False
     return True
 
@@ -67,7 +67,7 @@ def _check_views(gltf: dict[str, Any], data: bytes, errors: list[str]) -> None:
         _check_ref(errors, f"bufferViews[{i}].buffer", view.get("buffer"), buffers)
         end = view.get("byteOffset", 0) + view["byteLength"]
         if end > len(data):
-            errors.append(f"bufferViews[{i}]: acaba en {end} > {len(data)}")
+            errors.append(f"bufferViews[{i}]: ends at {end} > {len(data)}")
 
 
 def _check_accessors(gltf: dict[str, Any], data: bytes, errors: list[str]) -> None:
@@ -78,22 +78,22 @@ def _check_accessors(gltf: dict[str, Any], data: bytes, errors: list[str]) -> No
         fmt = COMPONENTS.get(accessor.get("componentType", -1))
         width = WIDTHS.get(accessor.get("type", ""))
         if fmt is None or width is None or accessor.get("count", 0) < 1:
-            errors.append(f"accessors[{i}]: tipo, componente o count inválidos")
+            errors.append(f"accessors[{i}]: invalid type, component or count")
             continue
         size = struct.calcsize("<" + fmt)
         view = views[accessor["bufferView"]]
         offset = view.get("byteOffset", 0) + accessor.get("byteOffset", 0)
         if offset % size:
-            errors.append(f"accessors[{i}]: offset {offset} no alineado a {size}")
+            errors.append(f"accessors[{i}]: offset {offset} not aligned to {size}")
         need = accessor.get("byteOffset", 0) + size * width * accessor["count"]
         if need > view["byteLength"]:
-            errors.append(f"accessors[{i}]: {need} bytes > bufferView de {view['byteLength']}")
+            errors.append(f"accessors[{i}]: {need} bytes > bufferView of {view['byteLength']}")
 
 
 def _check_position(gltf: dict[str, Any], data: bytes, index: int, errors: list[str]) -> None:
     accessor = gltf["accessors"][index]
     if "min" not in accessor or "max" not in accessor:
-        errors.append(f"accessors[{index}]: POSITION sin min/max")
+        errors.append(f"accessors[{index}]: POSITION without min/max")
         return
     values = read_accessor(gltf, data, index)
     lo = [min(v[k] for v in values) for k in range(3)]
@@ -112,25 +112,25 @@ def _check_meshes(gltf: dict[str, Any], data: bytes, errors: list[str]) -> None:
             where = f"meshes[{m}].primitives[{p}]"
             attributes = prim.get("attributes", {})
             if "POSITION" not in attributes:
-                errors.append(f"{where}: sin POSITION")
+                errors.append(f"{where}: no POSITION")
                 continue
             if not all(_check_ref(errors, where, a, accessors) for a in attributes.values()):
                 continue
             counts = {accessors[a]["count"] for a in attributes.values()}
             if len(counts) != 1:
-                errors.append(f"{where}: atributos con conteos distintos {counts}")
+                errors.append(f"{where}: attributes with different counts {counts}")
             _check_position(gltf, data, attributes["POSITION"], errors)
             if "material" in prim:
                 _check_ref(errors, f"{where}.material", prim["material"], materials)
             if prim.get("mode", TRIANGLES) != TRIANGLES or "indices" not in prim:
-                errors.append(f"{where}: se esperaban TRIANGLES indexados")
+                errors.append(f"{where}: indexed TRIANGLES expected")
                 continue
             if not _check_ref(errors, f"{where}.indices", prim["indices"], accessors):
                 continue
             indices = [v[0] for v in read_accessor(gltf, data, prim["indices"])]
             vertex_count = accessors[attributes["POSITION"]]["count"]
             if len(indices) % 3 or (indices and max(indices) >= vertex_count):
-                errors.append(f"{where}: índices inválidos para {vertex_count} vértices")
+                errors.append(f"{where}: invalid indices for {vertex_count} vertices")
 
 
 def _check_nodes(gltf: dict[str, Any], errors: list[str]) -> None:
@@ -145,20 +145,20 @@ def _check_nodes(gltf: dict[str, Any], errors: list[str]) -> None:
             if not _check_ref(errors, f"nodes[{i}].children", child, nodes):
                 continue
             if child in parent:
-                errors.append(f"nodes[{child}]: dos padres ({parent[child]} y {i})")
+                errors.append(f"nodes[{child}]: two parents ({parent[child]} and {i})")
             parent[child] = i
     for start in range(len(nodes)):
         seen, node = set(), start
         while node in parent:
             if node in seen:
-                errors.append(f"nodes[{start}]: ciclo en la jerarquía")
+                errors.append(f"nodes[{start}]: cycle in the hierarchy")
                 break
             seen.add(node)
             node = parent[node]
     for scene in gltf.get("scenes", []):
         for root in scene.get("nodes", []):
             if _check_ref(errors, "scene.nodes", root, nodes) and root in parent:
-                errors.append(f"scene: el nodo {root} no es raíz")
+                errors.append(f"scene: node {root} is not a root")
 
 
 def _check_materials(gltf: dict[str, Any], base: Path | None, errors: list[str]) -> None:
@@ -177,9 +177,9 @@ def _check_materials(gltf: dict[str, Any], base: Path | None, errors: list[str])
         if "bufferView" in image:
             _check_ref(errors, f"images[{i}].bufferView", image["bufferView"], gltf["bufferViews"])
             if image.get("mimeType") != "image/png" or "uri" in image:
-                errors.append(f"images[{i}]: incrustada sin mimeType PNG o con uri")
+                errors.append(f"images[{i}]: embedded without PNG mimeType or with uri")
         elif base is not None and not (base / unquote(image["uri"])).is_file():
-            errors.append(f"images[{i}]: no existe {image['uri']}")
+            errors.append(f"images[{i}]: {image['uri']} does not exist")
 
 
 PATH_TYPES = {"translation": "VEC3", "rotation": "VEC4", "scale": "VEC3"}
@@ -196,12 +196,12 @@ def _check_animations(gltf: dict[str, Any], data: bytes, errors: list[str]) -> N
                 continue
             source, output = (accessors[r] for r in refs)
             if source["count"] != output["count"] or "min" not in source:
-                errors.append(f"{where}: input/output con conteos distintos o sin min/max")
+                errors.append(f"{where}: input/output with different counts or without min/max")
             times = [v[0] for v in read_accessor(gltf, data, sampler["input"])]
             if any(b <= a for a, b in itertools.pairwise(times)):
-                errors.append(f"{where}: tiempos no crecientes")
+                errors.append(f"{where}: non-increasing times")
             if sampler.get("interpolation", "LINEAR") not in ("LINEAR", "STEP", "CUBICSPLINE"):
-                errors.append(f"{where}: interpolación inválida")
+                errors.append(f"{where}: invalid interpolation")
         for c, channel in enumerate(animation.get("channels", [])):
             where = f"animations[{a}].channels[{c}]"
             target = channel.get("target", {})
@@ -209,25 +209,25 @@ def _check_animations(gltf: dict[str, Any], data: bytes, errors: list[str]) -> N
             ok &= _check_ref(errors, f"{where}.node", target.get("node"), nodes)
             path = target.get("path")
             if path not in PATH_TYPES:
-                errors.append(f"{where}: path {path!r} inválido")
+                errors.append(f"{where}: invalid path {path!r}")
             elif ok:
                 output = accessors[samplers[channel["sampler"]]["output"]]
                 if output["type"] != PATH_TYPES[path]:
-                    errors.append(f"{where}: salida {output['type']} para {path}")
+                    errors.append(f"{where}: output {output['type']} for {path}")
 
 
 def load_glb(blob: bytes) -> tuple[dict[str, Any], bytes]:
-    """JSON y chunk BIN de un GLB, comprobando cabecera, tipos de chunk y alineación."""
+    """JSON and BIN chunk of a GLB, checking header, chunk types and alignment."""
     magic, version, total = struct.unpack_from("<4sII", blob, 0)
     if magic != b"glTF" or version != 2 or total != len(blob):
-        raise ValueError(f"cabecera GLB inválida: {magic!r} v{version} {total}/{len(blob)}")
+        raise ValueError(f"invalid GLB header: {magic!r} v{version} {total}/{len(blob)}")
     json_len, json_type = struct.unpack_from("<II", blob, 12)
     bin_at = 20 + json_len
     bin_len, bin_type = struct.unpack_from("<II", blob, bin_at)
     if json_type != 0x4E4F534A or bin_type != 0x004E4942 or json_len % 4 or bin_len % 4:
-        raise ValueError("chunks GLB con tipo o alineación inválidos")
+        raise ValueError("GLB chunks with invalid type or alignment")
     if bin_at + 8 + bin_len != total:
-        raise ValueError("el chunk BIN no llega al final del GLB")
+        raise ValueError("the BIN chunk does not reach the end of the GLB")
     gltf = json.loads(blob[20:bin_at].decode("utf-8"))
     return gltf, blob[bin_at + 8 : bin_at + 8 + bin_len]
 
@@ -242,14 +242,14 @@ def _check_skins(gltf: dict[str, Any], errors: list[str]) -> None:
         ):
             accessor = gltf["accessors"][ibm]
             if accessor["type"] != "MAT4" or accessor["count"] != len(skin["joints"]):
-                errors.append(f"skins[{i}]: inverseBindMatrices no cuadra con los joints")
+                errors.append(f"skins[{i}]: inverseBindMatrices does not match the joints")
 
 
 def validate(gltf: dict[str, Any], data: bytes, base: Path | None = None) -> list[str]:
-    """Lista de errores estructurales (vacía si el documento es coherente)."""
+    """List of structural errors (empty if the document is consistent)."""
     errors: list[str] = []
     if gltf.get("asset", {}).get("version") != "2.0":
-        errors.append("asset.version no es 2.0")
+        errors.append("asset.version is not 2.0")
     _check_views(gltf, data, errors)
     _check_accessors(gltf, data, errors)
     if errors:

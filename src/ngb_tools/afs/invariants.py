@@ -1,8 +1,8 @@
-"""Auditoría de un AFS ya parseado: lo que un AFS sano cumple y este archivo no.
+"""Audit of an already-parsed AFS: what a healthy AFS satisfies and this file does not.
 
-Las reglas salen de cómo CRI empaqueta los datos para el DVD: cada entrada empieza en
-un sector (0x800), después de la cabecera, dentro del archivo y sin pisar a otra; la
-tabla de atributos ocupa exactamente N x 0x30 bytes y también va alineada.
+The rules come from how CRI packs data for the DVD: each entry starts at a sector (0x800),
+after the header, inside the file and without overlapping another; the attribute table
+takes exactly N x 0x30 bytes and is also aligned.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from ngb_tools.afs.archive import (
 
 
 class IssueCode(StrEnum):
-    """Tipo de incidencia; el valor es el código estable que aparece en los informes."""
+    """Issue type; the value is the stable code that appears in the reports."""
 
     MAGIC_VARIANT = "magic_variant"
     MISALIGNED = "misaligned"
@@ -33,14 +33,14 @@ class IssueCode(StrEnum):
     BAD_DATE = "bad_date"
     OVERLAP = "overlap"
     UNREADABLE = "unreadable"
-    NESTED_REVISIT = "nested_revisit"  # un AFS anidado ya inventariado en el mismo archivo
-    ENTRY_BUDGET = "entry_budget"  # se agotó el tope de fichas por archivo
-    METADATA_BUDGET = "metadata_budget"  # se agotó el tope de bytes de metadatos de los hijos
+    NESTED_REVISIT = "nested_revisit"  # a nested AFS already inventoried in the same file
+    ENTRY_BUDGET = "entry_budget"  # the per-file card limit was exhausted
+    METADATA_BUDGET = "metadata_budget"  # the children metadata byte limit was exhausted
 
 
 @dataclass(frozen=True, slots=True)
 class Issue:
-    """Una incidencia; `index` es la entrada afectada, o None si es del archivo entero."""
+    """An issue; `index` is the affected entry, or None if it concerns the whole file."""
 
     code: IssueCode
     detail: str
@@ -52,7 +52,7 @@ class Issue:
 
 
 class _Span(NamedTuple):
-    """Rango [start, end) relativo al AFS; owner None = la tabla de atributos."""
+    """Range [start, end) relative to the AFS; owner None = the attribute table."""
 
     start: int
     end: int
@@ -67,10 +67,10 @@ def _entry_issues(archive: AfsArchive) -> list[Issue]:
     issues: list[Issue] = []
     for e in archive.data_entries():
         if e.rel_offset % SECTOR:
-            detail = f"offset {e.rel_offset:#x} no múltiplo de {SECTOR:#x}"
+            detail = f"offset {e.rel_offset:#x} not a multiple of {SECTOR:#x}"
             issues.append(Issue(IssueCode.MISALIGNED, detail, e.index))
         if e.rel_offset < archive.header_end:
-            detail = f"offset {e.rel_offset:#x} < fin de cabecera {archive.header_end:#x}"
+            detail = f"offset {e.rel_offset:#x} < header end {archive.header_end:#x}"
             issues.append(Issue(IssueCode.INSIDE_HEADER, detail, e.index))
         if e.rel_offset + e.size > archive.limit:
             detail = f"{e.rel_offset:#x}+{e.size:#x} > {archive.limit:#x}"
@@ -84,14 +84,14 @@ def _attr_issues(archive: AfsArchive) -> list[Issue]:
     ptr, expected = archive.attr_ptr, archive.count * ATTR_ENTRY_SIZE
     issues: list[Issue] = []
     if ptr.size != expected:
-        detail = f"tabla {ptr.size:#x} != N*0x30 = {expected:#x}"
+        detail = f"table {ptr.size:#x} != N*0x30 = {expected:#x}"
         issues.append(Issue(IssueCode.ATTR_SIZE, detail))
     if ptr.offset % SECTOR:
-        issues.append(Issue(IssueCode.ATTR_MISALIGNED, f"tabla en {ptr.offset:#x}"))
+        issues.append(Issue(IssueCode.ATTR_MISALIGNED, f"table at {ptr.offset:#x}"))
     for e in archive.data_entries():
-        # Una fecha toda a cero es "sin fecha", no una fecha corrupta.
+        # An all-zero date means "no date", not a corrupt date.
         if e.attr is not None and e.attr.timestamp is None and any(e.attr.date):
-            issues.append(Issue(IssueCode.BAD_DATE, f"fecha inválida {e.attr.date}", e.index))
+            issues.append(Issue(IssueCode.BAD_DATE, f"invalid date {e.attr.date}", e.index))
     return issues
 
 
@@ -101,15 +101,16 @@ def _overlap_issues(archive: AfsArchive) -> list[Issue]:
         ptr = archive.attr_ptr
         spans.append(_Span(ptr.offset, ptr.offset + ptr.size, None))
     spans.sort(key=lambda s: (s.start, s.end))
-    # Barrido: cada rango se compara con el que más lejos llega de los anteriores, no solo
-    # con su vecino. Así una entrada que envuelve a varias solapa con todas ellas.
+    # Sweep: each range is compared with the one that reaches farthest among the previous
+    # ones, not just with its neighbor. That way an entry that wraps several overlaps all
+    # of them.
     issues: list[Issue] = []
     reach: _Span | None = None
     for span in spans:
         if reach is not None and span.start < reach.end:
             detail = (
-                f"{reach.label} [{reach.start:#x},{reach.end:#x}) solapa con {span.label} "
-                f"en {span.start:#x}"
+                f"{reach.label} [{reach.start:#x},{reach.end:#x}) overlaps {span.label} "
+                f"at {span.start:#x}"
             )
             issues.append(Issue(IssueCode.OVERLAP, detail, span.owner))
         if reach is None or span.end > reach.end:
@@ -118,9 +119,9 @@ def _overlap_issues(archive: AfsArchive) -> list[Issue]:
 
 
 def validate_archive(archive: AfsArchive) -> tuple[Issue, ...]:
-    """Todas las incidencias del AFS, en un orden estable (cabecera, entradas, tabla, solapes)."""
+    """All the AFS issues, in a stable order (header, entries, table, overlaps)."""
     head = (
-        [Issue(IssueCode.MAGIC_VARIANT, "magia 'AFS ' (0x20)")]
+        [Issue(IssueCode.MAGIC_VARIANT, "magic 'AFS ' (0x20)")]
         if archive.magic == MAGIC_VARIANT
         else []
     )
@@ -129,7 +130,7 @@ def validate_archive(archive: AfsArchive) -> tuple[Issue, ...]:
 
 @dataclass(frozen=True, slots=True)
 class CustomFieldStats:
-    """Recuento de hipótesis sobre el u32 `custom` (no son excluyentes entre sí)."""
+    """Count of hypotheses about the `custom` u32 (they are not mutually exclusive)."""
 
     equals_header_u32: int
     equals_size: int
@@ -137,10 +138,10 @@ class CustomFieldStats:
 
 
 def custom_field_semantics(source: ByteSource, archive: AfsArchive) -> CustomFieldStats:
-    """Compara el `custom` de cada entrada con su tamaño y con el u32 del offset 4 + 4*i.
+    """Compare each entry's `custom` with its size and with the u32 at offset 4 + 4*i.
 
-    La cabecera completa (8 + 8*N bytes) siempre cubre esos 4 + 4*N bytes, así que la
-    lectura no puede quedarse corta en un AFS que se haya podido abrir.
+    The full header (8 + 8*N bytes) always covers those 4 + 4*N bytes, so the read cannot
+    come up short on an AFS that could be opened.
     """
     if not archive.has_names:
         return CustomFieldStats(0, 0, 0)

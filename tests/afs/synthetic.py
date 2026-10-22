@@ -1,7 +1,7 @@
-"""Constructores de AFS sintéticos: nunca se usan datos del juego en los tests.
+"""Synthetic AFS builders: game data is never used in the tests.
 
-Reproducen la disposición que tienen los AFS de Ninja Gaiden Black: datos alineados a
-0x800, tabla de atributos al final y el campo `custom` copiado de la cabecera.
+They reproduce the layout of the Ninja Gaiden Black AFS files: data aligned to 0x800,
+attribute table at the end and the `custom` field copied from the header.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ DEFAULT_DATE: Date = (2004, 2, 10, 23, 56, 2)
 
 
 def align(n: int, alignment: int = SECTOR) -> int:
-    """Redondea `n` hacia arriba al múltiplo de `alignment`."""
+    """Round `n` up to a multiple of `alignment`."""
     return (n + alignment - 1) // alignment * alignment
 
 
@@ -28,7 +28,7 @@ def build_afs(
     attr_mode: AttrMode = "after_toc",
     date: Date = DEFAULT_DATE,
 ) -> bytes:
-    """AFS sintético con `files` = [(nombre, datos)] y el puntero de atributos en `attr_mode`."""
+    """Synthetic AFS with `files` = [(name, data)] and the attribute pointer at `attr_mode`."""
     count = len(files)
     toc_end = 8 + 8 * count
     pos = align(toc_end + 8)
@@ -46,14 +46,14 @@ def build_afs(
         ptr_pos = toc_end if attr_mode == "after_toc" else toc[0][0] - 8
         struct.pack_into("<II", buf, ptr_pos, attr_offset, attr_size)
         for i, (name, _) in enumerate(files):
-            # Igual que en el juego: custom = u32 en el offset 4 + 4*i del archivo.
+            # Same as in the game: custom = u32 at offset 4 + 4*i of the file.
             custom = int.from_bytes(buf[4 + 4 * i : 8 + 4 * i], "little")
             struct.pack_into("<32s6HI", buf, attr_offset + 0x30 * i, name.encode(), *date, custom)
     return bytes(buf)
 
 
 def make_adx(length: int = 64) -> bytes:
-    """Cabecera ADX mínima: `80 00`, offset del copyright y `(c)CRI` justo antes del audio."""
+    """Minimal ADX header: `80 00`, copyright offset and `(c)CRI` right before the audio."""
     adx = bytearray(length)
     adx[0:4] = b"\x80\x00\x00\x20"
     adx[0x1E:0x24] = b"(c)CRI"

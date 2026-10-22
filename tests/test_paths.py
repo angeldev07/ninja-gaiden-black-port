@@ -1,4 +1,4 @@
-"""Tests de `ngb_tools._paths`: raíz de datos, guarda de repos y escritura atómica."""
+"""Tests of `ngb_tools._paths`: data root, repo guard and atomic writes."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from ngb_tools._paths import (
 )
 
 REPO = Path(__file__).resolve().parents[1]
-IN_CHECKOUT = (REPO / ".git").exists()  # en un sdist no hay repo que proteger ni build/
+IN_CHECKOUT = (REPO / ".git").exists()  # an sdist has no repo to protect nor build/
 
 
 def _can_symlink() -> bool:
@@ -37,12 +37,12 @@ def _can_symlink() -> bool:
     return True
 
 
-CAN_SYMLINK = _can_symlink()  # en Windows hace falta el modo desarrollador o privilegios
+CAN_SYMLINK = _can_symlink()  # on Windows it needs developer mode or privileges
 
 
 def link_dir(link: Path, target: Path) -> bool:
-    """Enlace de directorio: unión (`mklink /J`, sin privilegios) en Windows, symlink fuera."""
-    if os.name == "nt":  # sys.platform haría que mypy diera la otra rama por inalcanzable
+    """Directory link: junction (`mklink /J`, no privileges) on Windows, symlink elsewhere."""
+    if os.name == "nt":  # sys.platform would make mypy treat the other branch as unreachable
         command = ["cmd", "/c", "mklink", "/J", str(link), str(target)]
         return subprocess.run(command, capture_output=True, check=False).returncode == 0
     try:
@@ -66,7 +66,7 @@ class TempDirTestCase(unittest.TestCase):
         return repo
 
     def temp_dir_in_build(self) -> Path:
-        """Carpeta temporal dentro de `build/` del repo real (ignorada y bloqueada por higiene)."""
+        """Temp folder inside the real repo's `build/` (ignored and blocked by hygiene)."""
         build = REPO / "build"
         build.mkdir(exist_ok=True)
         tmp = tempfile.TemporaryDirectory(dir=build)
@@ -76,7 +76,7 @@ class TempDirTestCase(unittest.TestCase):
 
 class DataRootTests(unittest.TestCase):
     def test_env_var_wins(self) -> None:
-        self.assertEqual(data_root({DATA_ENV_VAR: "D:/datos"}), Path("D:/datos"))
+        self.assertEqual(data_root({DATA_ENV_VAR: "D:/data"}), Path("D:/data"))
 
     def test_defaults_to_home_when_unset_or_empty(self) -> None:
         for environ in ({}, {DATA_ENV_VAR: ""}):
@@ -98,7 +98,7 @@ class RepoRootTests(TempDirTestCase):
         outer = self.make_repo("outer")
         fake = outer / "fake"
         fake.mkdir()
-        (fake / ".git").write_text("no soy un repo\n", encoding="utf-8")
+        (fake / ".git").write_text("not a repo\n", encoding="utf-8")
         self.assertEqual(find_repo_root(fake / "x"), outer)
         (self.root / "lone").mkdir()
         (self.root / "lone" / ".git").write_bytes(b"")
@@ -109,7 +109,7 @@ class RepoRootTests(TempDirTestCase):
         (outer / "inner" / ".git").mkdir(parents=True)
         self.assertEqual(find_repo_roots(outer / "inner" / "x"), (outer / "inner", outer))
 
-    @unittest.skipUnless(IN_CHECKOUT, "sin .git: el paquete no está en un clon")
+    @unittest.skipUnless(IN_CHECKOUT, "no .git: the package is not in a clone")
     def test_package_repo_is_this_checkout(self) -> None:
         self.assertEqual(package_repo_root(), REPO)
         self.assertEqual(report_dirs(), (REPO / "build",))
@@ -126,11 +126,11 @@ class EnsureOutsideReposTests(TempDirTestCase):
     def test_outer_repo_counts_even_if_the_nearest_dot_git_is_bogus(self) -> None:
         outer = self.make_repo("outer")
         (outer / "sub").mkdir()
-        (outer / "sub" / ".git").write_text("basura\n", encoding="utf-8")
+        (outer / "sub" / ".git").write_text("junk\n", encoding="utf-8")
         with self.assertRaises(UnsafeOutputError):
             ensure_outside_repos(outer / "sub" / "x")
 
-    @unittest.skipUnless(IN_CHECKOUT, "sin .git: el paquete no está en un clon")
+    @unittest.skipUnless(IN_CHECKOUT, "no .git: the package is not in a clone")
     def test_path_inside_the_package_repo_is_refused(self) -> None:
         with self.assertRaises(UnsafeOutputError):
             ensure_outside_repos(REPO / "src" / "nope")
@@ -143,9 +143,9 @@ class EnsureOutsideReposTests(TempDirTestCase):
         missing = self.root / "a" / "missing" / ".." / "b"
         self.assertEqual(ensure_outside_repos(missing), self.root / "a" / "b")
 
-    @unittest.skipUnless(IN_CHECKOUT, "sin .git: el paquete no está en un clon")
+    @unittest.skipUnless(IN_CHECKOUT, "no .git: the package is not in a clone")
     def test_build_of_the_package_repo_is_allowed(self) -> None:
-        target = REPO / "build" / "_no_se_crea" / "inv.json"
+        target = REPO / "build" / "_not_created" / "inv.json"
         self.assertEqual(ensure_outside_repos(target, allow=report_dirs()), target.resolve())
         self.assertFalse(target.parent.exists())
 
@@ -154,37 +154,37 @@ class EnsureOutsideReposTests(TempDirTestCase):
         with self.assertRaises(UnsafeOutputError):
             ensure_outside_repos(build / "inv.json", allow=[build])
 
-    @unittest.skipUnless(IN_CHECKOUT, "sin .git: el paquete no está en un clon")
+    @unittest.skipUnless(IN_CHECKOUT, "no .git: the package is not in a clone")
     def test_dotdot_cannot_climb_out_of_the_allowed_dir(self) -> None:
         escape = REPO / "build" / "missing" / ".." / ".." / "src" / "x"
         with self.assertRaises(UnsafeOutputError):
             ensure_outside_repos(escape, allow=report_dirs())
 
-    @unittest.skipUnless(IN_CHECKOUT, "sin .git: el paquete no está en un clon")
+    @unittest.skipUnless(IN_CHECKOUT, "no .git: the package is not in a clone")
     def test_repo_nested_inside_build_is_refused(self) -> None:
         clone = self.temp_dir_in_build() / "clone"
         (clone / ".git").mkdir(parents=True)
         with self.assertRaises(UnsafeOutputError):
             ensure_outside_repos(clone / "x", allow=report_dirs())
 
-    @unittest.skipUnless(IN_CHECKOUT, "sin .git: el paquete no está en un clon")
+    @unittest.skipUnless(IN_CHECKOUT, "no .git: the package is not in a clone")
     def test_allowed_dir_linked_into_another_repo_is_refused(self) -> None:
         target = self.make_repo("other") / "data"
         target.mkdir()
         fake_build = self.temp_dir_in_build() / "fake_build"
         if not link_dir(fake_build, target):
-            self.skipTest("no se pudo crear el enlace de directorio")
+            self.skipTest("could not create the directory link")
         with self.assertRaises(UnsafeOutputError):
             ensure_outside_repos(fake_build / "inv.json", allow=[fake_build])
 
     def test_allowed_dir_that_is_a_link_inside_the_package_repo_is_refused(self) -> None:
-        # build/ como unión hacia src/ del mismo repo: la ruta resuelta sigue en el repo del
-        # paquete, pero fuera de la zona ignorada.
+        # build/ as a junction to src/ of the same repo: the resolved path stays in the
+        # package repo, but outside the ignored area.
         package = self.make_repo("pkg")
         (package / "src").mkdir()
         build = package / "build"
         if not link_dir(build, package / "src"):
-            self.skipTest("no se pudo crear el enlace de directorio")
+            self.skipTest("could not create the directory link")
         with (
             mock.patch("ngb_tools._paths.package_repo_root", return_value=package),
             self.assertRaises(UnsafeOutputError),
@@ -204,56 +204,56 @@ class EnsureOutsideReposTests(TempDirTestCase):
 class AtomicWriteTests(TempDirTestCase):
     def test_writes_content_and_leaves_no_partial(self) -> None:
         target = self.root / "a.bin"
-        atomic_write_bytes(target, b"hola")
-        self.assertEqual(target.read_bytes(), b"hola")
+        atomic_write_bytes(target, b"hello")
+        self.assertEqual(target.read_bytes(), b"hello")
         self.assertEqual([p.name for p in self.root.iterdir()], ["a.bin"])
 
     def test_overwrites_an_existing_target(self) -> None:
         target = self.root / "a.bin"
-        target.write_bytes(b"viejo y algo largo")
-        atomic_write_bytes(target, b"nuevo")
-        self.assertEqual(target.read_bytes(), b"nuevo")
+        target.write_bytes(b"old and somewhat long")
+        atomic_write_bytes(target, b"new")
+        self.assertEqual(target.read_bytes(), b"new")
 
     def test_stale_partial_from_a_crash_is_replaced(self) -> None:
         target = self.root / "a.bin"
-        target.with_name(target.name + PARTIAL_SUFFIX).write_bytes(b"basura de un corte")
-        atomic_write_bytes(target, b"nuevo", fsync=True)
-        self.assertEqual(target.read_bytes(), b"nuevo")
+        target.with_name(target.name + PARTIAL_SUFFIX).write_bytes(b"junk from an interruption")
+        atomic_write_bytes(target, b"new", fsync=True)
+        self.assertEqual(target.read_bytes(), b"new")
         self.assertEqual([p.name for p in self.root.iterdir()], ["a.bin"])
 
-    @unittest.skipUnless(CAN_SYMLINK, "crear symlinks exige privilegios en este sistema")
+    @unittest.skipUnless(CAN_SYMLINK, "creating symlinks requires privileges on this system")
     def test_partial_symlink_is_replaced_without_touching_its_target(self) -> None:
         victim = self.root / "victim.txt"
-        victim.write_bytes(b"intacto")
+        victim.write_bytes(b"intact")
         target = self.root / "a.bin"
         target.with_name(target.name + PARTIAL_SUFFIX).symlink_to(victim)
-        atomic_write_bytes(target, b"nuevo")
-        self.assertEqual(victim.read_bytes(), b"intacto")
-        self.assertEqual(target.read_bytes(), b"nuevo")
+        atomic_write_bytes(target, b"new")
+        self.assertEqual(victim.read_bytes(), b"intact")
+        self.assertEqual(target.read_bytes(), b"new")
         self.assertFalse(target.is_symlink())
 
     def test_failure_keeps_the_previous_file_and_removes_the_partial(self) -> None:
         target = self.root / "a.bin"
-        target.write_bytes(b"anterior")
+        target.write_bytes(b"previous")
 
         def chunks() -> Iterator[bytes]:
-            yield b"medio "
-            raise OSError("disco lleno")
+            yield b"half "
+            raise OSError("disk full")
 
-        with self.assertRaisesRegex(OSError, "disco lleno"):
+        with self.assertRaisesRegex(OSError, "disk full"):
             atomic_write_chunks(target, chunks())
-        self.assertEqual(target.read_bytes(), b"anterior")
+        self.assertEqual(target.read_bytes(), b"previous")
         self.assertEqual([p.name for p in self.root.iterdir()], ["a.bin"])
 
     def test_partial_created_by_another_writer_is_left_alone(self) -> None:
         target = self.root / "a.bin"
         partial = target.with_name(target.name + PARTIAL_SUFFIX)
-        partial.write_bytes(b"del otro escritor")
+        partial.write_bytes(b"from the other writer")
         real_unlink = Path.unlink
         calls: list[Path] = []
 
         def unlink_except_first(path: Path, missing_ok: bool = False) -> None:
-            # Simula la carrera: el otro escritor recrea el .part justo tras nuestro borrado.
+            # Simulate the race: the other writer recreates the .part right after our deletion.
             calls.append(path)
             if len(calls) > 1:
                 real_unlink(path, missing_ok=missing_ok)
@@ -262,8 +262,8 @@ class AtomicWriteTests(TempDirTestCase):
             mock.patch.object(Path, "unlink", unlink_except_first),
             self.assertRaises(FileExistsError),
         ):
-            atomic_write_bytes(target, b"nuevo")
-        self.assertEqual(partial.read_bytes(), b"del otro escritor")
+            atomic_write_bytes(target, b"new")
+        self.assertEqual(partial.read_bytes(), b"from the other writer")
         self.assertFalse(target.exists())
 
 

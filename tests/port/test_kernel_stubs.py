@@ -1,4 +1,4 @@
-"""Generador de stubs C del kernel: TSV -> `port/src/kernel/stubs.c`."""
+"""Kernel C stub generator: TSV -> `port/src/kernel/stubs.c`."""
 
 from __future__ import annotations
 
@@ -126,7 +126,7 @@ class RenderFileTest(unittest.TestCase):
     def test_committed_file_is_up_to_date(self) -> None:
         with redirect_stdout(io.StringIO()):
             status = main(["--check", "--out", str(COMMITTED_STUBS)])
-        self.assertEqual(status, 0, "regenera con: python tools/gen_kernel_stubs.py")
+        self.assertEqual(status, 0, "regenerate with: python tools/gen_kernel_stubs.py")
 
     def test_main_writes_and_checks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -136,7 +136,7 @@ class RenderFileTest(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 self.assertEqual(main(["--exports", str(tsv), "--out", str(out)]), 0)
                 self.assertEqual(main(["--exports", str(tsv), "--out", str(out), "--check"]), 0)
-                out.write_text("viejo", encoding="utf-8")
+                out.write_text("stale", encoding="utf-8")
                 self.assertEqual(main(["--exports", str(tsv), "--out", str(out), "--check"]), 1)
 
 

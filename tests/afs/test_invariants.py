@@ -1,4 +1,4 @@
-"""Tests de la auditoría de invariantes y de la semántica del campo `custom`."""
+"""Tests of the invariant audit and of the semantics of the `custom` field."""
 
 from __future__ import annotations
 
@@ -24,8 +24,8 @@ def codes_of(data: bytes) -> set[IssueCode]:
 class ValidationTests(unittest.TestCase):
     def test_misaligned_overlap_and_bounds(self) -> None:
         buf = bytearray(build_afs(FILES, "none"))
-        struct.pack_into("<II", buf, 8 + 8 * 1, 0x810, 0x100)  # desalineada (y pisa #0)
-        struct.pack_into("<II", buf, 8 + 8 * 2, 0x800, len(buf))  # pisa #0 y se sale del archivo
+        struct.pack_into("<II", buf, 8 + 8 * 1, 0x810, 0x100)  # misaligned (and overlaps #0)
+        struct.pack_into("<II", buf, 8 + 8 * 2, 0x800, len(buf))  # overlaps #0 and exceeds the file
         codes = codes_of(bytes(buf))
         self.assertLessEqual(
             {IssueCode.MISALIGNED, IssueCode.OVERLAP, IssueCode.OUT_OF_BOUNDS}, codes
@@ -33,11 +33,11 @@ class ValidationTests(unittest.TestCase):
 
     def test_entry_containing_several_others_overlaps_each_of_them(self) -> None:
         buf = bytearray(build_afs(FILES, "none"))
-        struct.pack_into("<II", buf, 8, 0x800, 0x2000)  # #0 [0x800,0x2800) envuelve a #1 y #2
+        struct.pack_into("<II", buf, 8, 0x800, 0x2000)  # #0 [0x800,0x2800) wraps #1 and #2
         issues = validate_archive(open_afs(io.BytesIO(bytes(buf)), "t.afs"))
         overlaps = {i.index: i.detail for i in issues if i.code is IssueCode.OVERLAP}
         self.assertEqual(set(overlaps), {1, 2})
-        self.assertTrue(overlaps[2].startswith("0 [0x800,0x2800) solapa con 2"))
+        self.assertTrue(overlaps[2].startswith("0 [0x800,0x2800) overlaps 2"))
 
     def test_well_formed_archive_has_no_issues(self) -> None:
         for mode in ("after_toc", "before_data", "none"):
@@ -76,7 +76,7 @@ class ValidationTests(unittest.TestCase):
         buf = bytearray(build_afs(FILES, "none"))
         struct.pack_into("<II", buf, 8 + 8 * 1, 0x1810, 0x10)
         issues = validate_archive(open_afs(io.BytesIO(bytes(buf)), "t.afs"))
-        self.assertEqual(str(issues[0]), "misaligned #1: offset 0x1810 no múltiplo de 0x800")
+        self.assertEqual(str(issues[0]), "misaligned #1: offset 0x1810 not a multiple of 0x800")
 
 
 class CustomFieldTests(unittest.TestCase):

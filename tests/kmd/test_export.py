@@ -1,4 +1,4 @@
-"""Tests de los exportadores glTF y OBJ sobre KMD sintéticos, con el validador propio."""
+"""Tests of the glTF and OBJ exporters on synthetic KMDs, with the in-house validator."""
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ class GltfTests(ExportCase):
         position = gltf["accessors"][prim["attributes"]["POSITION"]]  # type: ignore[index]
         self.assertEqual((position["min"], position["max"]), ([0, 0, 0], [1, 1, 0]))
         uvs = read_accessor(gltf, binary, prim["attributes"]["TEXCOORD_0"])
-        self.assertEqual(uvs[2], (0.0, -1.0))  # UV tal cual: glTF y D3D comparten origen
+        self.assertEqual(uvs[2], (0.0, -1.0))  # UVs as they are: glTF and D3D share the origin
 
     def test_material_points_to_the_exported_png(self) -> None:
         _, gltf, _ = self.export(parent_and_child())
@@ -113,7 +113,7 @@ class GltfTests(ExportCase):
         self.assertEqual(len(skinned), 1)
         prim = gltf["meshes"][skinned[0]["mesh"]]["primitives"][0]  # type: ignore[index]
         positions = read_accessor(gltf, binary, prim["attributes"]["POSITION"])
-        self.assertEqual(positions[0], (0.0, 2.0, 0.0))  # local + mundo del padre (0, 2, 0)
+        self.assertEqual(positions[0], (0.0, 2.0, 0.0))  # local + parent world (0, 2, 0)
         weights = read_accessor(gltf, binary, prim["attributes"]["WEIGHTS_0"])
         self.assertEqual(weights[0], (1.0, 0.0, 0.0, 0.0))
         self.assertEqual(weights[3], (0.0, 1.0, 0.0, 0.0))
@@ -131,7 +131,7 @@ class ObjTests(ExportCase):
         lines = obj.splitlines()
         self.assertEqual((stats.objects, stats.triangles), (2, 4))
         vertices = [line for line in lines if line.startswith("v ")]
-        self.assertEqual(vertices[4], "v 2.000000 1.000000 0.000000")  # hijo: (2, 1, 0) + local
+        self.assertEqual(vertices[4], "v 2.000000 1.000000 0.000000")  # child: (2, 1, 0) + local
         self.assertIn("vt 0.000000 2.000000", lines)  # v = -1 -> 1 - v = 2
         self.assertIn("f 5/5/5 6/6/6 7/7/7", lines)
         self.assertIn("map_Kd ../textures/", mtl)

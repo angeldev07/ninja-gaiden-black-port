@@ -1,1 +1,1 @@
-"""Tests del port nativo (`port/`): generador de stubs y loader sobre XBE sintéticos."""
+"""Tests of the native port (`port/`): stub generator and loader over synthetic XBEs."""

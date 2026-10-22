@@ -1,4 +1,4 @@
-"""Escritor PNG mínimo (RGB de 8 bits, sin filtros), con zlib de la stdlib."""
+"""Minimal PNG writer (8-bit RGB, no filters), using the stdlib zlib."""
 
 from __future__ import annotations
 
@@ -17,9 +17,9 @@ def _chunk(kind: bytes, payload: bytes) -> bytes:
 
 
 def encode_rgb(width: int, height: int, rows: Sequence[bytes | bytearray]) -> bytes:
-    """PNG de `height` filas de `width` píxeles RGB (3 bytes por píxel)."""
+    """PNG of `height` rows of `width` RGB pixels (3 bytes per pixel)."""
     if len(rows) != height or any(len(row) != 3 * width for row in rows):
-        raise ValueError("las filas no cuadran con el tamaño de la imagen")
+        raise ValueError("the rows do not match the image size")
     header = struct.pack(">IIBBBBB", width, height, 8, _RGB, 0, 0, 0)
     raw = b"".join(b"\x00" + bytes(row) for row in rows)
     return (
