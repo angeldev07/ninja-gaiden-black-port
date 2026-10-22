@@ -309,6 +309,27 @@ en el modo fijo.
   - sin skinning se sigue usando la matriz compuesta.
 - **Resultado:** el templo aparece completo y la escena coincide con la captura de xemu.
 
+## Pusher asíncrono (como la GPU real)
+
+- **Antes:** cada escritura de `PUT` bloqueaba el hilo del juego mientras el hilo de render procesaba el kick
+  entero, unas 38 veces por frame. Cada ida y vuelta entre hilos costaba unos 0,17 ms (unos 6,6 ms por frame), y
+  la lógica del juego no se solapaba con el dibujo.
+- **Ahora:** `pgraph_kick` apunta el nuevo `PUT` y vuelve. El hilo de render es el pusher: consume
+  `[GET, PUT)` en paralelo con el juego y hace él el pacing de `FLIP_STALL`.
+- **Lo que D3D necesita de una GPU asíncrona:**
+  - **`GET` real**, palabra a palabra (`pb_state.cur`). `D3D_BlockOnTime` calcula a qué distancia va la GPU y,
+    si va más de 9 KB por detrás, parchea el push buffer más adelante. Con un `GET` atrasado parchearía lo que
+    ya se ha pasado y esperaría para siempre.
+  - **`NO_OPERATION(5)`:** ese parche es `WAIT_FOR_IDLE` más `NO_OPERATION` con parámetro 5, una interrupción
+    de la GPU. D3D duerme en el KEVENT del dispositivo (+0x773 palabras), que su ISR señala al llegar. Se
+    emula señalándolo al procesar el método (`ngb_ke_set_event`).
+  - **`PGRAPH_PATT_COLOR0` (`0x400B10`):** D3D escribe un marcador con el objeto pattern (clase `0x44`, método
+    `0x310`) y, al esperar a la GPU, compara sus bits 2-6 con la valla. El pusher lo guarda al procesarlo.
+- **Resultado** (demo determinista, 200 s): sin cuelgues ni errores del push buffer.
+  - El gameplay pasa de 45-53 a 54-60 fps.
+  - El vídeo del montaje va a 30 fps, su ritmo de origen.
+  - Audio limpio: 0 frames descartados.
+
 ## Siguiente
 
 1. Pasar de la pantalla de título al menú principal, y averiguar qué esperan los avisos y el vídeo (audio).

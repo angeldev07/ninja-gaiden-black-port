@@ -130,7 +130,7 @@ static int is_modelled(uint32_t off) {
     case PTIMER_NUMERATOR: case PTIMER_DENOMINATOR: case PTIMER_TIME_0: case PTIMER_TIME_1:
     case PFB_CSTATUS: case PFB_WBC: case PGRAPH_INTR: case PGRAPH_STATUS: case PCRTC_INTR_0:
     case PCRTC_INTR_EN_0: case PCRTC_START: case PCRTC_RASTER: case PRAMDAC_PLL_TEST_COUNTER:
-    case USER_DMA_PUT: case USER_DMA_GET: case USER_REF:
+    case USER_DMA_PUT: case USER_DMA_GET: case USER_REF: case 0x400B10u:
         return 1;
     default:
         return 0;
@@ -156,8 +156,9 @@ static uint32_t nv2a_value(uint32_t off) {
     case PFIFO_CACHE1_DMA_PUSH: return g_regs[off / 4] & ~(1u << 12); /* sin STATUS de parada */
     case PFIFO_CACHE1_DMA_CTL: return g_regs[off / 4] | 0x80000000u;  /* VALID */
     case PFIFO_CACHE1_DMA_PUT: case USER_DMA_PUT: return g_put;
-    case PFIFO_CACHE1_DMA_GET: case USER_DMA_GET: return g_get;
+    case PFIFO_CACHE1_DMA_GET: case USER_DMA_GET: return pgraph_fifo_get(g_get);
     case USER_REF: return g_regs[PFIFO_CACHE1_REF / 4];
+    case 0x400B10u: return pgraph_patt_color0(); /* PGRAPH_PATT_COLOR0 */
     case PTIMER_TIME_0: return (uint32_t)(ptimer_ns() << 5);
     case PTIMER_TIME_1: return (uint32_t)(ptimer_ns() >> 27) & 0x1FFFFFFFu;
     case PFB_CSTATUS: return NGB_CONTIG_SIZE; /* 64 MB */
@@ -192,6 +193,7 @@ static uint32_t nv2a_write(uint32_t off, uint32_t val) {
         return 0;
     case PFIFO_CACHE1_DMA_GET: case USER_DMA_GET:
         g_get = val;
+        pgraph_fifo_set_get(val);
         return val;
     case PFIFO_CACHE1_DMA_PUT: case USER_DMA_PUT:
         g_put = val;

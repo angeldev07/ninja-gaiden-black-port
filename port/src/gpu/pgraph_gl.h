@@ -5,9 +5,9 @@
  * `--renderer gl` las operaciones que tocan píxeles (CLEAR_SURFACE, el dibujo al cerrar un
  * BEGIN_END y FLIP_STALL) van aquí en vez de al rasterizador por software.
  *
- * Hilos: todo GL vive en un hilo de render propio que tiene el contexto actual. pgraph_kick
- * le pasa el kick entero con pgl_call() y espera a que termine (el kick sigue siendo
- * síncrono, como espera D3D). Ver el porqué en pgraph_gl.c.
+ * Hilos: todo GL vive en un hilo de render propio que tiene el contexto actual. Ese hilo
+ * es también el pusher: pgraph_kick le avisa con pgl_post() y vuelve enseguida, y el hilo
+ * consume el push buffer en paralelo con el juego, como la GPU de la consola.
  */
 #pragma once
 
@@ -50,6 +50,9 @@ int pgl_active(void);
 
 /* Ejecuta fn(arg) en el hilo de render y espera a que vuelva. */
 void pgl_call(void (*fn)(void *), void *arg);
+/* Pide fn(arg) al hilo de render sin esperar. Si ya está corriendo, lo vuelve a llamar al
+ * terminar (el evento queda señalado): fn debe ser idempotente y mirar su propia cola. */
+void pgl_post(void (*fn)(void *), void *arg);
 
 /* Desde el hilo de render (dentro de pgl_call). */
 /* Al empezar cada kick: recoge las páginas que la CPU escribió desde el anterior. */

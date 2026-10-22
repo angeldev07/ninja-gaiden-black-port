@@ -279,3 +279,17 @@ Detalle en [[gpu-nv2a]].
   en el análisis, como las ISR y las DPC registradas en ejecución.
 
 Detalle en [[audio-apu]].
+
+## [2026-10-22] perf | Pusher asíncrono: el juego ya no espera a la GPU en cada kick
+- **Perfil del tramo lento:**
+  - unos 6,6 ms por frame en idas y vueltas síncronas entre el hilo del juego y el de render (38 kicks por
+    frame);
+  - además, la lógica del juego no se solapaba con el dibujo.
+- **Cambio:** ahora el hilo de render consume el push buffer en paralelo, como la GPU.
+- **Lo que D3D necesitaba de una GPU asíncrona, descubierto en tres cuelgues sucesivos:**
+  - `PGRAPH_PATT_COLOR0`, un marcador del objeto pattern;
+  - `NO_OPERATION(5)`, la interrupción que despierta a `D3D_BlockOnTime`;
+  - un `GET` en tiempo real.
+- **Resultado:** gameplay de la demo a 54-60 fps, frente a 45-53. Sin errores del push buffer y con audio limpio.
+
+Detalle en [[gpu-nv2a]].

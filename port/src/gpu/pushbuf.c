@@ -16,6 +16,7 @@ uint32_t pb_run(pb_state_t *st, const uint8_t *base, uint32_t limit, uint32_t ge
     uint32_t done = 0, ok_page = 0xFFFFFFFFu;
     while (get != put && done < max_words) {
         uint32_t word, at = get;
+        st->cur = get;
         if (get > limit || limit - get < 4 || (get & 3)) {
             st->errors++;
             emit(cb, user, PB_EVENT_ERROR, get, 0, limit);
@@ -76,5 +77,6 @@ uint32_t pb_run(pb_state_t *st, const uint8_t *base, uint32_t limit, uint32_t ge
             emit(cb, user, PB_EVENT_ERROR, at, word, 0);
         }
     }
+    st->cur = get;
     return get;
 }

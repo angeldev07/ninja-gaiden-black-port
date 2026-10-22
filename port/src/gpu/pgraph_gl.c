@@ -243,6 +243,12 @@ void pgl_call(void (*fn)(void *), void *arg) {
     WaitForSingleObject(R.done, INFINITE);
 }
 
+void pgl_post(void (*fn)(void *), void *arg) {
+    R.fn = fn;
+    R.arg = arg;
+    SetEvent(R.req); /* R.done queda señalado al volver y nadie lo espera */
+}
+
 /* ---------------------------------------------------------------- estado ---- */
 
 void pgl_regs_defaults(pgl_regs *r) {

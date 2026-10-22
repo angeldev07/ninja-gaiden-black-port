@@ -319,6 +319,14 @@ static uint64_t KeSetEvent(uint32_t *args) {
     return RET32(old);
 }
 
+/* KeSetEvent desde el emulador (p. ej. el pusher, que no es un hilo Xbox). */
+void ngb_ke_set_event(uint32_t event) {
+    HANDLE h = obj_handle(event);
+    *(volatile int32_t *)(uintptr_t)(event + 4) = 1;
+    if (h)
+        SetEvent(h);
+}
+
 /* 123 LONG KeResetEvent(PRKEVENT Event) / 92 VOID KeClearEvent(PRKEVENT Event) */
 static uint64_t KeResetEvent(uint32_t *args) {
     int32_t *signal = (int32_t *)((uint8_t *)PTR(0) + 4);

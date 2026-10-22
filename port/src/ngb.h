@@ -138,6 +138,7 @@ ngb_thread_t *ngb_thread_current(void); /* NULL si el hilo no es Xbox */
  * aplazada. Así NtSuspendThread nunca congela un hilo con un lock del loader tomado. */
 void ngb_kernel_enter(ngb_thread_t *t);
 void ngb_kernel_leave(ngb_thread_t *t);
+void ngb_ke_set_event(uint32_t event); /* KeSetEvent sobre un KEVENT del juego */
 /* NtSuspendThread/NtResumeThread sobre un hilo Xbox. Devuelven la cuenta previa, o -1 si
  * el host falla. */
 LONG ngb_thread_suspend(ngb_thread_t *t);

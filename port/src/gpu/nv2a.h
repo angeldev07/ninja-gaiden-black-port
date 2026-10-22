@@ -51,6 +51,12 @@ void nv2a_summary(void);
 int pgraph_init(const char *log_path);
 /* Decodifica el push buffer de GET a PUT; devuelve el GET final. */
 uint32_t pgraph_kick(uint32_t dma_instance, uint32_t get, uint32_t put);
+/* GET del FIFO: con el pusher asíncrono (render GL), hasta dónde ha llegado de verdad; si
+ * no, `fallback` (el modelo síncrono de nv2a.c). Escribir GET solo vale con el pusher quieto. */
+uint32_t pgraph_fifo_get(uint32_t fallback);
+void pgraph_fifo_set_get(uint32_t get);
+/* PGRAPH_PATT_COLOR0: el último SET_MONOCHROME_COLOR0 del objeto pattern (marcador de D3D). */
+uint32_t pgraph_patt_color0(void);
 /* Pacing de 60 Hz pendiente del último FLIP_STALL; se llama ya sin locks. */
 void pgraph_pace(void);
 void pgraph_vblank(uint32_t count);

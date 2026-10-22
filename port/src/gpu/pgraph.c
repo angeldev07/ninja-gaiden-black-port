@@ -69,6 +69,15 @@ static uint32_t g_present_offset, g_present_pitch, g_present_w, g_present_h;
 static LARGE_INTEGER g_pace_next, g_pace_freq;
 static volatile LONG g_pace_pending; /* FLIP_STALL hecho; el pacing va al salir de los locks */
 
+/* Pusher asíncrono (con GL): la cola es un solo tramo [g_q_get, g_q_put) del push buffer en
+ * curso. El juego mueve PUT; el hilo de render consume y mueve GET al terminar cada tramo. */
+static CRITICAL_SECTION g_q_lock;
+static volatile LONG g_patt_color0; /* PGRAPH_PATT_COLOR0, escrito por el pusher */
+static uint32_t g_block_wakes;       /* NO_OPERATION(5) de D3D_BlockOnTime atendidos */
+static uint32_t g_q_inst, g_q_get, g_q_put;
+static int g_q_busy, g_q_started;
+static volatile int g_q_running; /* el hilo de render está dentro de pb_run para la cola */
+
 /* H7c: render OpenGL (--renderer gl). g_r es el estado NV097 que necesita pgraph_gl.c; los
  * índices de ARRAY_ELEMENT y DRAW_ARRAYS de la primitiva en curso van en g_aidx. */
 static int g_gl;
@@ -808,8 +817,11 @@ static void pace(void) {
 }
 
 /* Lo llama nv2a.c al volver del kick, ya sin el lock del NV2A ni g_pg_lock (issue #35): el
- * Sleep del pacing ya no bloquea al hilo del vblank ni a otros accesos MMIO. */
+ * Sleep del pacing ya no bloquea al hilo del vblank ni a otros accesos MMIO. Con el pusher
+ * asíncrono el pacing es del hilo de render (kick_worker): el juego no espera aquí. */
 void pgraph_pace(void) {
+    if (g_gl)
+        return;
     if (InterlockedExchange(&g_pace_pending, 0))
         pace();
 }
@@ -981,6 +993,15 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
         d3d_pushbuffer_fixup(param); /* NO_OPERATION con interrupción: fixup de D3D */
         return;
     }
+    if (method == 0x0100 && (param & 0x1Fu) == 5u) {
+        /* D3D_BlockOnTime, con la GPU muy atrás, mete NO_OPERATION(5) y espera al KEVENT del
+         * dispositivo (+0x773 palabras) que su ISR señala cuando la GPU llega ahí. */
+        uint32_t *dev = (uint32_t *)game_mem(D3D_G_PDEVICE_VA, 4);
+        if (dev && *dev)
+            ngb_ke_set_event(*dev + 0x773u * 4u);
+        g_block_wakes++;
+        return;
+    }
     if (method == 0) { /* SET_OBJECT: el handle se busca en RAMHT; la clase está en RAMIN */
         uint8_t *obj;
         if (ramht_lookup(param, &inst) && (obj = nv2a_ramin(inst, 4)) != NULL) {
@@ -995,6 +1016,12 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
     if (method >= 0x180 && method < 0x200) { /* SET_CONTEXT_DMA_*: handle -> instancia */
         if (!g_class[sub & 7] || g_class[sub & 7] == 0x97) /* los de la clase 3D */
             g_dma[(method - 0x180) / 4] = ramht_lookup(param, &inst) ? inst : 0;
+        return;
+    }
+    if (g_class[sub & 7] == 0x44 && method == 0x0310) {
+        /* Pattern, SET_MONOCHROME_COLOR0: el hardware lo deja en PGRAPH_PATT_COLOR0 (0x400B10).
+         * D3D lo usa de marcador: al esperar a la GPU compara sus bits 2-6 con su valla. */
+        InterlockedExchange(&g_patt_color0, (LONG)param);
         return;
     }
     if (g_class[sub & 7] && g_class[sub & 7] != 0x97)
@@ -1224,9 +1251,89 @@ static void kick_body(void *arg) {
     g_perf.body += qpc() - t_body;
 }
 
+/* Hilo de render: consume la cola hasta vaciarla. El pacing va fuera de g_pg_lock. */
+static void kick_worker(void *unused) {
+    (void)unused;
+    for (;;) {
+        kick_args_t k;
+        LONGLONG t0 = qpc();
+        EnterCriticalSection(&g_q_lock);
+        if (g_q_get == g_q_put) {
+            g_q_busy = 0;
+            LeaveCriticalSection(&g_q_lock);
+            return;
+        }
+        k.dma_instance = g_q_inst;
+        k.get = g_q_get;
+        k.put = g_q_put;
+        LeaveCriticalSection(&g_q_lock);
+        EnterCriticalSection(&g_pg_lock);
+        g_pb.cur = k.get;
+        g_q_running = 1;
+        kick_body(&k);
+        g_perf.call += qpc() - t0;
+        LeaveCriticalSection(&g_pg_lock);
+        EnterCriticalSection(&g_q_lock);
+        g_q_running = 0;
+        g_q_get = k.put; /* tramo hecho: GET llega a PUT */
+        LeaveCriticalSection(&g_q_lock);
+        if (InterlockedExchange(&g_pace_pending, 0))
+            pace();
+    }
+}
+
+uint32_t pgraph_patt_color0(void) { return (uint32_t)g_patt_color0; }
+
+uint32_t pgraph_fifo_get(uint32_t fallback) {
+    uint32_t get;
+    if (!g_gl || !g_q_started)
+        return fallback;
+    EnterCriticalSection(&g_q_lock);
+    /* Mientras consume, la posición real (como el GET del hardware): D3D_BlockOnTime decide
+     * con ella dónde parchear una espera, y un GET atrasado le haría parchear lo ya pasado. */
+    get = g_q_busy && g_q_running ? g_pb.cur : g_q_get;
+    LeaveCriticalSection(&g_q_lock);
+    return get;
+}
+
+void pgraph_fifo_set_get(uint32_t get) {
+    if (!g_gl)
+        return;
+    for (;;) { /* D3D solo mueve GET con el pusher parado: se espera a que acabe lo que haya */
+        EnterCriticalSection(&g_q_lock);
+        if (!g_q_busy) {
+            g_q_get = get;
+            LeaveCriticalSection(&g_q_lock);
+            return;
+        }
+        LeaveCriticalSection(&g_q_lock);
+        Sleep(0);
+    }
+}
+
 uint32_t pgraph_kick(uint32_t dma_instance, uint32_t get, uint32_t put) {
     kick_args_t k;
     LONGLONG t_kick = qpc();
+    if (g_gl) { /* asíncrono: se apunta el nuevo PUT y el hilo de render lo consume */
+        int post = 0;
+        EnterCriticalSection(&g_q_lock);
+        if (!g_q_started) {
+            g_q_get = get;
+            g_q_started = 1;
+        }
+        g_q_inst = dma_instance;
+        g_q_put = put;
+        if (!g_q_busy && g_q_get != g_q_put) {
+            g_q_busy = 1;
+            post = 1;
+        }
+        get = g_q_get;
+        LeaveCriticalSection(&g_q_lock);
+        if (post)
+            pgl_post(kick_worker, NULL);
+        g_perf.kick += qpc() - t_kick;
+        return get;
+    }
     k.dma_instance = dma_instance;
     k.get = get;
     k.put = put;
@@ -1234,10 +1341,7 @@ uint32_t pgraph_kick(uint32_t dma_instance, uint32_t get, uint32_t put) {
     {
         LONGLONG t_call = qpc();
         g_perf.lockwait += t_call - t_kick;
-        if (g_gl)
-            pgl_call(kick_body, &k); /* todo GL en el hilo de render (ver pgraph_gl.c) */
-        else
-            kick_body(&k);
+        kick_body(&k); /* rasterizador por software: síncrono */
         g_perf.call += qpc() - t_call;
     }
     g_perf.kick += qpc() - t_kick;
@@ -1256,6 +1360,7 @@ void pgraph_vblank(uint32_t count) {
 int pgraph_init(const char *log_path) {
     char *dot;
     InitializeCriticalSection(&g_pg_lock);
+    InitializeCriticalSection(&g_q_lock);
     if (fopen_s(&g_pg, log_path, "wb") || !g_pg) {
         ngb_log("nv2a: no se puede crear el log de PGRAPH %s", log_path);
         g_pg = NULL;
@@ -1319,9 +1424,9 @@ void pgraph_summary(void) {
         ngb_log("pgraph: última medida: %s", g_perf.last);
     ngb_log("pgraph: %u kicks, %u palabras de datos, %u frames (FLIP_STALL), %u BEGIN_END, "
             "%u DRAW_ARRAYS, %u clears (%u de color), %u semáforos, %u errores del pb, "
-            "%u fixups de push buffer",
+            "%u fixups de push buffer, %u esperas de D3D_BlockOnTime despertadas",
             g_kicks, g_words, g_flips, g_begin_end, g_draw_arrays, g_clears, g_color_clears,
-            g_sem_releases, g_pb.errors, g_pb_fixups);
+            g_sem_releases, g_pb.errors, g_pb_fixups, g_block_wakes);
     ngb_log("pgraph: rasterizador: %u triángulos, %u píxeles escritos; %u primitivas sin dibujar "
             "(%u con posición no XYZRHW, %u sin superficie, %u puntos/líneas); %u DRAW_ARRAYS y "
             "ARRAY_ELEMENT sin dibujar",

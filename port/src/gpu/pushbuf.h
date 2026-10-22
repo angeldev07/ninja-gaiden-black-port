@@ -37,6 +37,7 @@ typedef struct pb_state {
     uint32_t return_get; /* GET al que vuelve el RETURN */
     uint32_t words;      /* palabras consumidas en total */
     uint32_t errors;
+    volatile uint32_t cur; /* GET en curso (la siguiente palabra a leer), para otros hilos */
 } pb_state_t;
 
 typedef struct pb_callbacks {
