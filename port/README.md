@@ -40,8 +40,8 @@ sintéticos y se salta si no existe `build\port\ngb-loader.exe` (o `NGB_LOADER`)
 |---|---|
 | `build.cmd` | Compilación x86 con MSVC: `ngb-core.dll` y el exe stub. |
 | `src/loader_stub.c` | `ngb-loader.exe`: base fija `0x10000` y BSS `.xbox` que reserva la imagen del XBE; carga `ngb-core.dll`. |
-| `launcher/launcher.c` | `ngb-launcher.exe`: launcher gráfico (Win32 + GDI, sin dependencias). Ajustes en `ngb.ini` junto al exe; PLAY lanza el loader con las opciones elegidas. |
-| `res/` | Recursos: `ngb.ico` (shuriken original, lo genera `make_icon.py` con solo la stdlib), `ngb.rc` (icono y versión de loader y core) y `version.h`. |
+| `launcher/` | `ngb-launcher.exe`: launcher gráfico (Win32 + GDI, sin dependencias), inglés y español. `launcher.c` (páginas y lógica; ajustes en `ngb.ini` junto al exe; PLAY lanza el loader con `NGB_DATA`), `ui.c` (widgets), `art.c` (arte original procedural), `import.c` (importar el juego del usuario en un hilo), `xdvdfs.c` (lector/extractor XDVDFS de imágenes `.iso`), `strings.h` (tabla EN/ES). |
+| `res/` | Recursos: `ngb.ico` (shuriken cromado con tajo rojo, original; lo genera `make_icon.py` con solo la stdlib), `ngb.rc` (icono y versión de loader y core) y `version.h`. |
 | `src/main.c` | `ngb_main`: argumentos, carga, thunk, hilo de arranque y vigilante (timeout, inactividad, fin). |
 | `src/xbe.c`, `xbe.h` | Parseo mínimo: cabecera, secciones, TLS y des-XOR (retail/debug) del entry y del thunk. |
 | `src/memory.c` | Mapa de la imagen, cabecera PE sombra, arena contigua en `0x80000000`, kernel PE falso, thunk. |

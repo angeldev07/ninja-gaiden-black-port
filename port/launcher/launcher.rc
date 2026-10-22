@@ -1,4 +1,4 @@
-/* launcher.rc: icono, manifiesto (DPI del sistema) y versión de ngb-launcher.exe. */
+/* launcher.rc: icon, manifest (system DPI) and version of ngb-launcher.exe. */
 #include <winver.h>
 #include "version.h"
 

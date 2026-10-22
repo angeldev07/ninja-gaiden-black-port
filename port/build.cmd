@@ -85,9 +85,14 @@ cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\gfx_test.pdb" /Fe"%OUT%\gfx_test.exe"
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\gl_test.pdb" /Fe"%OUT%\gl_test.exe" "%PORT%tests\gl_test.c" "%SRC%\gl\glbackend.c" "%SRC%\gl\glload.c" "%SRC%\gl\glpng.c" "%SRC%\gl\texconv.c" "%SRC%\gl\glstate.c" "%SRC%\shaders\vsh.c" "%SRC%\shaders\psh.c" "%SRC%\shaders\emit.c" opengl32.lib user32.lib gdi32.lib || exit /b 1
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\texconv_test.pdb" /Fe"%OUT%\texconv_test.exe" "%PORT%tests\texconv_test.c" "%SRC%\gl\texconv.c" "%SRC%\gl\glstate.c" "%SRC%\gl\glbackend.c" "%SRC%\gl\glload.c" opengl32.lib user32.lib gdi32.lib && "%OUT%\texconv_test.exe" || exit /b 1
 
+rem 5a) Prueba del lector XDVDFS del launcher (imágenes sintéticas, sin datos del juego).
+cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\xdvdfs_test.pdb" /Fe"%OUT%\xdvdfs_test.exe" "%PORT%tests\xdvdfs_test.c" "%PORT%launcher\xdvdfs.c" || exit /b 1
+"%OUT%\xdvdfs_test.exe" || exit /b 1
+
 rem 5) ngb-launcher.exe: el launcher gráfico (Win32 + GDI, sin dependencias). Ver launcher\launcher.c.
 rc /nologo /I"%PORT%res" /I"%PORT%launcher" /fo"%OUT%\obj\launcher.res" "%PORT%launcher\launcher.rc" || exit /b 1
-cl %CFLAGS% /I"%PORT%res" /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\launcher.pdb" /Fe"%OUT%\ngb-launcher.exe" "%PORT%launcher\launcher.c" "%OUT%\obj\launcher.res" ^
-  /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib shell32.lib comdlg32.lib advapi32.lib || exit /b 1
+cl %CFLAGS% /I"%PORT%res" /I"%PORT%launcher" /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\launcher.pdb" /Fe"%OUT%\ngb-launcher.exe" ^
+  "%PORT%launcher\launcher.c" "%PORT%launcher\ui.c" "%PORT%launcher\art.c" "%PORT%launcher\import.c" "%PORT%launcher\xdvdfs.c" "%OUT%\obj\launcher.res" ^
+  /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib shell32.lib comdlg32.lib advapi32.lib ole32.lib || exit /b 1
 echo build: %OUT%\ngb-loader.exe + ngb-core.dll + ngb-launcher.exe
 endlocal

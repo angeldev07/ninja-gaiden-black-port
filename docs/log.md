@@ -415,3 +415,16 @@ Detalle en [[gpu-nv2a]].
 - `system.dat` está cifrado.
 - Herramienta nueva: `--dump-ram FRAMES` / F10, que vuelca la RAM del juego para comparar estados.
 - Detalle en [[mods]].
+
+## [2026-10-22] feat | Launcher v2: estética Ninja Gaiden propia, inglés y español, importar la ISO
+- **Arte:** procedural y original (letras cromadas propias, niebla roja, líneas de velocidad, shuriken con tajo
+  rojo) y un icono nuevo. El logo oficial no se usa: es arte con marca registrada.
+- **Idiomas:** inglés y español, por defecto el de Windows, con un selector guardado en `ngb.ini`.
+- **Importar el juego:** desde una imagen XISO o Redump (lector XDVDFS propio en `port/launcher/xdvdfs.c`, con la
+  partición en `0x18300000` en Redump) o desde una carpeta extraída. Valida el título del certificado del XBE.
+- **Prueba de la importación:** con la XISO real, 249 archivos (6,3 GB) en 6,7 s, idénticos byte a byte a
+  `NGB_DATA\game`. Las ISO de otros juegos dan un error claro. El diseño Redump se probó con una imagen
+  construida a mano.
+- **Carpeta de datos:** la de `ngb.ini`, luego `NGB_DATA`, luego `%USERPROFILE%\ngb-data` si ya trae el juego, y si
+  no `%LOCALAPPDATA%\NGBPort`. PLAY pasa `NGB_DATA` al loader.
+- Lo hizo un subagente (Sonnet) en un worktree; lo revisó e integró el líder.

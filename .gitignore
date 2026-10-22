@@ -55,3 +55,6 @@ docs/.trash/
 *.pdb
 *.ilk
 *.obj
+
+# Worktrees y estado local de Claude Code
+.claude/
