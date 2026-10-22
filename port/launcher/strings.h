@@ -36,6 +36,8 @@
     X(SUM_SOFT, L"Software", L"Software")                                                        \
     X(SUM_FPS60, L"60 fps", L"60 fps")                                                           \
     X(SUM_NOFPS, L"Unlimited fps", L"Sin límite de fps")                                         \
+    X(SUM_FULL, L"Fullscreen", L"Pantalla completa")                                             \
+    X(SUM_WIDE, L"16:9", L"16:9")                                                                \
     X(SUM_MUTED, L"Muted", L"Silenciado")                                                        \
     X(SUM_SOUND, L"Sound on", L"Con sonido")                                                     \
     /* play page */                                                                              \
@@ -120,11 +122,25 @@
     X(GFX_R_AUTO, L"Automatic", L"Automático")                                                   \
     X(GFX_R_GL, L"OpenGL 4.x", L"OpenGL 4.x")                                                    \
     X(GFX_R_SOFT, L"Software (rasteriser)", L"Software (rasterizador)")                          \
+    X(GFX_SCALE, L"Internal resolution", L"Resolución interna")                                  \
+    X(GFX_SCALE_DESC, L"Draws the game above the Xbox's 720x480: sharper edges and textures. \"Match my screen\" covers your monitor pixel for pixel. OpenGL only.", \
+      L"Dibuja el juego por encima de los 720x480 de la Xbox: bordes y texturas más nítidos. \"Ajustar a mi pantalla\" cubre tu monitor píxel a píxel. Solo con OpenGL.") \
+    X(GFX_SCALE_AUTO, L"Match my screen (%dx%d)", L"Ajustar a mi pantalla (%dx%d)")             \
+    X(GFX_SCALE_1, L"1x native (720x480)", L"1x nativa (720x480)")                               \
+    X(GFX_SCALE_2, L"2x (1440x960)", L"2x (1440x960)")                                           \
+    X(GFX_SCALE_3, L"3x (2160x1440)", L"3x (2160x1440)")                                         \
+    X(GFX_SCALE_4, L"4x (2880x1920)", L"4x (2880x1920)")                                         \
+    X(GFX_FULL, L"Fullscreen", L"Pantalla completa")                                             \
+    X(GFX_FULL_DESC, L"Borderless, over the whole monitor. Alt+Enter switches between fullscreen and window while playing.", \
+      L"Sin bordes, ocupando todo el monitor. Alt+Enter alterna entre pantalla completa y ventana mientras juegas.") \
+    X(GFX_WIDE, L"Widescreen (16:9)", L"Panorámico (16:9)")                                       \
+    X(GFX_WIDE_DESC, L"Tells the game the TV is 16:9, like the Xbox dashboard setting: it widens the view and fills a 16:9 screen with no bars. Menus drawn for 4:3 look stretched, as on the console.", \
+      L"Le dice al juego que la tele es 16:9, como el ajuste del dashboard de la Xbox: abre el campo de visión y llena una pantalla 16:9 sin bandas. Los menús dibujados para 4:3 se ven estirados, como en la consola.") \
     X(GFX_FPS, L"Limit to 60 fps", L"Limitar a 60 fps")                                          \
     X(GFX_FPS_DESC, L"Each frame waits for the next 1/60 s, like on the Xbox. Turn it off to see the most your PC can do.", \
       L"Cada frame espera al siguiente 1/60 s, como en la Xbox. Desactívalo para ver el máximo que da tu equipo.") \
-    X(GFX_NOTE, L"The game window opens centred and can be resized: the picture keeps its 4:3 shape with black bars. F12 saves a screenshot to runs\\shots.", \
-      L"La ventana del juego se abre centrada y se puede redimensionar: la imagen mantiene el aspecto 4:3 con bandas negras. F12 guarda una captura en runs\\shots.") \
+    X(GFX_NOTE, L"Without widescreen the game is 4:3: on a 16:9 screen the picture fills the height with black bars at the sides. F12 saves a screenshot to runs\\shots.", \
+      L"Sin panorámico el juego es 4:3: en una pantalla 16:9 la imagen llena el alto con bandas negras a los lados. F12 guarda una captura en runs\\shots.") \
     /* audio */                                                                                  \
     X(AUD_SUB, L"Sound output of the game.", L"Salida de sonido del juego.")                     \
     X(AUD_SECTION, L"Sound", L"Sonido")                                                          \

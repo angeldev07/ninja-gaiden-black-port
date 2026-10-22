@@ -15,6 +15,13 @@
  * this way a surface can be sampled as a texture with the same coordinates as
  * a texture uploaded from RAM, and the present flips it when copying it to the window.
  *
+ * Internal resolution (--scale S, fractional allowed: auto gives 2.25 on a 1080p monitor). Surface
+ * textures are S times the size the game programmed and the viewport, scissors and copies follow; everything the game sees stays native: the
+ * surfaceSize uniform (the vertex programs output native pixels and the shader turns them into
+ * NDC, which does not depend on S), the 1/width of render-to-texture on linear textures (native
+ * texel coordinates) and the cache sizes in bytes. Nothing reads a surface back into the
+ * guest's RAM, so the game cannot tell.
+ *
  * Shaders. Vertex programs (0x0B00 + LOAD/START) are translated with nv2a_vsh_to_glsl and
  * the register combiners with nv2a_psh_to_glsl; in fixed transform mode its own
  * shader with the composite matrix (0x0680) is used. They are cached by the hash of the
@@ -44,6 +51,8 @@
 #define GL_MIRRORED_REPEAT_ 0x8370
 #define GL_CLAMP_TO_BORDER_ 0x812D
 #define GL_TEXTURE_CUBE_MAP_SEAMLESS_ 0x884F
+#define GL_TEXTURE_MAX_ANISOTROPY_ 0x84FE
+#define GL_MAX_TEXTURE_MAX_ANISOTROPY_ 0x84FF
 
 #define MAX_PROGRAMS 256
 #define SHADER_TEXT 65536
@@ -93,8 +102,12 @@ static struct {
     volatile LONG active;
     HWND hwnd;
     HDC dc;
-    GLuint fbo, read_fbo, vao, vbo, ebo, copy_tex;
+    GLuint fbo, read_fbo, blit_fbo, vao, vbo, ebo, copy_tex;
     uint32_t copy_w, copy_h;
+    float scale;      /* S: surfaces at S times their native size (--scale; may be fractional) */
+    float anisotropy; /* maximum anisotropy for the mipmapped textures (1 = off) */
+    GLuint present_prog; /* scaled surface -> window with a box filter (0 = plain blit) */
+    GLint u_present_step;
     rc_surfaces surf;
     rc_textures tex;
     uint32_t color_addr, zeta_addr; /* current target (0 = none) */
@@ -128,6 +141,10 @@ static struct {
     uint32_t ww_buf[RC_DIRTY_PAGES];
     rc_dirty dirty;
 } R;
+
+/* A native size or coordinate in the scaled surfaces. A span [a, b) maps to [px(a), px(b)), so
+ * neighbouring scissors and viewports still meet exactly at fractional scales. */
+static GLint px(uint32_t v) { return (GLint)((float)v * R.scale + 0.5f); }
 
 /* Breakdown of the draw with QPC (pgl_perf_take): where the time of each draw goes. */
 enum { PF_TARGET, PF_INDEX, PF_PROG, PF_STATE, PF_TEX, PF_UNIF, PF_VERT, PF_DRAW, PF_FLIP, PF_WATCH, PF_N };
@@ -196,13 +213,58 @@ static void *grow(void *p, size_t *cap, size_t need) {
 
 /* ---------------------------------------------------------------- render thread ---- */
 
+/* Present: a triangle that covers the destination rectangle. When the surface is larger than
+ * the rectangle (4x on a 1080p screen: 2880x1920 into 1440x1080) a bilinear blit would skip
+ * texels and shimmer; four bilinear taps at a quarter of the footprint average it like a box
+ * filter (exactly 2x2 texels at a 2:1 ratio). Surface row 0 is the top one, hence the flip. */
+static const char k_present_vs[] =
+    "#version 400\n"
+    "out vec2 uv;\n"
+    "void main() {\n"
+    "    vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);\n"
+    "    uv = vec2(p.x, 1.0 - p.y);\n"
+    "    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);\n"
+    "}\n";
+static const char k_present_fs[] =
+    "#version 400\n"
+    "in vec2 uv;\n"
+    "uniform sampler2D src;\n"
+    "uniform vec2 tap;\n"
+    "out vec4 color;\n"
+    "void main() {\n"
+    "    color = 0.25 * (texture(src, uv - tap) + texture(src, uv + tap) +\n"
+    "                    texture(src, uv + vec2(tap.x, -tap.y)) + texture(src, uv + vec2(-tap.x, tap.y)));\n"
+    "    color.a = 1.0;\n"
+    "}\n";
+
 static int setup_objects(void) {
     ngl_glGenFramebuffers(1, &R.fbo);
     ngl_glGenFramebuffers(1, &R.read_fbo);
+    ngl_glGenFramebuffers(1, &R.blit_fbo);
     ngl_glGenVertexArrays(1, &R.vao);
     ngl_glGenBuffers(1, &R.vbo);
     ngl_glGenBuffers(1, &R.ebo);
     glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS_);
+    glPointSize(R.scale); /* points cover the same area of the picture at any scale */
+    /* 16x anisotropic filtering (core in GL 4.6; without it the query fails and it stays off). */
+    R.anisotropy = 1.0f;
+    glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_, &R.anisotropy);
+    if (glGetError() != GL_NO_ERROR || R.anisotropy < 1.0f)
+        R.anisotropy = 1.0f;
+    if (R.anisotropy > 16.0f)
+        R.anisotropy = 16.0f;
+    {
+        char log[512];
+        unsigned prog = 0;
+        if (!glb_compile(k_present_vs, k_present_fs, &prog, log, sizeof log)) {
+            R.present_prog = prog;
+            R.u_present_step = ngl_glGetUniformLocation(prog, "tap");
+            ngl_glUseProgram(prog);
+            ngl_glUniform1i(ngl_glGetUniformLocation(prog, "src"), 0);
+            ngl_glUseProgram(0);
+        } else
+            ngb_log("pgraph gl: present shader failed, using a plain blit: %s", log);
+    }
     R.ww_ok = ngb_contig_written(R.ww_buf, RC_DIRTY_PAGES) != (size_t)-1;
     R.swap_interval = (swap_interval_fn)(void *)wglGetProcAddress("wglSwapIntervalEXT");
     if (R.swap_interval)
@@ -236,6 +298,28 @@ int pgl_start(HWND hwnd, char *why, size_t whylen) {
         return GLB_ERR_ARGS;
     }
     R.hwnd = hwnd;
+    R.scale = g_ngb_opts.scale >= 1.0f && g_ngb_opts.scale <= 4.0f ? g_ngb_opts.scale : 1.0f;
+    if (g_ngb_opts.scale_auto) {
+        /* At least as many pixels as the picture covers on the monitor, on both axes: 4:3 on
+         * 1080p is 1440x1080, so 1080 / 480 = 2.25 (1620x1080); 16:9 is 1920x1080, so
+         * 1920 / 720 = 2.67 (1920x1280). */
+        MONITORINFO mi;
+        memset(&mi, 0, sizeof mi);
+        mi.cbSize = sizeof mi;
+        if (GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY), &mi)) {
+            float a = g_ngb_opts.widescreen ? 16.0f / 9.0f : 4.0f / 3.0f;
+            float mw = (float)(mi.rcMonitor.right - mi.rcMonitor.left);
+            float mh = (float)(mi.rcMonitor.bottom - mi.rcMonitor.top);
+            float pw = mh * a < mw ? mh * a : mw, ph = pw / a;
+            R.scale = pw / 720.0f > ph / 480.0f ? pw / 720.0f : ph / 480.0f;
+        }
+        if (R.scale < 1.0f)
+            R.scale = 1.0f;
+        if (R.scale > 4.0f)
+            R.scale = 4.0f;
+    }
+    ngb_log("pgraph gl: internal resolution %dx%d (scale %.2f%s)", px(720), px(480), (double)R.scale,
+            g_ngb_opts.scale_auto ? ", matching the monitor" : "");
     rdoc_load(g_ngb_opts.rdoc_frame, g_ngb_opts.rdoc_key); /* before creating the GL context */
     R.req = CreateEventA(NULL, FALSE, FALSE, NULL);
     R.done = CreateEventA(NULL, FALSE, FALSE, NULL);
@@ -379,9 +463,10 @@ static void apply_state(const pgl_regs *r, gl_state *out) {
      * glstate.c). */
     glEnable(GL_SCISSOR_TEST);
     if (ch >> 16 && cv >> 16)
-        glScissor((GLint)(ch & 0xFFFF), (GLint)(cv & 0xFFFF), (GLsizei)(ch >> 16), (GLsizei)(cv >> 16));
+        glScissor(px(ch & 0xFFFF), px(cv & 0xFFFF), px((ch & 0xFFFF) + (ch >> 16)) - px(ch & 0xFFFF),
+                  px((cv & 0xFFFF) + (cv >> 16)) - px(cv & 0xFFFF));
     else
-        glScissor(0, 0, (GLsizei)R.target_w, (GLsizei)R.target_h);
+        glScissor(0, 0, px(R.target_w), px(R.target_h));
     R.last_state = s;
     R.last_gl = *out;
     R.state_valid = 1;
@@ -431,26 +516,52 @@ void pgl_kick_begin(void) {
     /* Reserved: the write watch is collected at the flip (see scan_written_pages). */
 }
 
-/* Creates a surface's texture. If it is a 32-bit linear color one, it is initialized with
- * whatever is in RAM (the game may have written it with the CPU). */
+/* Uploads a native-size picture from RAM into the scaled texture `t` (the upload goes to a
+ * temporary texture and a blit stretches it, nearest so that it stays the same picture). */
+static void upload_scaled(GLuint t, const rc_surface *s, const uint8_t *src) {
+    GLuint tmp;
+    GLint sw = (GLint)s->width, sh = (GLint)s->height;
+    glGenTextures(1, &tmp);
+    glBindTexture(GL_TEXTURE_2D, tmp);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, sw, sh, 0, GL_BGRA, GL_UNSIGNED_BYTE, src);
+    ngl_glBindFramebuffer(GL_READ_FRAMEBUFFER, R.read_fbo);
+    ngl_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tmp, 0);
+    ngl_glBindFramebuffer(GL_DRAW_FRAMEBUFFER, R.blit_fbo);
+    ngl_glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t, 0);
+    glDisable(GL_SCISSOR_TEST); /* the blit obeys the scissor */
+    R.state_valid = 0;
+    ngl_glBlitFramebuffer(0, 0, sw, sh, 0, 0, px(s->width), px(s->height), GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    ngl_glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+    ngl_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+    ngl_glBindFramebuffer(GL_FRAMEBUFFER, R.fbo);
+    glDeleteTextures(1, &tmp);
+    glBindTexture(GL_TEXTURE_2D, t);
+}
+
+/* Creates a surface's texture, at S times its size. If it is a 32-bit linear color one, it is
+ * initialized with whatever is in RAM (the game may have written it with the CPU). */
 static void create_surface_texture(rc_surface *s, uint32_t pitch, int swizzled) {
     GLuint t;
+    GLsizei w = px(s->width), h = px(s->height);
     glGenTextures(1, &t);
     glBindTexture(GL_TEXTURE_2D, t);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
     if (s->kind == RC_ZETA) {
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, (GLsizei)s->width, (GLsizei)s->height, 0,
-                     GL_DEPTH_STENCIL_, GL_UNSIGNED_INT_24_8_, NULL);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, w, h, 0, GL_DEPTH_STENCIL_, GL_UNSIGNED_INT_24_8_,
+                     NULL);
     } else {
         const uint8_t *src = NULL;
         if (!swizzled && color_bpp(s->format) == 4 && pitch >= s->width * 4)
             src = nv2a_phys(s->addr, pitch * s->height);
         glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
         glPixelStorei(0x0CF2 /* GL_UNPACK_ROW_LENGTH */, src ? (GLint)(pitch / 4) : 0);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, (GLsizei)s->width, (GLsizei)s->height, 0, GL_BGRA,
-                     GL_UNSIGNED_BYTE, src);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_BGRA, GL_UNSIGNED_BYTE,
+                     R.scale == 1.0f ? src : NULL);
+        if (src && R.scale != 1.0f)
+            upload_scaled(t, s, src);
         glPixelStorei(0x0CF2, 0);
     }
     s->gl_tex = t;
@@ -537,9 +648,9 @@ static int bind_target(const pgl_regs *r, int need_color, int need_zeta) {
     R.zeta_addr = z ? zaddr : 0;
     R.has_color = c != NULL;
     R.has_zeta = z != NULL;
-    R.target_w = w;
+    R.target_w = w; /* native: they feed surfaceSize and the scissor */
     R.target_h = h;
-    glViewport(0, 0, (GLsizei)w, (GLsizei)h);
+    glViewport(0, 0, px(w), px(h));
     if (c && (ch >> 16) == 720)
         R.present_addr = caddr; /* the buffer that will end up on screen (like the rasterizer) */
     return 1;
@@ -588,24 +699,28 @@ static void upload_levels(GLuint t, const texconv_desc *d, const uint8_t *data) 
     }
     glTexParameteri(target, GL_TEXTURE_BASE_LEVEL, 0);
     glTexParameteri(target, GL_TEXTURE_MAX_LEVEL, d->levels - 1);
+    /* Only with mipmaps: there it sharpens floors and walls seen at an angle; on a single level
+     * (HUD, fonts, video) it would only blur. */
+    if (d->levels > 1 && R.anisotropy > 1.0f)
+        glTexParameterf(target, GL_TEXTURE_MAX_ANISOTROPY_, R.anisotropy);
 }
 
 /* Copies the current color surface to a separate texture: the game is reading it as a
  * texture while drawing into it, and GL does not allow that loop. */
 static GLuint feedback_copy(rc_surface *s) {
+    GLsizei w = px(s->width), h = px(s->height);
     if (!R.copy_tex || R.copy_w != s->width || R.copy_h != s->height) {
         if (!R.copy_tex)
             glGenTextures(1, &R.copy_tex);
         glBindTexture(GL_TEXTURE_2D, R.copy_tex);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, (GLsizei)s->width, (GLsizei)s->height, 0, GL_BGRA,
-                     GL_UNSIGNED_BYTE, NULL);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_BGRA, GL_UNSIGNED_BYTE, NULL);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
         R.copy_w = s->width;
         R.copy_h = s->height;
     }
     glBindTexture(GL_TEXTURE_2D, R.copy_tex);
     ngl_glBindFramebuffer(GL_READ_FRAMEBUFFER, R.fbo);
-    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, (GLsizei)s->width, (GLsizei)s->height);
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
     R.feedback_copies++;
     return R.copy_tex;
 }
@@ -1621,15 +1736,16 @@ static void trace_draw(const pgl_regs *r, const pgl_draw_t *d, uint32_t n_idx, u
         rc_surface *c = rc_surface_find(&R.surf, RC_COLOR, R.color_addr);
         uint8_t *buf;
         char path[MAX_PATH + 32];
-        if (!c || !c->gl_tex || !(buf = (uint8_t *)malloc((size_t)c->width * c->height * 4)))
+        int sw = c ? px(c->width) : 0, sh = c ? px(c->height) : 0;
+        if (!c || !c->gl_tex || !(buf = (uint8_t *)malloc((size_t)sw * sh * 4)))
             return;
         ngl_glBindFramebuffer(GL_READ_FRAMEBUFFER, R.read_fbo);
         ngl_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, c->gl_tex, 0);
         glPixelStorei(GL_PACK_ALIGNMENT, 4);
-        glReadPixels(0, 0, (GLsizei)c->width, (GLsizei)c->height, GL_BGRA, GL_UNSIGNED_BYTE, buf);
+        glReadPixels(0, 0, sw, sh, GL_BGRA, GL_UNSIGNED_BYTE, buf);
         ngl_glBindFramebuffer(GL_READ_FRAMEBUFFER, R.fbo);
         snprintf(path, sizeof path, "%s-d%04u.png", prefix, k);
-        gfx_write_png(path, buf, (int)c->width, (int)c->height);
+        gfx_write_png(path, buf, sw, sh);
         free(buf);
     }
 }
@@ -1742,7 +1858,7 @@ void pgl_clear(const pgl_regs *r, uint32_t flags) {
     if (x0 > x1 || y0 > y1)
         return;
     glEnable(GL_SCISSOR_TEST);
-    glScissor((GLint)x0, (GLint)y0, (GLsizei)(x1 - x0 + 1), (GLsizei)(y1 - y0 + 1));
+    glScissor(px(x0), px(y0), px(x1 + 1) - px(x0), px(y1 + 1) - px(y0));
     if ((flags & 0xF0) && R.has_color) {
         argb_to_vec4(M(r, 0x1D90), c);
         glColorMask((flags & 0x10) != 0, (flags & 0x20) != 0, (flags & 0x40) != 0, (flags & 0x80) != 0);
@@ -1763,22 +1879,14 @@ void pgl_clear(const pgl_regs *r, uint32_t flags) {
         glClear(bits);
 }
 
-/* Window rectangle with the 4:3 aspect and integer vertical scale (like present.c). */
-static void fit_rect(int cw, int ch, int fh, int out[4]) {
-    int scale = fh > 0 ? ch / fh : 1, dw, dh;
-    if (scale < 1)
-        scale = 1;
-    while (scale > 1 && (fh * scale * 4 + 1) / 3 > cw)
-        scale--;
-    dh = fh * scale;
-    dw = (dh * 4 + 1) / 3;
-    if (dw > cw || dh > ch) {
-        dh = ch;
-        dw = (dh * 4 + 1) / 3;
-        if (dw > cw) {
-            dw = cw;
-            dh = (dw * 3 + 2) / 4;
-        }
+/* Window rectangle with the TV's aspect, as large as the window allows (like present.c): a
+ * 1920x1080 screen shows a 1440x1080 picture at 4:3 and fills itself at 16:9 (--widescreen). */
+static void fit_rect(int cw, int ch, int out[4]) {
+    int an = g_ngb_opts.widescreen ? 16 : 4, ad = g_ngb_opts.widescreen ? 9 : 3;
+    int dh = ch, dw = (dh * an + ad / 2) / ad;
+    if (dw > cw) {
+        dw = cw;
+        dh = (dw * ad + an / 2) / an;
     }
     out[0] = (cw - dw) / 2;
     out[1] = (ch - dh) / 2;
@@ -1792,21 +1900,49 @@ static void dump_surfaces(const char *shot_path) {
     int k;
     for (k = 0; k < RC_MAX_SURFACES; k++) {
         const rc_surface *c = &R.surf.s[k];
+        int sw = px(c->width), sh = px(c->height);
         char path[MAX_PATH];
         uint8_t *buf;
         if (!c->used || c->kind != RC_COLOR || !c->gl_tex)
             continue;
-        buf = (uint8_t *)malloc((size_t)c->width * c->height * 4);
+        buf = (uint8_t *)malloc((size_t)sw * sh * 4);
         if (!buf)
             continue;
         ngl_glBindFramebuffer(GL_READ_FRAMEBUFFER, R.read_fbo);
         ngl_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, c->gl_tex, 0);
         glPixelStorei(GL_PACK_ALIGNMENT, 4);
-        glReadPixels(0, 0, (GLsizei)c->width, (GLsizei)c->height, GL_BGRA, GL_UNSIGNED_BYTE, buf);
+        glReadPixels(0, 0, sw, sh, GL_BGRA, GL_UNSIGNED_BYTE, buf);
         snprintf(path, sizeof path, "%.*s-c%08X.png", (int)(strlen(shot_path) - 4), shot_path, c->addr);
-        gfx_write_png(path, buf, (int)c->width, (int)c->height);
+        gfx_write_png(path, buf, sw, sh);
         free(buf);
     }
+}
+
+/* Diagnostics (NGB_GL_SHOT_WINDOW): the window's back buffer next to the capture, as
+ * <shot>-window.png, to check the present (letterbox and filter) without photographing the screen. */
+static void shot_window(const char *shot_path, int w, int h) {
+    char path[MAX_PATH];
+    uint8_t *buf = w > 0 && h > 0 ? (uint8_t *)malloc((size_t)w * (size_t)h * 4) : NULL;
+    size_t i;
+    if (!buf)
+        return;
+    ngl_glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glReadBuffer(GL_BACK);
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    glReadPixels(0, 0, w, h, GL_BGRA, GL_UNSIGNED_BYTE, buf);
+    for (i = 0; i < (size_t)h / 2; i++) { /* GL rows go bottom-up; the PNG top-down */
+        uint32_t *a = (uint32_t *)buf + i * (size_t)w, *b = (uint32_t *)buf + ((size_t)h - 1 - i) * (size_t)w;
+        int x;
+        for (x = 0; x < w; x++) {
+            uint32_t t = a[x];
+            a[x] = b[x];
+            b[x] = t;
+        }
+    }
+    snprintf(path, sizeof path, "%.*s-window.png", (int)(strlen(shot_path) - 4), shot_path);
+    gfx_write_png(path, buf, w, h);
+    free(buf);
+    ngl_glBindFramebuffer(GL_READ_FRAMEBUFFER, R.read_fbo);
 }
 
 int pgl_flip(const pgl_regs *r, const char *shot_path) {
@@ -1844,23 +1980,52 @@ int pgl_flip(const pgl_regs *r, const char *shot_path) {
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     if (s && s->gl_tex) {
+        GLint sw = px(s->width), sh = px(s->height);
         ngl_glBindFramebuffer(GL_READ_FRAMEBUFFER, R.read_fbo);
         ngl_glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s->gl_tex, 0);
-        fit_rect(client.right, client.bottom, (int)s->height, rect);
-        /* Surface row 0 is the top one: it is flipped when copying to the window. */
-        ngl_glBlitFramebuffer(0, 0, (GLint)s->width, (GLint)s->height, rect[0], client.bottom - rect[1],
-                              rect[2], client.bottom - rect[3], GL_COLOR_BUFFER_BIT, GL_LINEAR);
+        fit_rect(client.right, client.bottom, rect);
+        if (R.present_prog && rect[2] > rect[0] && rect[3] > rect[1]) {
+            float rx = (float)sw / (float)(rect[2] - rect[0]), ry = (float)sh / (float)(rect[3] - rect[1]);
+            float tap[2];
+            /* A quarter of the footprint, in texture coordinates; 0 when magnifying. */
+            tap[0] = rx > 1.0f ? 0.25f * rx / (float)sw : 0.0f;
+            tap[1] = ry > 1.0f ? 0.25f * ry / (float)sh : 0.0f;
+            glDisable(GL_BLEND);
+            glDisable(GL_DEPTH_TEST);
+            glDisable(GL_STENCIL_TEST);
+            glDisable(GL_CULL_FACE);
+            glViewport(rect[0], client.bottom - rect[3], rect[2] - rect[0], rect[3] - rect[1]);
+            ngl_glUseProgram(R.present_prog);
+            R.cur_prog = 0; /* the next draw binds its own program again */
+            ngl_glUniform2fv(R.u_present_step, 1, tap);
+            ngl_glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, s->gl_tex);
+            /* bind_textures sets the game's filter again if it samples this surface. */
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            ngl_glBindVertexArray(R.vao);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+            ngl_glBindVertexArray(0);
+        } else {
+            /* Surface row 0 is the top one: it is flipped when copying to the window. */
+            ngl_glBlitFramebuffer(0, 0, sw, sh, rect[0], client.bottom - rect[1], rect[2], client.bottom - rect[3],
+                                  GL_COLOR_BUFFER_BIT, GL_LINEAR);
+        }
         if (shot_path) {
-            size_t px = (size_t)s->width * s->height;
-            uint8_t *buf = (uint8_t *)malloc(px * 4);
+            size_t n_px = (size_t)sw * (size_t)sh;
+            uint8_t *buf = (uint8_t *)malloc(n_px * 4);
             if (buf) {
                 glPixelStorei(GL_PACK_ALIGNMENT, 4);
-                glReadPixels(0, 0, (GLsizei)s->width, (GLsizei)s->height, GL_BGRA, GL_UNSIGNED_BYTE, buf);
-                result = gfx_write_png(shot_path, buf, (int)s->width, (int)s->height);
+                glReadPixels(0, 0, sw, sh, GL_BGRA, GL_UNSIGNED_BYTE, buf);
+                result = gfx_write_png(shot_path, buf, sw, sh);
                 free(buf);
             }
             if (getenv("NGB_GL_DUMP_SURFACES"))
                 dump_surfaces(shot_path);
+            if (getenv("NGB_GL_SHOT_WINDOW")) /* what the present drew into the window (back buffer) */
+                shot_window(shot_path, client.right, client.bottom);
         }
     }
     SwapBuffers(R.dc);

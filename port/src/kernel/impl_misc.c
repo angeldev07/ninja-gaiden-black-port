@@ -57,7 +57,11 @@ static uint64_t ExQueryNonVolatileSetting(uint32_t *args) {
         switch (index) {
         case 0x0: name = "TIMEZONE_BIAS"; value = 0; break;
         case 0x7: name = "LANGUAGE"; value = EEPROM_LANGUAGE; break;            /* English */
-        case 0x8: name = "VIDEO_FLAGS"; value = 0; break;
+        case 0x8: /* XC_VIDEO_FLAGS_WIDESCREEN (0x10000): the dashboard's 16:9 TV setting. The game
+                   * reads it and renders anamorphic 16:9 (a wider field of view in the same 720x480). */
+            name = "VIDEO_FLAGS";
+            value = g_ngb_opts.widescreen ? 0x10000u : 0;
+            break;
         case 0x9: name = "AUDIO_FLAGS"; value = 0; break;         /* stereo */
         case 0xA: name = "PARENTAL_CONTROL_GAMES"; value = 0; break;
         case 0xB: name = "PARENTAL_CONTROL_PASSWORD"; value = 0; break;

@@ -7,10 +7,14 @@
  *   - The window's: message loop, WM_PAINT (StretchDIBits of the back buffer), F12
  *     (PNG capture) and the title with the FPS.
  *
- * Scaling: the frame is painted with an integer height (1x, 2x...) and the width that the
- * aspect asks for (4:3 or 16:9), centered and with black bars. The Xbox 720x480 is not
- * square pixels: at 4:3 they show as 640x480 for each 1x of height. If the window is smaller
- * than 1x, it shrinks to fit.
+ * Scaling: the frame fills the window's height (or its width, if that is the narrower
+ * side) with the width that the aspect asks for (4:3 or 16:9), centered and with black bars.
+ * The Xbox 720x480 is not square pixels: at 4:3 they show as 640x480 for each 1x of height,
+ * so a 1920x1080 screen shows a 1440x1080 picture; at 16:9 (the game's anamorphic widescreen)
+ * it fills the whole screen.
+ *
+ * Fullscreen: borderless, covering the monitor the window is on (cfg.fullscreen at start,
+ * Alt+Enter toggles it). The cursor is hidden over the picture while in fullscreen.
  *
  * PNG: signature, IHDR (8-bit RGB), IDAT with zlib in "stored" blocks (no compression,
  * with Adler-32) and IEND, each chunk with its CRC-32. It is written to `<path>.part` and
@@ -47,6 +51,8 @@ static struct {
     volatile LONG should_close;
     volatile LONG external; /* 1: another thread draws with OpenGL (H7c); GDI does not paint */
     int init_ok;
+    int fullscreen;              /* 1: borderless over the whole monitor */
+    WINDOWPLACEMENT windowed_at; /* where the window was before going fullscreen */
     DWORD fps_tick;
     unsigned fps_frames;
     double fps;
@@ -338,24 +344,14 @@ int gfx_screenshot(const char *path, char *out_path, size_t out_len) {
 
 static double aspect_ratio(void) { return g.cfg.aspect == GFX_ASPECT_16_9 ? 16.0 / 9.0 : 4.0 / 3.0; }
 
-/* Destination rectangle: integer height (k x frame height) and width according to the aspect. */
-static RECT display_rect(int cw, int ch, int fh) {
+/* Destination rectangle: as large as the window allows, with the width the aspect asks for. */
+static RECT display_rect(int cw, int ch) {
     RECT r;
     double a = aspect_ratio();
-    int scale = fh > 0 ? ch / fh : 1, dw, dh;
-    if (scale < 1)
-        scale = 1;
-    while (scale > 1 && (int)(fh * scale * a + 0.5) > cw)
-        scale--;
-    dh = fh * scale;
-    dw = (int)(dh * a + 0.5);
-    if (dw > cw || dh > ch) { /* window smaller than 1x: shrink to fit */
-        dh = ch;
-        dw = (int)(dh * a + 0.5);
-        if (dw > cw) {
-            dw = cw;
-            dh = (int)(dw / a + 0.5);
-        }
+    int dh = ch, dw = (int)(dh * a + 0.5);
+    if (dw > cw) {
+        dw = cw;
+        dh = (int)(dw / a + 0.5);
     }
     r.left = (cw - dw) / 2;
     r.top = (ch - dh) / 2;
@@ -373,7 +369,7 @@ static void paint(HWND hwnd) {
     EnterCriticalSection(&g.lock);
     if (g.frame && g.frame_w > 0 && g.frame_h > 0) {
         BITMAPINFO bmi;
-        dst = display_rect(client.right, client.bottom, g.frame_h);
+        dst = display_rect(client.right, client.bottom);
         memset(&bmi, 0, sizeof bmi);
         bmi.bmiHeader.biSize = sizeof bmi.bmiHeader;
         bmi.bmiHeader.biWidth = g.frame_w;
@@ -405,13 +401,55 @@ static void update_title(HWND hwnd) {
     EnterCriticalSection(&g.lock);
     fps = g.fps;
     LeaveCriticalSection(&g.lock);
-    swprintf(text, sizeof text / sizeof text[0], L"%ls  ·  %.1f fps  ·  F12: screenshot", g.title, fps);
+    swprintf(text, sizeof text / sizeof text[0], L"%ls  ·  %.1f fps  ·  F12: screenshot  ·  Alt+Enter: fullscreen",
+             g.title, fps);
     SetWindowTextW(hwnd, text);
+}
+
+/* Borderless fullscreen on the window's monitor, or back to the window it was. */
+static void set_fullscreen(HWND hwnd, int on) {
+    LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+    if (on && !g.fullscreen) {
+        MONITORINFO mi;
+        memset(&mi, 0, sizeof mi);
+        mi.cbSize = sizeof mi;
+        g.windowed_at.length = sizeof g.windowed_at;
+        if (!GetWindowPlacement(hwnd, &g.windowed_at) ||
+            !GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY), &mi))
+            return;
+        SetWindowLongPtrW(hwnd, GWL_STYLE, (style & ~(LONG_PTR)WS_OVERLAPPEDWINDOW) | WS_POPUP);
+        SetWindowPos(hwnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right - mi.rcMonitor.left,
+                     mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+        g.fullscreen = 1;
+    } else if (!on && g.fullscreen) {
+        SetWindowLongPtrW(hwnd, GWL_STYLE, (style & ~(LONG_PTR)WS_POPUP) | WS_OVERLAPPEDWINDOW);
+        SetWindowPlacement(hwnd, &g.windowed_at);
+        SetWindowPos(hwnd, NULL, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+        g.fullscreen = 0;
+    }
 }
 
 static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
     char shot[MAX_PATH];
     switch (msg) {
+    case WM_SYSKEYDOWN:
+        /* Alt+Enter; bit 30 is the auto-repeat of a held key, which must not toggle again */
+        if (wparam == VK_RETURN && (lparam & (1 << 29)) && !(lparam & (1 << 30))) {
+            set_fullscreen(hwnd, !g.fullscreen);
+            return 0;
+        }
+        break;
+    case WM_SYSCHAR:
+        if (wparam == VK_RETURN)
+            return 0; /* no "ding" for Alt+Enter */
+        break;
+    case WM_SETCURSOR:
+        if (g.fullscreen && LOWORD(lparam) == HTCLIENT) {
+            SetCursor(NULL);
+            return TRUE;
+        }
+        break;
     case WM_PAINT:
         if (g.external) {
             ValidateRect(hwnd, NULL); /* the GL render repaints on the next frame */
@@ -517,8 +555,12 @@ static DWORD WINAPI window_thread(LPVOID param) {
     g.hwnd = CreateWindowExW(0, GFX_CLASS, g.title, WS_OVERLAPPEDWINDOW, ox, oy,
                              r.right - r.left, r.bottom - r.top, NULL, NULL, inst, NULL);
     g.init_ok = g.hwnd != NULL;
+    if (g.hwnd && g.cfg.fullscreen && !g.cfg.hidden)
+        set_fullscreen(g.hwnd, 1); /* before showing it, so the framed window never flashes */
     if (g.hwnd)
-        ShowWindow(g.hwnd, g.cfg.hidden ? SW_HIDE : SW_SHOWNORMAL);
+        ShowWindow(g.hwnd, g.cfg.hidden ? SW_HIDE : g.fullscreen ? SW_SHOW : SW_SHOWNORMAL);
+    if (g.hwnd && !g.cfg.hidden)
+        SetForegroundWindow(g.hwnd); /* the launcher allows it (AllowSetForegroundWindow) */
     SetEvent(g.ready);
     if (!g.hwnd)
         return 1;
@@ -549,6 +591,7 @@ int gfx_init_ex(const gfx_config_t *config) {
         config->width > GFX_MAX_DIM || config->height > GFX_MAX_DIM)
         return -1;
     g.cfg = *config;
+    g.fullscreen = 0;
     if (g.cfg.scale < 1)
         g.cfg.scale = 1;
     if (g.cfg.scale > 8)

@@ -500,3 +500,35 @@ Details in [[gpu-nv2a]].
   from that commit. No game data.
 - It is the save point before internal resolution scaling, the next session's work. To return to it:
   `git checkout v0.2.0`.
+
+## [2026-10-22] feat | Internal resolution scaling (`--scale 1-4`) and 16x anisotropic filtering
+- The game looked pixelated and jaggy because the GL render drew at the Xbox's native 720x480. Now `--scale N`
+  draws every surface at N times its size (up to 2880x1920), and the launcher's Graphics page has an "Internal
+  resolution" combo, saved as `[graphics] scale` in `ngb.ini`. Mipmapped game textures get 16x anisotropic filtering.
+- Only the GL side grows. `surfaceSize`, the render-to-texture texel scale and the cache sizes stay native, so the
+  game cannot tell. Details: [[gpu-nv2a]], section "Internal resolution scaling".
+- Checked on the deterministic demo at 1x, 2x and 4x: sharper edges and textures, same lighting, no shadow acne.
+  Pacing holds 60 fps at 2x and 4x on the RX 6600, and the 3D is still CPU-bound. Comparisons are in
+  `NGB_DATA\comparisons\escalado-2026-10-22\`.
+- Pending: the owner's chapter 1 test with the launcher.
+
+## [2026-10-22] feat | 1080p done right: "Match my screen", the picture fills the height, fullscreen
+- The owner asked for 1920x1080, the size of their screen. Three things stood in the way: the scale had to be an
+  integer, the present also scaled by integers (so 1080p only showed 960 rows), and there was no fullscreen.
+- `--scale auto` is now the monitor's height / 480 (2.25: 1620x1080 rendered). The picture fills the height at 4:3
+  (1440x1080 with bars at the sides), downscaled with a box-filter shader instead of a bilinear blit.
+  `--fullscreen` is borderless, and Alt+Enter toggles it. The loader is DPI aware. The launcher defaults to "Match
+  my screen" plus fullscreen.
+- Checked: the auto run logs `internal resolution 1620x1080 (scale 2.25, matching the monitor)` at 60 fps, and
+  the window back buffer (`NGB_GL_SHOT_WINDOW`) shows the supersampled picture the right way up. The game stays
+  4:3; true 16:9 is the H9+ widescreen work. Details in [[gpu-nv2a]].
+
+## [2026-10-22] feat | Native widescreen: `--widescreen` reports a 16:9 TV and the picture fills 16:9
+- The owner found the 4:3 bars ugly on their 16:9 screen. The game reads `XC_VIDEO_FLAGS` at boot, and with
+  `XC_VIDEO_FLAGS_WIDESCREEN` (`0x10000`) it renders anamorphic 16:9 itself: a wider field of view, not a stretch.
+  Before this the kernel always answered 0, which means a 4:3 TV.
+- `--widescreen` sets the flag and presents at 16:9. `--scale auto` now covers the picture on both axes, which gives
+  1920x1280 on 1080p (scale 2.67). The launcher has "Widescreen (16:9)", default on (`[graphics] widescreen`).
+- Checked in the demo: the log shows `VIDEO_FLAGS = 0x10000` and `internal resolution 1920x1280`. The 3D shows more
+  of the scene at the sides with correct proportions, and the window back buffer fills 16:9 with no bars. The 2D
+  title screen is drawn for 4:3 and shows stretched, as on a real Xbox with a widescreen TV. Details in [[gpu-nv2a]].

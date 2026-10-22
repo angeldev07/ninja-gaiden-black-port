@@ -30,7 +30,7 @@ static void usage(void) {
     fprintf(stderr,
             "usage: ngb-loader.exe <path.xbe> [--log FILE] [--max-calls N] [--timeout S]\n"
             "                      [--idle S] [--lenient] [--echo] [--window] [--no-pacing]\n"
-            "                      [--renderer gl|soft]\n"
+            "                      [--renderer gl|soft] [--scale N|auto] [--fullscreen] [--widescreen]\n"
             "                      [--mmio-strict] [--mmio-gpu-ram] [--pgraph-frames N]\n"
             "                      [--log-cap N] [--symbols CSV]\n"
             "                      [--input-script SCRIPT] [--no-host-input]\n"
@@ -43,6 +43,11 @@ static void usage(void) {
             "  --window     open the frame presenter window (H7; F12 = screenshot); --window-hidden: create it without showing it (tests)\n"
             "  --no-pacing  FLIP_STALL does not wait for the next 1/60 s (frames as fast as possible)\n"
             "  --renderer   gl (OpenGL 4.x, default when a context is available) or soft (rasterizer)\n"
+            "  --scale N    internal resolution of the GL render: N times 720x480, 1-4, may be fractional (1);\n"
+            "               auto = match the monitor's height (2.25 on a 1080p screen: 1620x1080)\n"
+            "  --fullscreen borderless fullscreen on the monitor (Alt+Enter toggles it)\n"
+            "  --widescreen tell the game the TV is 16:9: it widens its field of view and the picture\n"
+            "               is shown at 16:9, with no bars on a 16:9 screen\n"
             "  --mmio-strict   stop at the first MMIO or port I/O that is not the modeled NV2A\n"
             "  --mmio-gpu-ram  NV2A as traced RAM instead of the model (H6 exploration)\n"
             "  --pgraph-frames N  frames with all methods in the PGRAPH log (3)\n"
@@ -59,6 +64,17 @@ static void usage(void) {
             "  --input-script  gamepad presses, e.g. \"t=3s:START,t=5s:A@500ms\"\n"
             "                  (\"t=2400p:A@10p\": in gamepad reads, not in ms)\n"
             "  --no-host-input neither PC gamepad nor keyboard: only the script\n");
+}
+
+/* Per-monitor DPI awareness before the window exists. Without it, at 125 % or 150 % Windows
+ * renders the game window at a lower size and stretches the bitmap, which blurs the picture
+ * whatever the internal resolution. Looked up at run time: Windows 10 1703 or later. */
+static void set_dpi_aware(void) {
+    typedef BOOL(WINAPI * set_ctx_fn)(HANDLE);
+    HMODULE user = GetModuleHandleA("user32.dll");
+    set_ctx_fn set_ctx = user ? (set_ctx_fn)(void *)GetProcAddress(user, "SetProcessDpiAwarenessContext") : NULL;
+    if (!set_ctx || !set_ctx((HANDLE)(LONG_PTR)-4 /* DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 */))
+        SetProcessDPIAware();
 }
 
 /* 1 if `path` (or any folder containing it) is inside a git repo: some ancestor has a
@@ -214,6 +230,20 @@ static int parse_args(void) {
             g_ngb_opts.debug_shots = (unsigned)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--dump-ram") && more)
             g_ngb_opts.dump_ram = _strdup(argv[++i]);
+        else if (!strcmp(a, "--scale") && more) {
+            const char *v = argv[++i];
+            if (!strcmp(v, "auto"))
+                g_ngb_opts.scale_auto = 1;
+            else {
+                g_ngb_opts.scale = (float)strtod(v, NULL);
+                if (!(g_ngb_opts.scale >= 1.0f && g_ngb_opts.scale <= 4.0f))
+                    return -1;
+            }
+        }
+        else if (!strcmp(a, "--fullscreen"))
+            g_ngb_opts.fullscreen = 1;
+        else if (!strcmp(a, "--widescreen"))
+            g_ngb_opts.widescreen = 1;
         else if (!strcmp(a, "--no-pacing"))
             g_ngb_opts.no_pacing = 1;
         else if (!strcmp(a, "--renderer") && more) {
@@ -306,17 +336,20 @@ __declspec(dllexport) int __cdecl ngb_main(void) {
      * gpu/raster.c) and it waits for the next 1/60 s (--no-pacing removes that). */
     if (g_ngb_opts.window) {
         gfx_config_t cfg;
+        set_dpi_aware();
         memset(&cfg, 0, sizeof cfg);
         cfg.title = "Ninja Gaiden Black · native port"; /* UTF-8: gfx_init_ex converts it to UTF-16 */
         cfg.width = 720;
         cfg.height = 480;
         cfg.scale = 2;
-        cfg.aspect = GFX_ASPECT_4_3;
+        cfg.aspect = g_ngb_opts.widescreen ? GFX_ASPECT_16_9 : GFX_ASPECT_4_3;
         cfg.hidden = g_ngb_opts.window == 2; /* render and captures all the same, no visible window */
+        cfg.fullscreen = g_ngb_opts.fullscreen;
         if (gfx_init_ex(&cfg))
             ngb_log("gfx: could not open the window; continuing without it");
         else
-            ngb_log("gfx: window 720x480 x2 (4:3), F12 saves a screenshot in runs\\shots");
+            ngb_log("gfx: window 720x480 x2 (%s), F12 saves a screenshot in runs\\shots",
+                    g_ngb_opts.widescreen ? "16:9" : "4:3");
     }
 
     /* Xbox: a single core and no NX. Xbox threads are pinned to core 0 (ngb_thread_spawn);

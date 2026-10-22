@@ -3,7 +3,7 @@
  *
  * The game (or the D3D HLE) hands over each frame with gfx_present(). The copy goes to a BGRA
  * back buffer protected by a critical section and the window paints it with StretchDIBits:
- * integer vertical scaling and 4:3 or 16:9 aspect, with black bars. Nothing blocks the
+ * it fills the window at 4:3 or 16:9, with black bars. Nothing blocks the
  * caller except the frame conversion.
  *
  *   gfx_init("ngb", 720, 480, 2);                      // 1280x960 window (4:3)
@@ -12,6 +12,7 @@
  *
  * Keys: F12 saves the current frame to %NGB_DATA%\runs\shots\shot-<date>.png (C PNG
  * without compression; RGB, alpha is ignored). The title shows the FPS of gfx_present.
+ * Alt+Enter toggles borderless fullscreen.
  *
  * Formats (the names are the Xbox D3DFORMATs; little-endian pixels):
  *   GFX_FMT_A8R8G8B8, GFX_FMT_X8R8G8B8: u32 0xAARRGGBB (in memory: B, G, R, A)
@@ -50,6 +51,7 @@ typedef struct gfx_config {
     int scale;          /* initial integer window scale (1..8) */
     int aspect;         /* GFX_ASPECT_4_3 or GFX_ASPECT_16_9 */
     int hidden;         /* 1: the window exists but is not shown (screenless tests) */
+    int fullscreen;     /* 1: start borderless over the whole monitor (Alt+Enter toggles it) */
 } gfx_config_t;
 
 /* Creates the window on its own thread. 0 if all went well. Only one window per process. */

@@ -62,7 +62,7 @@ enum ui_id {
     ID_NONE = 0,
     ID_NAV0 = 1, /* ..ID_NAV0 + PG_COUNT - 1 */
     ID_PLAY = 20, ID_STOP, ID_IMPORT_ISO, ID_IMPORT_FOLDER, ID_IMPORT_CANCEL, ID_DATA_CHANGE,
-    ID_DATA_OPEN, ID_VIEW_LOG, ID_OPEN_RUNS, ID_CB_RENDERER, ID_CB_LOGCAP, ID_CHK_PACING,
+    ID_DATA_OPEN, ID_VIEW_LOG, ID_OPEN_RUNS, ID_CB_RENDERER, ID_CB_SCALE, ID_CB_LOGCAP, ID_CHK_PACING, ID_CHK_FULLSCREEN, ID_CHK_WIDESCREEN,
     ID_CHK_MUTE, ID_CHK_WAV, ID_CHK_RDOC, ID_CHK_LENIENT, ID_LANG_EN, ID_LANG_ES,
     ID_ITEM0 = 100 /* items of the open drop-down */
 };
@@ -73,7 +73,10 @@ typedef struct settings {
     wchar_t xbe[MAX_PATH];
     wchar_t data[MAX_PATH]; /* data folder chosen by the user ("" = automatic) */
     int renderer;  /* 0 auto, 1 gl, 2 soft */
-    int pacing;    /* 1: 60 fps; 0: --no-pacing */
+    int scale;      /* --scale: internal resolution 1-4; 0 = auto (match the monitor) */
+    int fullscreen; /* --fullscreen */
+    int widescreen; /* --widescreen */
+    int pacing;   /* 1: 60 fps; 0: --no-pacing */
     int mute;      /* --mute */
     int audio_wav; /* --audio-wav */
     int rdoc_key;  /* --rdoc-key */
@@ -275,6 +278,12 @@ static void save_settings(void) {
     ini_put(L"ui", L"lang", g_lang == LANG_ES ? L"es" : L"en");
     ini_put(L"graphics", L"renderer",
             g_set.renderer == 1 ? L"gl" : g_set.renderer == 2 ? L"soft" : L"auto");
+    if (g_set.scale)
+        ini_put_int(L"graphics", L"resolution", g_set.scale);
+    else
+        ini_put(L"graphics", L"resolution", L"auto");
+    ini_put_int(L"graphics", L"fullscreen", g_set.fullscreen);
+    ini_put_int(L"graphics", L"widescreen", g_set.widescreen);
     ini_put_int(L"graphics", L"limit_fps", g_set.pacing);
     ini_put_int(L"audio", L"mute", g_set.mute);
     ini_put_int(L"audio", L"wav", g_set.audio_wav);
@@ -314,6 +323,12 @@ static void load_settings(void) {
         g_lang = (GetUserDefaultUILanguage() & 0x3ff) == LANG_SPANISH ? LANG_ES : LANG_EN;
     ini_text(L"graphics", L"renderer", L"auto", t, 32);
     g_set.renderer = !wcscmp(t, L"gl") ? 1 : !wcscmp(t, L"soft") ? 2 : 0;
+    ini_text(L"graphics", L"resolution", L"auto", t, 32);
+    g_set.scale = _wtoi(t); /* "auto" (and anything unknown) reads as 0 */
+    if (g_set.scale < 1 || g_set.scale > 4)
+        g_set.scale = 0;
+    g_set.fullscreen = ini_int(L"graphics", L"fullscreen", 1) != 0;
+    g_set.widescreen = ini_int(L"graphics", L"widescreen", 1) != 0;
     g_set.pacing = ini_int(L"graphics", L"limit_fps", 1) != 0;
     g_set.mute = ini_int(L"audio", L"mute", 0) != 0;
     g_set.audio_wav = ini_int(L"audio", L"wav", 0) != 0;
@@ -361,6 +376,27 @@ static int importing(void) {
 }
 static int can_play(void) { return !running() && !importing() && loader_ok() && xbe_ok(); }
 
+/* Internal resolution the chosen scale gives; "auto" follows the loader: enough to cover the
+ * picture on the monitor the launcher is on, on both axes (4:3 or 16:9), between 1 and 4. */
+static void scaled_size(int *w, int *h) {
+    double s = g_set.scale;
+    if (!s) {
+        MONITORINFO mi;
+        memset(&mi, 0, sizeof mi);
+        mi.cbSize = sizeof mi;
+        s = 1.0;
+        if (GetMonitorInfoW(MonitorFromWindow(g_hwnd, MONITOR_DEFAULTTOPRIMARY), &mi)) {
+            double a = g_set.widescreen ? 16.0 / 9.0 : 4.0 / 3.0;
+            double mw = mi.rcMonitor.right - mi.rcMonitor.left, mh = mi.rcMonitor.bottom - mi.rcMonitor.top;
+            double pw = mh * a < mw ? mh * a : mw, ph = pw / a;
+            s = pw / 720.0 > ph / 480.0 ? pw / 720.0 : ph / 480.0;
+        }
+        s = s < 1.0 ? 1.0 : s > 4.0 ? 4.0 : s;
+    }
+    *w = (int)(720 * s + 0.5);
+    *h = (int)(480 * s + 0.5);
+}
+
 /* PLAY's command line (also shown on the Advanced page). */
 static void build_cmdline(wchar_t *out, size_t n) {
     wfmt(out, n, L"\"%ls\" \"%ls\" --window --timeout 0 --max-calls 0 --idle 0", g_loader, g_set.xbe);
@@ -368,6 +404,17 @@ static void build_cmdline(wchar_t *out, size_t n) {
         wcat(out, n, L" --renderer gl");
     else if (g_set.renderer == 2)
         wcat(out, n, L" --renderer soft");
+    if (!g_set.scale)
+        wcat(out, n, L" --scale auto");
+    else if (g_set.scale > 1) {
+        wchar_t t[24];
+        wfmt(t, 24, L" --scale %d", g_set.scale);
+        wcat(out, n, t);
+    }
+    if (g_set.fullscreen)
+        wcat(out, n, L" --fullscreen");
+    if (g_set.widescreen)
+        wcat(out, n, L" --widescreen");
     if (!g_set.pacing)
         wcat(out, n, L" --no-pacing");
     if (g_set.mute)
@@ -391,6 +438,21 @@ static void config_summary(wchar_t *out, size_t n) {
                                                 : tr(S_SUM_AUTO);
     wfmt(out, n, L"%ls  ·  %ls  ·  %ls", rend, g_set.pacing ? tr(S_SUM_FPS60) : tr(S_SUM_NOFPS),
          g_set.mute ? tr(S_SUM_MUTED) : tr(S_SUM_SOUND));
+    if (g_set.scale != 1 && g_set.renderer != 2) {
+        wchar_t t[32];
+        int w, h;
+        scaled_size(&w, &h);
+        wfmt(t, 32, L"  ·  %dx%d", w, h);
+        wcat(out, n, t);
+    }
+    if (g_set.widescreen) {
+        wcat(out, n, L"  ·  ");
+        wcat(out, n, tr(S_SUM_WIDE));
+    }
+    if (g_set.fullscreen) {
+        wcat(out, n, L"  ·  ");
+        wcat(out, n, tr(S_SUM_FULL));
+    }
     if (g_set.rdoc_key)
         wcat(out, n, L"  ·  RenderDoc");
     if (g_set.lenient)
@@ -794,20 +856,37 @@ static void ui_check(int id, int x, int y, int w, const wchar_t *label, const wc
 }
 
 static const int k_renderer_ids[] = {S_GFX_R_AUTO, S_GFX_R_GL, S_GFX_R_SOFT};
+static const int k_scale_ids[] = {S_GFX_SCALE_AUTO, S_GFX_SCALE_1, S_GFX_SCALE_2, S_GFX_SCALE_3,
+                                  S_GFX_SCALE_4};
 
 static int combo_count(int id) {
-    return id == ID_CB_RENDERER ? 3 : (int)(sizeof k_logcap_vals / sizeof k_logcap_vals[0]);
+    return id == ID_CB_RENDERER ? 3
+           : id == ID_CB_SCALE  ? 5
+                                : (int)(sizeof k_logcap_vals / sizeof k_logcap_vals[0]);
 }
 static const wchar_t *combo_text(int id, int i) {
     static const wchar_t *caps[] = {L"500", NULL, L"10 000", L"50 000"};
     if (id == ID_CB_RENDERER)
         return tr(k_renderer_ids[i]);
+    if (id == ID_CB_SCALE && i == 0) { /* auto: with the size it gives on this monitor */
+        static wchar_t text[96];
+        int w, h, keep = g_set.scale;
+        g_set.scale = 0;
+        scaled_size(&w, &h);
+        g_set.scale = keep;
+        wfmt(text, 96, tr(S_GFX_SCALE_AUTO), w, h);
+        return text;
+    }
+    if (id == ID_CB_SCALE)
+        return tr(k_scale_ids[i]);
     return caps[i] ? caps[i] : tr(S_ADV_LOGCAP_DEF);
 }
 static int combo_sel(int id) {
     int i;
     if (id == ID_CB_RENDERER)
         return g_set.renderer;
+    if (id == ID_CB_SCALE)
+        return g_set.scale; /* 0 auto, then 1x..4x */
     for (i = 0; i < combo_count(id); i++)
         if (k_logcap_vals[i] == g_set.log_cap)
             return i;
@@ -1025,6 +1104,12 @@ static void page_graphics(void) {
     section_title(y, tr(S_GFX_SECTION));
     y += 52;
     ui_combo(ID_CB_RENDERER, PANEL_X, y, PANEL_W, tr(S_GFX_RENDERER), tr(S_GFX_RENDERER_DESC));
+    y += ROW_H;
+    ui_combo(ID_CB_SCALE, PANEL_X, y, PANEL_W, tr(S_GFX_SCALE), tr(S_GFX_SCALE_DESC));
+    y += ROW_H;
+    ui_check(ID_CHK_WIDESCREEN, PANEL_X, y, PANEL_W, tr(S_GFX_WIDE), tr(S_GFX_WIDE_DESC), g_set.widescreen);
+    y += ROW_H;
+    ui_check(ID_CHK_FULLSCREEN, PANEL_X, y, PANEL_W, tr(S_GFX_FULL), tr(S_GFX_FULL_DESC), g_set.fullscreen);
     y += ROW_H;
     ui_check(ID_CHK_PACING, PANEL_X, y, PANEL_W, tr(S_GFX_FPS), tr(S_GFX_FPS_DESC), g_set.pacing);
     y += ROW_H + 18;
@@ -1305,6 +1390,8 @@ static void activate(int id) {
         int i = id - ID_ITEM0;
         if (g_open_combo == ID_CB_RENDERER)
             g_set.renderer = i;
+        else if (g_open_combo == ID_CB_SCALE)
+            g_set.scale = i;
         else
             g_set.log_cap = k_logcap_vals[i];
         g_open_combo = ID_NONE;
@@ -1312,7 +1399,9 @@ static void activate(int id) {
         return;
     }
     g_open_combo = g_open_combo == id ? ID_NONE
-                                      : (id == ID_CB_RENDERER || id == ID_CB_LOGCAP ? id : ID_NONE);
+                                      : (id == ID_CB_RENDERER || id == ID_CB_SCALE || id == ID_CB_LOGCAP
+                                             ? id
+                                             : ID_NONE);
     switch (id) {
     case ID_PLAY: start_game(); break;
     case ID_STOP: stop_game(); break;
@@ -1335,6 +1424,8 @@ static void activate(int id) {
     case ID_VIEW_LOG: goto_page(PG_LOG); break;
     case ID_OPEN_RUNS: open_folder(g_runs); break;
     case ID_CHK_PACING: g_set.pacing = !g_set.pacing; save_settings(); break;
+    case ID_CHK_FULLSCREEN: g_set.fullscreen = !g_set.fullscreen; save_settings(); break;
+    case ID_CHK_WIDESCREEN: g_set.widescreen = !g_set.widescreen; save_settings(); break;
     case ID_CHK_MUTE: g_set.mute = !g_set.mute; save_settings(); break;
     case ID_CHK_WAV: g_set.audio_wav = !g_set.audio_wav; save_settings(); break;
     case ID_CHK_RDOC: g_set.rdoc_key = !g_set.rdoc_key; save_settings(); break;

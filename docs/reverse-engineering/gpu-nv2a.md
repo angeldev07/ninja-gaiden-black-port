@@ -405,6 +405,60 @@ spotlights without cone and no skinning in fixed mode.
 - **Next in cost** inside drawing: uploading vertices (2.2-3.4 ms) and the draws (1.9-2.5 ms). Outside
   drawing, the rest of `pb_run` (about 6 ms) is the word-by-word push buffer decoding.
 
+## Internal resolution scaling and anisotropic filtering (`VERIFIED` in the demo)
+
+- **Option:** `--scale N` (1-4, fractional allowed) renders every surface at N times the size the game programmed,
+  so 720x480 becomes 1440x960 ... 2880x1920. `--scale auto` uses the height of the window's monitor divided by 480:
+  2.25 on a 1080p screen, so 1620x1080. In fullscreen each rendered row then lands on exactly one screen row. The
+  launcher's Graphics page has an "Internal resolution" combo whose default is "Match my screen" (`[graphics]
+  resolution = auto|1..4` in `ngb.ini`). Only the OpenGL renderer scales; the software rasterizer ignores it.
+- **Scaled coordinates:** `px(v) = round(v * S)`. A span `[a, b)` maps to `[px(a), px(b))`, so scissors and viewports
+  that touch at native size still touch at fractional scales.
+- **Presentation** (`pgraph_gl.c → pgl_flip`, `present.c → display_rect`):
+  - the picture now fills the window's height at 4:3 (1440x1080 on a 1920x1080 screen, with black bars at the
+    sides). Before, the vertical scale was an integer, so a 1080p screen only got 960 rows;
+  - a small shader replaces the bilinear blit. It takes four bilinear taps at a quarter of the footprint, which
+    works like a box filter: exactly 2x2 texels at 2:1. At 4x on 1080p, 2880x1920 goes into 1440x1080, and the
+    supersampling smooths the edges instead of shimmering;
+  - `--fullscreen` (the launcher's "Fullscreen", default on) is a borderless window over the monitor, with the
+    cursor hidden. Alt+Enter toggles it;
+  - the loader is per-monitor DPI aware. Without that, at 125 % or 150 % scaling Windows draws the window smaller
+    and stretches the bitmap, which blurs the picture whatever the internal resolution;
+  - `NGB_GL_SHOT_WINDOW=1` together with `--debug-shots` also saves the window's back buffer
+    (`<shot>-window.png`), to check the presentation without photographing the screen.
+- **Widescreen is native** (`VERIFIED` in the demo). The game reads `ExQueryNonVolatileSetting(XC_VIDEO_FLAGS)`
+  twice at boot. With `XC_VIDEO_FLAGS_WIDESCREEN` (`0x10000`, the dashboard's 16:9 TV setting) it renders
+  anamorphic 16:9: a wider field of view in the same 720x480, meant for the TV to stretch. The disc also carries
+  `2_VI_WIDE_B.sfd` next to `4_VI_STD_B.sfd`, see [[ngb-disc]].
+  - `--widescreen` (the launcher's "Widescreen (16:9)", default on) sets that flag in the kernel and presents at 16:9,
+    so a 16:9 screen has no bars.
+  - `--scale auto` then covers the picture on both axes: `S = max(picture_w / 720, picture_h / 480)`. That is 2.67 on
+    1080p (1920x1280, with a light vertical supersample) and stays 2.25 at 4:3.
+  - The 2D title screen and menus are drawn for 4:3 and show stretched, as on the console with a widescreen TV.
+  - Ultrawide (21:9) or 16:9 menus would need patching the game: that is the roadmap's H9+ item.
+  - Without the flag the game is 4:3, with black bars at the sides.
+- **What scales** (all in `pgraph_gl.c`): the surface textures (`create_surface_texture`), the viewport
+  (`bind_target`), the draw and clear scissors (`apply_state`, `pgl_clear`), the feedback copy, the present blit,
+  the screenshots and surface dumps, and `glPointSize`. A surface the CPU pre-filled is uploaded at native size into a
+  temporary texture and stretched with a nearest blit.
+- **What stays native, on purpose:**
+  - `R.target_w/h` and the `surfaceSize` uniform. The vertex programs output native screen pixels and the shader
+    turns them into NDC, which does not depend on the scale;
+  - the `1/width` scale of render-to-texture on linear textures, because those coordinates are native texels;
+  - the cache sizes in bytes and the CPU-write signature of surfaces. Nothing reads a surface back into guest RAM,
+    so the game never sees the larger buffers.
+- **Anisotropic filtering:** 16x (clamped to `GL_MAX_TEXTURE_MAX_ANISOTROPY`) on cached textures that have mipmaps.
+  Single-level textures (HUD, fonts, video) do not get it, because there it would only blur.
+- **Checks** (deterministic demo, `--debug-shots 300`, RX 6600). Side-by-side shots are in
+  `NGB_DATA\comparisons\escalado-2026-10-22\`.
+  - Edges and textures are clearly sharper at 2x and 4x. The lighting is the same, and the shadow acne fixed by
+    the polygon offset does not come back: the shadow maps are scaled too.
+  - The full-screen "ghosting" seen in some shots is the game's own motion blur (it shows up at 1x as well). The
+    offset matches the camera motion, not a 2x magnification from the corner, which is what a scale bug would cause.
+  - FPS with pacing: **60.0 at 1x, 2x and 4x**. With `--debug-shots`, 4x drops to about 58.7, because each 2880x1920
+    PNG stalls the render thread. Without pacing the 3D windows run at 80-100 fps at every scale, so the
+    bottleneck is still the CPU (push buffer decoding), not the GPU.
+
 ## Next
 
 1. Go from the title screen to the main menu, and find out what the warnings and the video (audio) wait for.

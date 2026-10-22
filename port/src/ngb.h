@@ -60,6 +60,10 @@ typedef struct ngb_options {
     unsigned rdoc_frame;      /* --rdoc-frame N: captures that frame with RenderDoc (gpu/rdoc.c) */
     int rdoc_key;             /* --rdoc-key: F11 captures the next frame with RenderDoc */
     unsigned debug_shots;     /* --debug-shots N: PNG every N frames + texture dumps (0 = off) */
+    float scale;              /* --scale N: GL render surfaces at N times 720x480 (1-4, may be fractional; 0 = 1) */
+    int scale_auto;           /* --scale auto: N = height of the window's monitor / 480 */
+    int fullscreen;           /* --fullscreen: borderless over the whole monitor (Alt+Enter toggles) */
+    int widescreen;           /* --widescreen: the console reports a 16:9 TV, the game renders anamorphic 16:9 */
     const char *dump_ram;    /* --dump-ram FRAMES: guest RAM snapshots at those frames (F10 too) */
 } ngb_options_t;
 
