@@ -137,6 +137,12 @@ static const uint8_t *apu_phys(uint32_t phys, uint32_t len) {
     if (phys < NGB_CONTIG_SIZE)
         return len <= NGB_CONTIG_SIZE - phys ? (const uint8_t *)(uintptr_t)(NGB_CONTIG_BASE + phys)
                                              : NULL;
+    if (phys >= NGB_PHYS_XBE + NGB_RESERVE_BASE && phys < NGB_PHYS_XBE + NGB_RESERVE_END) {
+        /* Imagen del XBE (ventana de MmGetPhysicalAddress, como en nv2a_phys): los sonidos que
+           el juego tiene en .data, como los del menú (SetBufferData sobre 0x00B05000). */
+        uint32_t va = phys - NGB_PHYS_XBE;
+        return NGB_RESERVE_END - va >= len ? (const uint8_t *)(uintptr_t)va : NULL;
+    }
     if (len > 0x1000u || phys > 0xFFFFFFFFu - len)
         return NULL;
     if (phys >= ok_lo && phys + len <= ok_hi)

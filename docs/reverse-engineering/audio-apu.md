@@ -147,3 +147,18 @@ terminar el juego sigue solo. El líder revisó las capturas `vp2-pgraph-shot-09
   bajaba el vblank a 30 por segundo y la música dejaba de fallar. Para medir esto, mejor contadores baratos en
   el propio juego (`0x489E38`) que hilos que paren a otros.
 
+## Los sonidos del menú salían en silencio (`VERIFIED`)
+
+- **Síntoma:** al mover el cursor del menú no sonaba nada.
+- **Medida:**
+  - cada movimiento enciende una voz (`VOICE_ON 68`): ADPCM estéreo a 22 kHz (`fmt 0xA801E0E6`, pitch `0xEE0B`),
+    de unos 0,28 s y sin bucle;
+  - la voz avanzaba entera, pero un volcado de sus muestras dio 108 120 ceros.
+- **Causa:** el sonido está en la sección `.data` del XBE (`SetBufferData` sobre `0x00B05000`).
+  `MmGetPhysicalAddress` sitúa la imagen del XBE en su ventana física (`NGB_PHYS_XBE + VA`, `0x06B05000`), y
+  DirectSound escribe esa página en la tabla SGE. `nv2a_phys` ya conocía esa ventana, pero `apu_phys`
+  (`crash.c`) la buscaba como dirección del host, no la encontraba y devolvía silencio.
+- **Arreglo:** `apu_phys` traduce la ventana del XBE igual que la GPU.
+- **Resultado:** las muestras de la voz tienen señal (pico 18 092) con la envolvente de un efecto: ataque y caída
+  en unos 0,2 s. Cualquier sonido que el juego tenga en `.data` se oye ahora.
+

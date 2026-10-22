@@ -334,3 +334,12 @@ Detalle en [[audio-apu]].
 
 Detalle en [[arranque-nativo]].
 
+## [2026-10-22] fix | Los sonidos del menú ya se oyen
+- **Síntoma:** mover el cursor del menú no sonaba.
+- **Causa:** los efectos del menú están en `.data` del XBE. DirectSound pone en la tabla SGE la página de la ventana
+  física del XBE (`NGB_PHYS_XBE + VA`), y `apu_phys` no la traducía: cada muestra leía 0.
+- **Arreglo:** `apu_phys` traduce esa ventana, como ya hacía `nv2a_phys`.
+- **Resultado:** la voz del cursor tiene señal y la envolvente de un efecto.
+
+Detalle en [[audio-apu]].
+
