@@ -1049,6 +1049,33 @@ static void d3d_pushbuffer_fixup(uint32_t param) {
     g_pb_fixups++;
 }
 
+/* --dump-ram FRAMES and F10: guest RAM snapshot next to the log, to diff game state (finding
+ * flags and variables for mods). */
+static void maybe_dump_ram(void) {
+    static int was_down;
+    char path[MAX_PATH], tag[32], *dot;
+    const char *list = g_ngb_opts.dump_ram;
+    int down = (GetAsyncKeyState(VK_F10) & 0x8000) != 0, hit = down && !was_down;
+    was_down = down;
+    while (!hit && list && *list) {
+        char *next;
+        unsigned long f = strtoul(list, &next, 0);
+        if (next == list)
+            break;
+        hit = f == g_flips;
+        list = *next == ',' ? next + 1 : next;
+    }
+    if (!hit)
+        return;
+    snprintf(path, sizeof path, "%s", g_ngb_opts.log_path);
+    if ((dot = strrchr(path, '.')) != NULL && !strchr(dot, '\\'))
+        *dot = 0;
+    snprintf(tag, sizeof tag, "-ram-%06u.bin", g_flips);
+    if (strlen(path) + strlen(tag) < sizeof path)
+        strcat(path, tag);
+    ngb_dump_guest_ram(path);
+}
+
 static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param, int non_inc) {
     uint32_t inst = 0;
     (void)user;
@@ -1210,6 +1237,7 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
     case 0x0130: /* FLIP_STALL: fin de frame */
         flush_run();
         g_flips++;
+        maybe_dump_ram();
         present_and_pace();
         if (g_flips % PERF_EVERY == 0)
             perf_report();

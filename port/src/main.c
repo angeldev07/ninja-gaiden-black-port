@@ -52,6 +52,7 @@ static void usage(void) {
             "  --audio-wav  guarda lo que suena en <log>-audio.wav\n"
             "  --rdoc-frame N  captura el frame N con RenderDoc (render GL; .rdc junto al log)\n"
             "  --rdoc-key     carga RenderDoc y F11 captura el frame siguiente (jugar y capturar)\n"
+            "  --dump-ram FRAMES  guest RAM snapshots at those frames (\"2400,3000\"); F10 too\n"
             "  --watch LISTA  vigila direcciones del juego (0xADDR[:1|2|4],...) y registra los "
             "cambios\n"
             "  --input-script  pulsaciones del mando, p. ej. \"t=3s:START,t=5s:A@500ms\"\n"
@@ -166,6 +167,8 @@ static int parse_args(void) {
             g_ngb_opts.rdoc_frame = (unsigned)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--rdoc-key"))
             g_ngb_opts.rdoc_key = 1;
+        else if (!strcmp(a, "--dump-ram") && more)
+            g_ngb_opts.dump_ram = _strdup(argv[++i]);
         else if (!strcmp(a, "--no-pacing"))
             g_ngb_opts.no_pacing = 1;
         else if (!strcmp(a, "--renderer") && more) {

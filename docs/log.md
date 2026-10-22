@@ -407,3 +407,11 @@ Detalle en [[audio-apu]].
   (`registro inválido 0x09AB09BA`). Por eso ahora se valida la cadena.
 
 Detalle en [[gpu-nv2a]].
+
+## [2026-10-22] ingest | Mods: trajes ocultos, Intercept y `--dump-ram`
+- Hay 7 trajes alternativos de Ryu en el disco, y las guías solo dan 5 desbloqueables. El selector se abre
+  manteniendo RT o LT en NEW GAME, o con Y en Misiones.
+- El texto de Intercept, retirado en Black, sigue en la lista de técnicas.
+- `system.dat` está cifrado.
+- Herramienta nueva: `--dump-ram FRAMES` / F10, que vuelca la RAM del juego para comparar estados.
+- Detalle en [[mods]].

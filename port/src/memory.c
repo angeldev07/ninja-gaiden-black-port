@@ -308,6 +308,54 @@ int ngb_contig_contains(const void *p) {
     return g_contig && (const uint8_t *)p >= g_contig && (const uint8_t *)p < g_contig + NGB_CONTIG_SIZE;
 }
 
+static int dumpable(const MEMORY_BASIC_INFORMATION *m) {
+    uintptr_t at = (uintptr_t)m->BaseAddress;
+    if (m->State != MEM_COMMIT || (m->Protect & (PAGE_GUARD | PAGE_NOACCESS)))
+        return 0;
+    if (!(m->Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE | PAGE_WRITECOPY |
+                        PAGE_EXECUTE_WRITECOPY)))
+        return 0;
+    /* The XBE image lives in the loader exe's reserve (MEM_IMAGE); the rest is the game's
+       heap and the contiguous RAM (MEM_PRIVATE). Host modules are images outside the reserve. */
+    if (m->Type == MEM_IMAGE)
+        return at >= NGB_RESERVE_BASE && at < NGB_RESERVE_END;
+    return m->Type == MEM_PRIVATE;
+}
+
+int ngb_dump_guest_ram(const char *path) {
+    static uint8_t chunk[1 << 16];
+    MEMORY_BASIC_INFORMATION m;
+    uintptr_t at = NGB_RESERVE_BASE, end = (uintptr_t)NGB_CONTIG_BASE + NGB_CONTIG_SIZE;
+    size_t total = 0;
+    FILE *f = fopen(path, "wb");
+    if (!f)
+        return -1;
+    while (at < end && VirtualQuery((const void *)at, &m, sizeof m)) {
+        uintptr_t next = (uintptr_t)m.BaseAddress + m.RegionSize;
+        if (dumpable(&m) && m.RegionSize <= (512u << 20)) {
+            uintptr_t p = (uintptr_t)m.BaseAddress;
+            while (p < next) {
+                uint32_t hdr[2];
+                SIZE_T want = next - p < sizeof chunk ? next - p : sizeof chunk, got = 0;
+                if (!ReadProcessMemory(GetCurrentProcess(), (const void *)p, chunk, want, &got) || !got)
+                    break; /* decommitted under our feet: skip the rest of the region */
+                hdr[0] = (uint32_t)p;
+                hdr[1] = (uint32_t)got;
+                fwrite(hdr, sizeof hdr, 1, f);
+                fwrite(chunk, 1, got, f);
+                total += got;
+                p += got;
+            }
+        }
+        if (next <= at)
+            break;
+        at = next;
+    }
+    fclose(f);
+    ngb_log("    · RAM dump: %u MB -> %s", (unsigned)(total >> 20), path);
+    return 0;
+}
+
 void ngb_hexdump_line(char *out, size_t outlen, uint32_t va, uint32_t len) {
     uint8_t buf[64];
     SIZE_T got = 0;

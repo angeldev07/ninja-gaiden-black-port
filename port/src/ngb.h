@@ -59,6 +59,7 @@ typedef struct ngb_options {
     int audio_wav;            /* --audio-wav: guarda la mezcla en <log>-audio.wav */
     unsigned rdoc_frame;      /* --rdoc-frame N: captura ese frame con RenderDoc (gpu/rdoc.c) */
     int rdoc_key;             /* --rdoc-key: F11 captura el frame siguiente con RenderDoc */
+    const char *dump_ram;     /* --dump-ram FRAMES: guest RAM snapshots at those frames (F10 too) */
 } ngb_options_t;
 
 /* --renderer: AUTO = OpenGL si hay ventana y contexto 4.x; si no, el rasterizador. */
@@ -98,6 +99,9 @@ int ngb_contig_free(void *p);
 uint32_t ngb_contig_size(const void *p);
 int ngb_contig_contains(const void *p);
 size_t ngb_contig_written(uint32_t *phys, size_t cap);
+/* Writes every committed, writable private region below 2 GB plus the contiguous RAM to
+ * `path` as {u32 va, u32 len, bytes} records. A development tool to diff game state. */
+int ngb_dump_guest_ram(const char *path);
 
 /* thread.c: hilos Xbox sobre hilos Win32 (KPCR/KTHREAD falsos, pila propia, TLS) */
 #define NGB_KTHREAD_SIZE 0x200
