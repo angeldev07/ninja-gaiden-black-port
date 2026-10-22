@@ -367,3 +367,8 @@ Detalle en [[audio-apu]].
   palabra, con 35 000 vértices por frame. El audio sufre porque el juego va lento. Es el siguiente frente de perf.
 - **Capturas F11 (5):** muros y suelos muy claros y planos en la mansión y la aldea. Es el problema de iluminación
   ya abierto ([[gpu-nv2a]]).
+
+## [2026-10-22] milestone | Release v0.1.0: jugable hasta el capítulo 6
+- Tag `v0.1.0` sobre `7796960`, con una release en GitHub que adjunta `ngb-loader.exe` y `ngb-core.dll`
+  compilados desde el tag (sin datos del juego).
+- Punto de retorno antes de tocar el pusher (el congelamiento) y la iluminación: `git checkout v0.1.0`.
