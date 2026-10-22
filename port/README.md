@@ -164,6 +164,11 @@ tested in `tests/pushbuf_test.c`), `pgraph.c` (methods, log, clear, semaphores, 
   H7a.
 - `--symbols CSV` (from Ghidra, in NGB_DATA) adds `<function+off>` to the log lines and to
   crashes. `--log-cap N` limits the lines per kernel function (2000 by default).
+- `--log-detail minimal` (what the launcher passes unless *Advanced > Debugging > Detailed log* is on) writes the
+  short log: the header, warnings and errors, the stop summary and the crash report, and no line per kernel call
+  or PGRAPH method dump (`logfilter.c`, tested by `tests/logfilter_test.c`). `full`, the loader's default, writes
+  everything. In both modes the user's profile folder is written as `%USERPROFILE%`, so a log attached to a
+  public issue does not carry the Windows user name.
 
 Result (30 s of `default.xbe`): D3D and DSOUND initialize, the game reaches the warnings
 screen ("Warnings") and sends ~40,000 frames (without pacing: FLIP_STALL does not wait for

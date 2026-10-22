@@ -120,7 +120,9 @@ static uint64_t kcall(uint32_t ordinal, uint32_t *args, uint32_t caller) {
         t->inflight_ordinal = prev_ord;
         t->inflight_caller = prev_caller;
     }
-    if (g_ngb_opts.log_cap && ordinal <= NGB_MAX_ORDINAL &&
+    if (g_ngb_opts.log_minimal) {
+        /* short log: the call is only counted */
+    } else if (g_ngb_opts.log_cap && ordinal <= NGB_MAX_ORDINAL &&
         (unsigned long)g_counts[ordinal] > g_ngb_opts.log_cap &&
         g_counts[ordinal] % 100000 != 0) { /* after the cap, one sample every 100000 */
         if ((unsigned long)g_counts[ordinal] == g_ngb_opts.log_cap + 1)

@@ -13,7 +13,8 @@
  *   - Only options that the loader's argument parser (port\src\main.c) understands are shown.
  *
  *   ngb-launcher.exe [--page N] [--lang en|es] [--iso FILE] [--shot FILE.bmp [--shot-delay MS]]
- *       --page N       start on page N (0 Play .. 5 Log)
+ *       --page N       start on page N (0 Play .. 5 About)
+ *       --log-view     with --page 4: open the log viewer (the sub-view of Advanced)
  *       --lang         force a language for this run (not saved)
  *       --iso FILE     start importing that disc image right away
  *       --shot FILE    render the window to a BMP and exit (used to review the interface)
@@ -56,14 +57,21 @@
 #define HERO_CARD_Y 318
 #define HERO_CARD_H 270
 
-enum page_id { PG_PLAY, PG_GRAPHICS, PG_AUDIO, PG_CONTROLS, PG_ADVANCED, PG_LOG, PG_COUNT };
+/* The log viewer is not a page: it is a sub-view of Advanced (g_log_view). */
+enum page_id { PG_PLAY, PG_GRAPHICS, PG_AUDIO, PG_CONTROLS, PG_ADVANCED, PG_ABOUT, PG_COUNT };
+
+#define URL_REPO L"https://github.com/angeldev07/ninja-gaiden-black-port"
+#define URL_CONTRIB URL_REPO L"/graphs/contributors"
+#define URL_LICENSE URL_REPO L"/blob/main/LICENSE"
+#define COPIED_MS 2000 /* how long "Copy session info" says "Copied" */
 
 enum ui_id {
     ID_NONE = 0,
     ID_NAV0 = 1, /* ..ID_NAV0 + PG_COUNT - 1 */
     ID_PLAY = 20, ID_STOP, ID_IMPORT_ISO, ID_IMPORT_FOLDER, ID_IMPORT_CANCEL, ID_DATA_CHANGE,
     ID_DATA_OPEN, ID_VIEW_LOG, ID_OPEN_RUNS, ID_CB_RENDERER, ID_CB_SCALE, ID_CB_LOGCAP, ID_CHK_PACING, ID_CHK_FULLSCREEN, ID_CHK_WIDESCREEN,
-    ID_CHK_MUTE, ID_CHK_WAV, ID_CHK_RDOC, ID_CHK_LENIENT, ID_LANG_EN, ID_LANG_ES,
+    ID_CHK_MUTE, ID_CHK_WAV, ID_CHK_RDOC, ID_CHK_LENIENT, ID_CHK_DETAIL, ID_LANG_EN, ID_LANG_ES,
+    ID_LOG_BACK, ID_COPY_INFO, ID_ABOUT_REPO, ID_ABOUT_CONTRIB, ID_ABOUT_LICENSE,
     ID_ITEM0 = 100 /* items of the open drop-down */
 };
 
@@ -81,6 +89,7 @@ typedef struct settings {
     int audio_wav; /* --audio-wav */
     int rdoc_key;  /* --rdoc-key */
     int lenient;   /* --lenient */
+    int detailed_log; /* 0: --log-detail minimal; 1: the loader's full log */
     int log_cap;   /* --log-cap */
 } settings_t;
 
@@ -139,6 +148,8 @@ static int g_log_n, g_log_scroll;
 static wchar_t g_log_path[MAX_PATH];
 static ULONGLONG g_log_sig;
 static wchar_t g_log_stamp[16];
+static int g_log_view; /* the log viewer is open (a sub-view of the Advanced page) */
+static ULONGLONG g_copied_until; /* GetTickCount64() deadline of the "Copied" label; 0 = none */
 
 static wchar_t g_shot_path[MAX_PATH];
 static int g_shot_delay = 0;
@@ -289,6 +300,7 @@ static void save_settings(void) {
     ini_put_int(L"audio", L"wav", g_set.audio_wav);
     ini_put_int(L"advanced", L"rdoc_key", g_set.rdoc_key);
     ini_put_int(L"advanced", L"lenient", g_set.lenient);
+    ini_put_int(L"advanced", L"detailed_log", g_set.detailed_log);
     ini_put_int(L"advanced", L"log_cap", g_set.log_cap);
 }
 
@@ -334,6 +346,7 @@ static void load_settings(void) {
     g_set.audio_wav = ini_int(L"audio", L"wav", 0) != 0;
     g_set.rdoc_key = ini_int(L"advanced", L"rdoc_key", 0) != 0;
     g_set.lenient = ini_int(L"advanced", L"lenient", 0) != 0;
+    g_set.detailed_log = ini_int(L"advanced", L"detailed_log", 0) != 0;
     g_set.log_cap = ini_int(L"advanced", L"log_cap", DEFAULT_LOG_CAP);
     for (i = 0; i < (int)(sizeof k_logcap_vals / sizeof k_logcap_vals[0]); i++)
         ok |= k_logcap_vals[i] == g_set.log_cap;
@@ -356,6 +369,7 @@ static void load_settings(void) {
 static int loader_ok(void) { return file_exists(g_loader); }
 static int xbe_ok(void) { return g_game_exists && g_game.valid; }
 static int running(void) { return g_proc != NULL; }
+static int log_view(void) { return g_page == PG_ADVANCED && g_log_view; }
 
 static void get_import(imp_status_t *st) {
     import_status(st);
@@ -425,6 +439,8 @@ static void build_cmdline(wchar_t *out, size_t n) {
         wcat(out, n, L" --rdoc-key");
     if (g_set.lenient)
         wcat(out, n, L" --lenient");
+    if (!g_set.detailed_log) /* the loader's default is the full log */
+        wcat(out, n, L" --log-detail minimal");
     if (g_set.log_cap != DEFAULT_LOG_CAP) {
         wchar_t t[40];
         wfmt(t, 40, L" --log-cap %d", g_set.log_cap);
@@ -819,6 +835,165 @@ static void open_folder(const wchar_t *dir) {
     ShellExecuteW(g_hwnd, L"open", dir, NULL, NULL, SW_SHOWNORMAL);
 }
 
+/* ------------------------------------------------------------- session info ---- */
+
+#define LOG_HEAD_BYTES (256 * 1024)
+
+/* The text inside the parentheses of the "pgraph: OpenGL render (...)" line. The loader writes
+ * it during start-up, so the head of the log is enough. */
+static int log_gpu_text(const wchar_t *path, wchar_t *out, size_t n) {
+    static const char key[] = "pgraph: OpenGL render (";
+    char *raw, *p, *end, *close;
+    HANDLE h;
+    DWORD got = 0;
+    int found = 0;
+    h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE)
+        return 0;
+    raw = (char *)malloc(LOG_HEAD_BYTES + 1);
+    if (!raw) {
+        CloseHandle(h);
+        return 0;
+    }
+    ReadFile(h, raw, LOG_HEAD_BYTES, &got, NULL);
+    CloseHandle(h);
+    raw[got] = 0;
+    for (p = raw; (p = strstr(p, key)) != NULL; p += sizeof key - 1) {
+        if (p != raw && p[-1] != '\n')
+            continue; /* the line must start with the key */
+        p += sizeof key - 1;
+        end = p + strcspn(p, "\r\n");
+        *end = 0;
+        close = strrchr(p, ')');
+        if (close)
+            *close = 0;
+        found = MultiByteToWideChar(CP_UTF8, 0, p, -1, out, (int)n) > 1;
+        break;
+    }
+    free(raw);
+    return found;
+}
+
+static void windows_version(wchar_t *out, size_t n) {
+    typedef LONG(WINAPI * rtl_get_version_fn)(OSVERSIONINFOW *);
+    HMODULE nt = GetModuleHandleW(L"ntdll.dll");
+    rtl_get_version_fn get = nt ? (rtl_get_version_fn)(void *)GetProcAddress(nt, "RtlGetVersion") : NULL;
+    OSVERSIONINFOW v;
+    memset(&v, 0, sizeof v);
+    v.dwOSVersionInfoSize = sizeof v;
+    if (get && get(&v) == 0)
+        wfmt(out, n, L"Windows %lu.%lu.%lu", v.dwMajorVersion, v.dwMinorVersion, v.dwBuildNumber);
+    else
+        wfmt(out, n, L"Windows (unknown version)");
+}
+
+/* Replaces the user's profile directory with %USERPROFILE%, so a pasted block does not carry
+ * the Windows user name. */
+static void scrub_profile(wchar_t *s, size_t n) {
+    wchar_t prof[MAX_PATH], *tmp;
+    static const wchar_t rep[] = L"%USERPROFILE%";
+    size_t plen, i = 0, o = 0;
+    DWORD len = GetEnvironmentVariableW(L"USERPROFILE", prof, MAX_PATH);
+    if (!len || len >= MAX_PATH)
+        return;
+    strip_trailing_slash(prof);
+    plen = wcslen(prof);
+    tmp = (wchar_t *)malloc(n * sizeof(wchar_t));
+    if (plen < 4 || !tmp) { /* shorter than "C:\x": not a profile directory */
+        free(tmp);
+        return;
+    }
+    while (s[i] && o + 1 < n) {
+        if (!_wcsnicmp(s + i, prof, plen) && !iswalnum(s[i + plen])) { /* not %USERPROFILE%o */
+            size_t k;
+            for (k = 0; k < wcslen(rep) && o + 1 < n; k++)
+                tmp[o++] = rep[k];
+            i += plen;
+        } else {
+            tmp[o++] = s[i++];
+        }
+    }
+    tmp[o] = 0;
+    memcpy(s, tmp, (o + 1) * sizeof(wchar_t));
+    free(tmp);
+}
+
+/* The plain-text block for a bug report. Always English, whatever the launcher language. */
+static void build_session_info(wchar_t *out, size_t n) {
+    static const wchar_t *const rend[] = {L"auto", L"opengl", L"software"};
+    wchar_t logp[MAX_PATH], gpu[400], line[600], dur[48], res[96];
+    ULONGLONG sig;
+    int w = 720, h = 480, keep = g_lang;
+    int have_log = g_runs[0] && latest_log(logp, MAX_PATH, &sig);
+    g_lang = LANG_EN;
+    out[0] = 0;
+    wfmt(line, 600, L"Ninja Gaiden Black native port %ls\r\n", L"" NGB_VERSION_STR);
+    wcat(out, n, line);
+    windows_version(gpu, 400);
+    wcat(out, n, gpu);
+    wcat(out, n, L"\r\n");
+    if (have_log && log_gpu_text(logp, gpu, 400))
+        wfmt(line, 600, L"GPU: %ls\r\n", gpu);
+    else
+        wfmt(line, 600, L"Renderer: software/unknown\r\n");
+    wcat(out, n, line);
+    if (g_set.renderer != 2)
+        scaled_size(&w, &h);
+    wfmt(res, 96, L"%dx%d", w, h);
+    wfmt(line, 600,
+         L"Settings: renderer %ls, internal resolution %ls, widescreen %ls, fullscreen %ls, fps limit %ls, "
+         L"audio %ls, detailed log %ls\r\n",
+         rend[g_set.renderer], res, g_set.widescreen ? L"on" : L"off", g_set.fullscreen ? L"on" : L"off",
+         g_set.pacing ? L"60" : L"off", g_set.mute ? L"muted" : L"on", g_set.detailed_log ? L"on" : L"off");
+    wcat(out, n, line);
+    if (running()) {
+        wfmt(line, 600, L"Last session: %ls, still running\r\n", g_last.start);
+    } else if (g_last.code == SESSION_NONE) {
+        wfmt(line, 600, L"Last session: none\r\n");
+    } else {
+        fmt_duration(g_last.duration_s, dur, 48);
+        exit_text(g_last.code, gpu, 400);
+        wfmt(line, 600, L"Last session: %ls, %ls, %ls\r\n", g_last.start, dur, gpu);
+    }
+    wcat(out, n, line);
+    wfmt(line, 600, L"Log file: %ls\r\n", have_log ? base_name(logp) : L"none");
+    wcat(out, n, line);
+    g_lang = keep;
+    scrub_profile(out, n);
+}
+
+static int clipboard_put(const wchar_t *text) {
+    size_t bytes = (wcslen(text) + 1) * sizeof(wchar_t);
+    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    void *p;
+    int ok = 0;
+    if (!mem)
+        return 0;
+    p = GlobalLock(mem);
+    if (!p) {
+        GlobalFree(mem);
+        return 0;
+    }
+    memcpy(p, text, bytes);
+    GlobalUnlock(mem);
+    if (OpenClipboard(g_hwnd)) {
+        EmptyClipboard();
+        ok = SetClipboardData(CF_UNICODETEXT, mem) != NULL;
+        CloseClipboard();
+    }
+    if (!ok)
+        GlobalFree(mem); /* the clipboard owns the memory only after a successful SetClipboardData */
+    return ok;
+}
+
+static void copy_session_info(void) {
+    wchar_t info[2048];
+    build_session_info(info, 2048);
+    if (clipboard_put(info))
+        g_copied_until = GetTickCount64() + COPIED_MS;
+}
+
 /* ---------------------------------------------------------- shared page parts ---- */
 
 static void page_header(const wchar_t *title, const wchar_t *sub) {
@@ -1193,8 +1368,9 @@ static void page_controls(void) {
 }
 
 static void page_advanced(void) {
-    int y = 128;
+    int y = 128, x = PANEL_X, bh, b1, b2, b3;
     wchar_t cmd[4096];
+    const wchar_t *copy_label = g_copied_until ? tr(S_BTN_COPIED) : tr(S_BTN_COPY_INFO);
     page_header(tr(S_NAV_ADVANCED), tr(S_ADV_SUB));
     section_title(y, tr(S_ADV_DEBUG));
     y += 52;
@@ -1202,16 +1378,32 @@ static void page_advanced(void) {
     y += ROW_H;
     ui_check(ID_CHK_LENIENT, PANEL_X, y, PANEL_W, tr(S_ADV_LENIENT), tr(S_ADV_LENIENT_DESC),
              g_set.lenient);
-    y += ROW_H + 14;
-    section_title(y, tr(S_ADV_LOGGING));
-    y += 52;
-    ui_combo(ID_CB_LOGCAP, PANEL_X, y, PANEL_W, tr(S_ADV_LOGCAP), tr(S_ADV_LOGCAP_DESC));
-    y += ROW_H + 10;
+    y += ROW_H;
+    ui_check(ID_CHK_DETAIL, PANEL_X, y, PANEL_W, tr(S_ADV_DETAIL), tr(S_ADV_DETAIL_DESC),
+             g_set.detailed_log);
+    y += ROW_H;
+    if (g_set.detailed_log) { /* the cap only matters for the full log */
+        ui_combo(ID_CB_LOGCAP, PANEL_X, y, PANEL_W, tr(S_ADV_LOGCAP), tr(S_ADV_LOGCAP_DESC));
+        y += ROW_H;
+    }
+    /* The copy button keeps its width when its label turns into "Copied". */
+    b1 = text_w(F_BOLD, tr(S_BTN_VIEW_LOG)) + 36;
+    b2 = text_w(F_BOLD, tr(S_BTN_OPEN_RUNS)) + 36;
+    b3 = text_w(F_BOLD, tr(S_BTN_COPY_INFO)) + 36;
+    if (text_w(F_BOLD, tr(S_BTN_COPIED)) + 36 > b3)
+        b3 = text_w(F_BOLD, tr(S_BTN_COPIED)) + 36;
+    ui_button(ID_VIEW_LOG, x, y, b1, 36, tr(S_BTN_VIEW_LOG), 0, 1);
+    ui_button(ID_OPEN_RUNS, x + b1 + 10, y, b2, 36, tr(S_BTN_OPEN_RUNS), 0, 1);
+    ui_button(ID_COPY_INFO, x + b1 + b2 + 20, y, b3, 36, copy_label, 0, 1);
+    y += 36 + 10;
     build_cmdline(cmd, 4096);
     caption(PANEL_X, y, 400, tr(S_ADV_CMDLINE));
-    fill_rrect(PANEL_X, y + 22, PANEL_W, 76, 5, C_FIELD);
-    stroke_rrect(PANEL_X, y + 22, PANEL_W, 76, 5, C_LINE);
-    txt(F_MONO, 0xb9bcc6, PANEL_X + 14, y + 30, PANEL_W - 28, 62, DT_WORDBREAK | DT_END_ELLIPSIS, cmd);
+    bh = PANEL_BOTTOM - (y + 22); /* what is left; the box shrinks when the combo is shown */
+    if (bh > 76)
+        bh = 76;
+    fill_rrect(PANEL_X, y + 22, PANEL_W, bh, 5, C_FIELD);
+    stroke_rrect(PANEL_X, y + 22, PANEL_W, bh, 5, C_LINE);
+    txt(F_MONO, 0xb9bcc6, PANEL_X + 14, y + 28, PANEL_W - 28, bh - 12, DT_WORDBREAK | DT_END_ELLIPSIS, cmd);
 }
 
 static rgb_t log_line_color(const wchar_t *line) {
@@ -1231,8 +1423,10 @@ static rgb_t log_line_color(const wchar_t *line) {
 static void page_log(void) {
     int bx = PANEL_X, by = 118, bw = PANEL_W, bh = PANEL_BOTTOM - 118, lh = 17, vis, maxs, i;
     wchar_t buf[300];
-    page_header(tr(S_NAV_LOG), tr(S_LOG_SUB));
+    int back_w = text_w(F_BOLD, tr(S_BTN_BACK)) + 36;
+    page_header(tr(S_LOG_TITLE), tr(S_LOG_SUB));
     ui_button(ID_OPEN_RUNS, PANEL_X + PANEL_W - 170, 34, 170, 38, tr(S_LOG_OPEN), 0, 1);
+    ui_button(ID_LOG_BACK, PANEL_X + PANEL_W - 170 - 10 - back_w, 34, back_w, 38, tr(S_BTN_BACK), 0, 1);
     fill_rrect_a(bx, by, bw, bh, 6, 0x07070a, 240);
     stroke_rrect(bx, by, bw, bh, 6, C_LINE);
     if (!g_log_n) {
@@ -1263,11 +1457,59 @@ static void page_log(void) {
     }
 }
 
+/* One credit: the project in bold, what the port takes from it beside it. */
+static int credit_row(int x, int y, int w, const wchar_t *name, const wchar_t *what) {
+    txt(F_BOLD, C_TEXT, x, y, 290, 24, T_LINE, name);
+    txt(F_SMALL, C_DIM, x + 300, y, w - 300, 24, T_LINE, what);
+    return y + 24;
+}
+
+#define ABOUT_PRODUCT_H 138
+#define ABOUT_CREDITS_H 194
+
+static void page_about(void) {
+    int y = 116, x = PANEL_X + 22, w = PANEL_W - 44, b1, b2, b3;
+    wchar_t buf[96];
+    page_header(tr(S_NAV_ABOUT), tr(S_ABOUT_SUB));
+    /* product */
+    ui_card(PANEL_X, y, PANEL_W, ABOUT_PRODUCT_H);
+    txt_chrome(F_H2, x, y + 12, w, 32, DT_SINGLELINE | DT_VCENTER, 0, 1, tr(S_ABOUT_PRODUCT));
+    wfmt(buf, 96, tr(S_ABOUT_VERSION), L"" NGB_VERSION_STR);
+    txt(F_SMALL, C_DIM, x, y + 46, w, 20, T_LINE, buf);
+    txt(F_BODY, C_TEXT, x, y + 66, w, 24, T_LINE, tr(S_ABOUT_AUTHOR));
+    b1 = text_w(F_BOLD, tr(S_ABOUT_GITHUB)) + 36;
+    b2 = text_w(F_BOLD, tr(S_ABOUT_CONTRIB)) + 36;
+    b3 = text_w(F_BOLD, tr(S_ABOUT_LICENSE)) + 36;
+    ui_button(ID_ABOUT_REPO, x, y + 94, b1, 34, tr(S_ABOUT_GITHUB), 0, 1);
+    ui_button(ID_ABOUT_CONTRIB, x + b1 + 10, y + 94, b2, 34, tr(S_ABOUT_CONTRIB), 0, 1);
+    ui_button(ID_ABOUT_LICENSE, x + b1 + b2 + 20, y + 94, b3, 34, tr(S_ABOUT_LICENSE), 0, 1);
+    /* credits */
+    y += ABOUT_PRODUCT_H + 10;
+    ui_card(PANEL_X, y, PANEL_W, ABOUT_CREDITS_H);
+    caption(x, y + 14, w, tr(S_ABOUT_CREDITS));
+    y += 38;
+    y = credit_row(x, y, w, L"xemu", tr(S_CRED_XEMU));
+    y = credit_row(x, y, w, L"nxdk", tr(S_CRED_NXDK));
+    y = credit_row(x, y, w, tr(S_CRED_CXBX_NAME), tr(S_CRED_CXBX));
+    y = credit_row(x, y, w, L"envytools", tr(S_CRED_ENVY));
+    y = credit_row(x, y, w, L"RenderDoc", tr(S_CRED_RDOC));
+    txt(F_SMALL, C_FAINT, x, y + 6, w, 20, T_LINE, tr(S_CRED_FULL));
+    /* legal */
+    y = 116 + ABOUT_PRODUCT_H + 10 + ABOUT_CREDITS_H + 10;
+    ui_card(PANEL_X, y, PANEL_W, PANEL_BOTTOM - y);
+    caption(x, y + 12, w, tr(S_ABOUT_LEGAL));
+    y += 34;
+    txt(F_SMALL, C_DIM, x, y, w, 20, T_LINE, tr(S_LEGAL_1));
+    txt(F_SMALL, C_DIM, x, y + 21, w, 20, T_LINE, tr(S_LEGAL_2));
+    txt(F_SMALL, C_DIM, x, y + 42, w, 20, T_LINE, tr(S_LEGAL_3));
+    txt(F_SMALL, C_DIM, x, y + 63, w, 20, T_LINE, tr(S_LEGAL_4));
+}
+
 /* ------------------------------------------------------------ general painting ---- */
 
 static void paint_sidebar(void) {
     static const int names[PG_COUNT] = {S_NAV_PLAY,     S_NAV_GRAPHICS, S_NAV_AUDIO,
-                                        S_NAV_CONTROLS, S_NAV_ADVANCED, S_NAV_LOG};
+                                        S_NAV_CONTROLS, S_NAV_ADVANCED, S_NAV_ABOUT};
     wchar_t buf[96];
     int i, y;
     wfmt(buf, 96, tr(S_SIDE_TAG), L"" NGB_VERSION_STR);
@@ -1354,8 +1596,13 @@ static void paint_all(void) {
     case PG_GRAPHICS: page_graphics(); break;
     case PG_AUDIO: page_audio(); break;
     case PG_CONTROLS: page_controls(); break;
-    case PG_ADVANCED: page_advanced(); break;
-    default: page_log(); break;
+    case PG_ADVANCED:
+        if (g_log_view)
+            page_log();
+        else
+            page_advanced();
+        break;
+    default: page_about(); break;
     }
     paint_footer();
     paint_overlay();
@@ -1367,10 +1614,15 @@ static void paint_all(void) {
 static void goto_page(int page) {
     g_page = page;
     g_open_combo = ID_NONE;
-    if (page == PG_LOG) {
-        g_log_sig = 0;
-        log_reload();
-    }
+    g_log_view = 0;
+}
+
+static void open_log_view(void) {
+    g_page = PG_ADVANCED;
+    g_open_combo = ID_NONE;
+    g_log_view = 1;
+    g_log_sig = 0;
+    log_reload();
 }
 
 static void set_language(int lang) {
@@ -1421,8 +1673,13 @@ static void activate(int id) {
         break;
     case ID_DATA_CHANGE: change_data_folder(); break;
     case ID_DATA_OPEN: open_folder(g_data); break;
-    case ID_VIEW_LOG: goto_page(PG_LOG); break;
+    case ID_VIEW_LOG: open_log_view(); break;
+    case ID_LOG_BACK: g_log_view = 0; break;
     case ID_OPEN_RUNS: open_folder(g_runs); break;
+    case ID_COPY_INFO: copy_session_info(); break;
+    case ID_ABOUT_REPO: ShellExecuteW(g_hwnd, L"open", URL_REPO, NULL, NULL, SW_SHOWNORMAL); break;
+    case ID_ABOUT_CONTRIB: ShellExecuteW(g_hwnd, L"open", URL_CONTRIB, NULL, NULL, SW_SHOWNORMAL); break;
+    case ID_ABOUT_LICENSE: ShellExecuteW(g_hwnd, L"open", URL_LICENSE, NULL, NULL, SW_SHOWNORMAL); break;
     case ID_CHK_PACING: g_set.pacing = !g_set.pacing; save_settings(); break;
     case ID_CHK_FULLSCREEN: g_set.fullscreen = !g_set.fullscreen; save_settings(); break;
     case ID_CHK_WIDESCREEN: g_set.widescreen = !g_set.widescreen; save_settings(); break;
@@ -1430,6 +1687,7 @@ static void activate(int id) {
     case ID_CHK_WAV: g_set.audio_wav = !g_set.audio_wav; save_settings(); break;
     case ID_CHK_RDOC: g_set.rdoc_key = !g_set.rdoc_key; save_settings(); break;
     case ID_CHK_LENIENT: g_set.lenient = !g_set.lenient; save_settings(); break;
+    case ID_CHK_DETAIL: g_set.detailed_log = !g_set.detailed_log; save_settings(); break;
     case ID_LANG_EN: set_language(LANG_EN); break;
     case ID_LANG_ES: set_language(LANG_ES); break;
     default: break;
@@ -1524,7 +1782,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     case WM_MOUSEWHEEL:
-        if (g_page == PG_LOG && g_log_n) {
+        if (log_view() && g_log_n) {
             g_log_scroll -= (GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA) * 4;
             if (g_log_scroll < 0)
                 g_log_scroll = 0;
@@ -1535,7 +1793,12 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (wp == VK_ESCAPE && g_open_combo != ID_NONE) {
             g_open_combo = ID_NONE;
             redraw();
-        } else if (g_page == PG_LOG) {
+        } else if (log_view()) {
+            if (wp == VK_ESCAPE) {
+                g_log_view = 0;
+                redraw();
+                return 0;
+            }
             if (wp == VK_HOME)
                 g_log_scroll = 0;
             else if (wp == VK_END)
@@ -1570,8 +1833,12 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             poll_import();
             if (g_tick % SLOW_EVERY == 0) {
                 poll_game();
-                if (g_page == PG_LOG || running())
+                if (log_view() || running())
                     log_reload();
+            }
+            if (g_copied_until && GetTickCount64() >= g_copied_until) {
+                g_copied_until = 0;
+                redraw();
             }
             if (importing())
                 g_import_seen = 1;
@@ -1581,7 +1848,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 return 0;
             }
             if (importing() || was_importing ||
-                (g_tick % SLOW_EVERY == 0 && (running() || was_running || g_page == PG_LOG)))
+                (g_tick % SLOW_EVERY == 0 && (running() || was_running || log_view())))
                 redraw();
         }
         return 0;
@@ -1670,6 +1937,10 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show) {
             g_shot_after_import = 1;
             continue;
         }
+        if (!wcscmp(a, L"--log-view")) {
+            g_log_view = 1;
+            continue;
+        }
         if (!wcscmp(a, L"--page")) {
             int pg = _wtoi(v);
             if (pg >= 0 && pg < PG_COUNT)
@@ -1698,7 +1969,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show) {
     if (g_demo == 2)
         note_error(IMPE_NOT_NGB, L"Halo: Combat Evolved", 0);
     ui_init(dpi);
-    if (g_page == PG_LOG)
+    if (!log_view())
+        g_log_view = 0; /* --log-view only applies to the Advanced page */
+    else
         log_reload();
 
     memset(&wc, 0, sizeof wc);

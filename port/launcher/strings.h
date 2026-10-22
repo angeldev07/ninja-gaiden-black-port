@@ -20,7 +20,7 @@
     X(NAV_AUDIO, L"Audio", L"Audio")                                                             \
     X(NAV_CONTROLS, L"Controls", L"Controles")                                                   \
     X(NAV_ADVANCED, L"Advanced", L"Avanzado")                                                    \
-    X(NAV_LOG, L"Log", L"Registro")                                                              \
+    X(NAV_ABOUT, L"About", L"Acerca de")                                                         \
     /* footer */                                                                                 \
     X(BTN_PLAY, L"PLAY", L"JUGAR")                                                               \
     X(BTN_STOP, L"Stop", L"Detener")                                                             \
@@ -70,6 +70,10 @@
     X(LS_RESULT, L"Result", L"Resultado")                                                        \
     X(LS_LOG, L"Log", L"Registro")                                                               \
     X(BTN_VIEW_LOG, L"View log", L"Ver el registro")                                             \
+    X(BTN_OPEN_RUNS, L"Open runs folder", L"Abrir carpeta runs")                                 \
+    X(BTN_COPY_INFO, L"Copy session info", L"Copiar info de sesión")                             \
+    X(BTN_COPIED, L"Copied", L"Copiado")                                                         \
+    X(BTN_BACK, L"Back", L"Volver")                                                              \
     /* import progress */                                                                        \
     X(IMP_TITLE, L"IMPORTING YOUR GAME", L"IMPORTANDO TU JUEGO")                                 \
     X(IMP_SCAN, L"Reading the disc image…", L"Leyendo la imagen de disco…")                      \
@@ -177,17 +181,41 @@
     X(ADV_LENIENT, L"Tolerate unimplemented calls", L"Tolerar llamadas sin implementar")         \
     X(ADV_LENIENT_DESC, L"An unimplemented kernel call returns STATUS_SUCCESS and the game goes on (it can hide failures).", \
       L"Una llamada del kernel sin implementar devuelve STATUS_SUCCESS y el juego sigue (puede ocultar fallos).") \
-    X(ADV_LOGGING, L"Logging", L"Registro")                                                      \
+    X(ADV_DETAIL, L"Detailed log", L"Log detallado")                                             \
+    X(ADV_DETAIL_DESC, L"Off writes a short log (header, warnings, errors, crash report: a few KB) that you can attach to a bug report. On writes every kernel call (MBs per session), for developers.", \
+      L"Desactivado escribe un log corto (cabecera, avisos, errores e informe de fallo: unos pocos KB) que puedes adjuntar a un reporte de error. Activado escribe cada llamada del kernel (varios MB por sesión), para desarrolladores.") \
     X(ADV_LOGCAP, L"Log lines per kernel function", L"Líneas de log por función del kernel")     \
     X(ADV_LOGCAP_DESC, L"Past that limit only the calls are counted (--log-cap). Fewer lines, shorter logs.", \
       L"Pasado ese límite solo se cuentan las llamadas (--log-cap). Menos líneas, logs más cortos.") \
     X(ADV_LOGCAP_DEF, L"2000 (default)", L"2000 (por defecto)")                                  \
     X(ADV_CMDLINE, L"PLAY COMMAND LINE", L"LÍNEA DE COMANDOS DE JUGAR")                          \
-    /* log */                                                                                    \
+    /* log viewer (a sub-view of Advanced) */                                                    \
+    X(LOG_TITLE, L"Log", L"Registro")                                                            \
     X(LOG_SUB, L"The tail of the latest ngb-loader log (runs folder).", L"La cola del último registro de ngb-loader (carpeta runs).") \
     X(LOG_OPEN, L"Open folder", L"Abrir carpeta")                                                \
     X(LOG_EMPTY, L"No logs yet. Each session writes an h6-<date>.log in the runs folder.", L"Todavía no hay registros. Cada sesión escribe un h6-<fecha>.log en la carpeta runs.") \
-    X(LOG_UPDATED, L"%ls  ·  updated %ls", L"%ls  ·  actualizado %ls")
+    X(LOG_UPDATED, L"%ls  ·  updated %ls", L"%ls  ·  actualizado %ls")                          \
+    /* about */                                                                                  \
+    X(ABOUT_SUB, L"The project, its license and its credits.", L"El proyecto, su licencia y sus créditos.") \
+    X(ABOUT_PRODUCT, L"Ninja Gaiden Black — native PC port", L"Ninja Gaiden Black — port nativo a PC") \
+    X(ABOUT_VERSION, L"Version %ls", L"Versión %ls")                                             \
+    X(ABOUT_AUTHOR, L"Unofficial fan project by angeldev07 and contributors", L"Port no oficial hecho por aficionados, por angeldev07 y colaboradores") \
+    X(ABOUT_GITHUB, L"GitHub repository", L"Repositorio en GitHub")                              \
+    X(ABOUT_CONTRIB, L"Contributors", L"Colaboradores")                                          \
+    X(ABOUT_LICENSE, L"License (GPL-3.0)", L"Licencia (GPL-3.0)")                                \
+    X(ABOUT_CREDITS, L"CREDITS", L"CRÉDITOS")                                                    \
+    X(CRED_XEMU, L"NV2A and APU behavior the renderer and audio follow (LGPL)", L"Comportamiento de NV2A y APU que siguen el render y el audio (LGPL)") \
+    X(CRED_NXDK, L"Xbox kernel export list (CC0)", L"Lista de exportaciones del kernel de Xbox (CC0)") \
+    X(CRED_CXBX_NAME, L"Cxbx-Reloaded and XboxDevWiki", L"Cxbx-Reloaded y XboxDevWiki")           \
+    X(CRED_CXBX, L"XBE, kernel and hardware documentation", L"Documentación de XBE, kernel y hardware") \
+    X(CRED_ENVY, L"NV2A documentation", L"Documentación de NV2A")                                \
+    X(CRED_RDOC, L"Capture API header (MIT)", L"Cabecera de la API de captura (MIT)")           \
+    X(CRED_FULL, L"Full list: THIRD_PARTY.md", L"Lista completa: THIRD_PARTY.md")                \
+    X(ABOUT_LEGAL, L"LEGAL", L"AVISO LEGAL")                                                     \
+    X(LEGAL_1, L"Ninja Gaiden is a trademark of Koei Tecmo; Xbox is a trademark of Microsoft.", L"Ninja Gaiden es una marca de Koei Tecmo; Xbox es una marca de Microsoft.") \
+    X(LEGAL_2, L"Not affiliated with or endorsed by Koei Tecmo, Team Ninja or Microsoft.", L"Sin afiliación ni aval de Koei Tecmo, Team Ninja ni Microsoft.") \
+    X(LEGAL_3, L"No game data is included: you need your own copy of the game.", L"No incluye datos del juego: necesitas tu propia copia.") \
+    X(LEGAL_4, L"Non-commercial project.", L"Proyecto sin fines comerciales.")
 
 enum {
 #define X(id, en, es) S_##id,

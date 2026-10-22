@@ -552,3 +552,23 @@ Details in [[gpu-nv2a]].
   - a `dco.yml` CI check. See [[adr-04-version-control]].
 - **Identity:** the owner appears publicly only as `angeldev07`. One history rewrite (noreply email, personal paths)
   is planned as the last step before the visibility flip.
+
+## [2026-10-22] feat | Launcher: Debugging section, short log by default, About page with credits
+- **Sidebar:** Play, Graphics, Audio, Controls, Advanced, **About**. The log viewer is now a sub-view of
+  Advanced (*View log*, with Back).
+- **Advanced > Debugging:**
+  - **Detailed log**, off by default. When it is off the launcher passes `--log-detail minimal`, and the log-cap
+    combo shows only when it is on.
+  - **Copy session info** puts an English block on the clipboard, ready for the bug form: version, Windows build,
+    GPU line from the latest log, settings and last session.
+- **Short log** (`port/src/logfilter.c`, tested by `logfilter_test.c`):
+  - minimal mode drops the line of every kernel call and the `    · ` detail lines, except those that report a
+    problem or the fps; it also turns off the PGRAPH method dumps;
+  - the demo for 100 s writes **78 KB** instead of about 6 MB, and the stop summary and the perf lines stay;
+  - in both modes the profile folder is written as `%USERPROFILE%`, with `\` and `/` alike.
+- **About:** "Unofficial fan project by angeldev07 and contributors", buttons to the repository, the contributors and
+  the license, the credits (xemu, nxdk, Cxbx-Reloaded and XboxDevWiki, envytools, RenderDoc; full list in
+  `THIRD_PARTY.md`) and the legal notice. Nothing is added inside the game. The game window's title says
+  "(unofficial)".
+- `port/res/version.h` is now `0.3.0-dev`. It still said 0.1.0 after the v0.2.0 release; the release workflow will
+  set it from the tag.

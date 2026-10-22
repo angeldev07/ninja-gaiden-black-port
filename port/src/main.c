@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../res/version.h"
 #include "gpu/nv2a.h"
 #include "gfx/present.h"
 #include "input/input.h"
@@ -32,7 +33,7 @@ static void usage(void) {
             "                      [--idle S] [--lenient] [--echo] [--window] [--no-pacing]\n"
             "                      [--renderer gl|soft] [--scale N|auto] [--fullscreen] [--widescreen]\n"
             "                      [--mmio-strict] [--mmio-gpu-ram] [--pgraph-frames N]\n"
-            "                      [--log-cap N] [--symbols CSV]\n"
+            "                      [--log-cap N] [--log-detail minimal|full] [--symbols CSV]\n"
             "                      [--input-script SCRIPT] [--no-host-input]\n"
             "  --log        execution log (default %%NGB_DATA%%\\runs\\h6-<date>.log)\n"
             "  --max-calls  stop after N kernel calls (default 200000; 0 = unlimited)\n"
@@ -52,6 +53,8 @@ static void usage(void) {
             "  --mmio-gpu-ram  NV2A as traced RAM instead of the model (H6 exploration)\n"
             "  --pgraph-frames N  frames with all methods in the PGRAPH log (3)\n"
             "  --log-cap N  log lines per kernel function; after that they are only counted (2000)\n"
+            "  --log-detail minimal: only the header, warnings, errors, the stop summary and the crash\n"
+            "               report (a few KB; the launcher default); full: every kernel call (default)\n"
             "  --symbols CSV  function names (Ghidra CSV) in the log and in crashes\n"
             "  --mute       no sound (the emulated APU keeps advancing)\n"
             "  --audio-wav  save what plays to <log>-audio.wav\n"
@@ -212,6 +215,13 @@ static int parse_args(void) {
                 return -1;
             g_ngb_opts.watch = argv[i];
         }
+        else if (!strcmp(a, "--log-detail") && more) {
+            const char *v = argv[++i];
+            if (!strcmp(v, "minimal"))
+                g_ngb_opts.log_minimal = 1;
+            else if (strcmp(v, "full"))
+                return -1;
+        }
         else if (!strcmp(a, "--log-cap") && more)
             g_ngb_opts.log_cap = strtoul(argv[++i], NULL, 0);
         else if (!strcmp(a, "--window"))
@@ -284,13 +294,16 @@ static int parse_args(void) {
                         "must not go there. Use a path under NGB_DATA.\n", g_ngb_opts.log_path);
         return -1;
     }
+    if (g_ngb_opts.log_minimal)
+        g_ngb_opts.pgraph_frames = g_ngb_opts.pgraph_at = 0; /* no method dumps in the short log */
     LocalFree(wargv);
     return 0;
 }
 
 static void log_header(const xbe_t *xbe) {
     uint32_t tls_total = ngb_tls_total_size(xbe);
-    ngb_log("ngb-loader H6: native boot of an XBE");
+    ngb_log("ngb-loader %s: native boot of an XBE (log: %s)", NGB_VERSION_STR,
+            g_ngb_opts.log_minimal ? "minimal" : "full");
     ngb_log("xbe: %s", g_ngb_opts.xbe_path);
     ngb_log("xbe: base 0x%08X, image 0x%X, headers 0x%X, %u sections, title id 0x%08X",
             xbe->base, xbe->size_of_image, xbe->size_of_headers, xbe->section_count,
@@ -338,7 +351,7 @@ __declspec(dllexport) int __cdecl ngb_main(void) {
         gfx_config_t cfg;
         set_dpi_aware();
         memset(&cfg, 0, sizeof cfg);
-        cfg.title = "Ninja Gaiden Black · native port"; /* UTF-8: gfx_init_ex converts it to UTF-16 */
+        cfg.title = "Ninja Gaiden Black · native port (unofficial)"; /* UTF-8: gfx_init_ex converts it to UTF-16 */
         cfg.width = 720;
         cfg.height = 480;
         cfg.scale = 2;

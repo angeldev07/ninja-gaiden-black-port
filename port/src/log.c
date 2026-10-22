@@ -14,12 +14,14 @@
 #include "gpu/nv2a.h"
 #include "input/input.h"
 #include "kernel/kernel.h"
+#include "logfilter.h"
 
 static CRITICAL_SECTION g_log_lock;
 static FILE *g_log_file;
 static volatile LONG g_stopping;
 static LARGE_INTEGER g_t0, g_freq;
 static volatile LONG64 g_log_ticks; /* time inside ngb_log_raw (lock included) */
+static char g_home[MAX_PATH];       /* %USERPROFILE%: scrubbed from every line */
 
 long long ngb_log_ticks(void) { return (long long)g_log_ticks; }
 
@@ -27,6 +29,8 @@ int ngb_log_open(const char *path) {
     InitializeCriticalSection(&g_log_lock);
     QueryPerformanceFrequency(&g_freq);
     QueryPerformanceCounter(&g_t0);
+    if (!GetEnvironmentVariableA("USERPROFILE", g_home, sizeof g_home) || strlen(g_home) < 4)
+        g_home[0] = 0; /* too short to be a profile folder ("C:\\" would match everything) */
     if (fopen_s(&g_log_file, path, "wb") || !g_log_file)
         return -1;
     /* NGB_LOG_UNBUFFERED=1: every line reaches the disk (to debug deaths without a report). */
@@ -77,6 +81,10 @@ void ngb_logv(const char *fmt, va_list ap) {
         n = 0;
     if (n > (int)sizeof buf - 2)
         n = (int)sizeof buf - 2;
+    buf[n] = 0;
+    if (g_ngb_opts.log_minimal && ngb_logline_is_detail(buf))
+        return;
+    n = (int)ngb_log_scrub(buf, sizeof buf - 1, g_home);
     buf[n] = '\n';
     buf[n + 1] = 0;
     ngb_log_raw(buf);

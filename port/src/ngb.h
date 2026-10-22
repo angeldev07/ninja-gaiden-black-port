@@ -48,6 +48,7 @@ typedef struct ngb_options {
     unsigned pgraph_frames;  /* frames with all methods in the PGRAPH log */
     unsigned pgraph_at;      /* plus, 3 full frames starting at this one (0 = no) */
     unsigned long log_cap;   /* log lines per kernel function (0 = unlimited) */
+    int log_minimal;         /* --log-detail minimal: no per-call lines (logfilter.h) */
     const char *symbols;     /* symbols CSV (optional) */
     int window;              /* 1: opens the presenter window (gfx/present.c, H7); 2: hidden */
     int no_pacing;           /* 1: FLIP_STALL does not wait for the next 1/60 s (H7b) */
