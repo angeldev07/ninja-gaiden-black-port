@@ -71,3 +71,25 @@ esa es la decisión de H7.
   - `NtDeleteFile`, `NtQueryDirectoryFile` y `ObReferenceObjectByName`;
   - las funciones `Xc*` de criptografía.
 - En total hay 118 exports implementados de los 371 de la tabla.
+
+## Nueva partida: el capítulo 1 se quedaba en negro (`VERIFIED`)
+
+- **Síntoma:** tras la tarjeta "Chapter 1 – Proceed" (botón X), la pantalla se quedaba en negro con el juego
+  dibujando a 60 fps.
+- **Diagnóstico:**
+  - con RenderDoc, la escena del nivel se dibujaba entera, con Ryu y la barra de vida, y el último draw del frame
+    era un quad negro opaco a pantalla completa: el fundido de entrada, con el color de vértice `(0,0,0,1)`;
+  - las 587 primitivas eran idénticas en cada frame: la lógica del juego no avanzaba;
+  - con `--log-cap 20000`, el hilo principal repetía sin fin `DeleteFile("z:\rtm_yasik.afs")`, el borrado de un
+    AFS de la caché del disco duro (Z:, partición 5) para hacer sitio al del nivel nuevo.
+- **Causa:** `NtSetInformationFile` rechazaba la clase 13 (`FileDispositionInformation`), con la que XAPI
+  borra. Estaba en la lista negra para que el juego no pudiera borrar archivos del PC. `DeleteFile` fallaba y el
+  juego lo reintentaba en cada frame.
+- **Arreglo:** la clase 13 se acepta solo si el handle está dentro del disco duro virtual (`NGB_DATA\runs\hdd`),
+  según la ruta final que da Windows (`GetFinalPathNameByHandle`, que resuelve enlaces y `..`). `NtOpenFile` pide
+  `DELETE` al host cuando el juego lo pide fuera de D:.
+- **Resultado:** el capítulo 1 empieza: cinemática con motor y gameplay en el desfiladero.
+- **Herramienta:** el guion de nueva partida (lecturas del mando, sin partida guardada):
+  `t=205p:START@12p,t=247p:START@12p,t=314p:START@12p,t=343p:START@12p,t=377p:START@12p,t=521p:A@12p,`
+  `t=684p:START@12p,t=718p:START@12p,t=1114p:START@12p,t=7500p:X@12p`. El gameplay empieza hacia el frame 9000.
+

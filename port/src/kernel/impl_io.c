@@ -349,6 +349,8 @@ static uint32_t open_file(uint32_t *handle_out, uint32_t access, const uint32_t 
         waccess |= GENERIC_READ;
     if (access & (GENERIC_WRITE | FILE_WRITE_DATA | FILE_APPEND_DATA | DELETE | 0x40000000u))
         waccess |= GENERIC_WRITE;
+    if ((access & DELETE) && !readonly)
+        waccess |= DELETE; /* DeleteFile: FileDispositionInformation (ver NtSetInformationFile) */
     if (!waccess)
         waccess = FILE_READ_ATTRIBUTES;
     if (disposition > 5)
@@ -517,14 +519,48 @@ static uint64_t NtQueryVolumeInformationFile(uint32_t *args) {
 }
 
 /* 226 NTSTATUS NtSetInformationFile(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG, CLASS) */
+/* 1 si el handle es un archivo o carpeta dentro del disco duro virtual (g_hdd_root), con la
+ * ruta final que da Windows (resuelve enlaces, `..` y mayúsculas). */
+static int handle_in_hdd(HANDLE h) {
+    static char root[MAX_PATH + 8];
+    char path[MAX_PATH + 8];
+    size_t n;
+    DWORD len;
+    if (!g_io_ok || is_raw(h))
+        return 0;
+    if (!root[0]) {
+        HANDLE r = CreateFileA(g_hdd_root, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE |
+                               FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+        if (r == INVALID_HANDLE_VALUE)
+            return 0;
+        len = GetFinalPathNameByHandleA(r, root, MAX_PATH, FILE_NAME_NORMALIZED);
+        CloseHandle(r);
+        if (!len || len >= MAX_PATH) {
+            root[0] = 0;
+            return 0;
+        }
+    }
+    len = GetFinalPathNameByHandleA(h, path, MAX_PATH, FILE_NAME_NORMALIZED);
+    n = strlen(root);
+    return len && len < MAX_PATH && len > n && !_strnicmp(path, root, n) && path[n] == '\\';
+}
+
 static uint64_t NtSetInformationFile(uint32_t *args) {
     static nt_query_info_fn fn;
-    /* Lista blanca: básica (4), asignación (19), fin de archivo (20) y posición (14).
-     * Fuera Disposition (13) y DispositionEx (64), que borran en el PC, y Rename (10) y
-     * Link (11), cuyo nombre (ANSI en Xbox) escaparía del confinamiento de rutas. */
+    /* Lista blanca: básica (4), asignación (19), fin de archivo (20) y posición (14), y
+     * Disposition (13, DeleteFile) solo dentro del disco duro virtual: el juego borra archivos
+     * de su caché en Z: al cambiar de nivel y reintenta sin fin si falla (la pantalla negra
+     * al empezar el capítulo 1). Fuera DispositionEx (64) y Rename (10) y Link (11), cuyo
+     * nombre (ANSI en Xbox) escaparía del confinamiento de rutas. */
     switch (ARG(4)) {
     case 4: case 14: case 19: case 20:
         break;
+    case 13:
+        if (handle_in_hdd((HANDLE)PTR(0))) {
+            ngb_log("    · NtSetInformationFile: borrado en el disco duro virtual (handle 0x%08X)", ARG(0));
+            break;
+        }
+        /* fall through */
     default:
         ngb_log("    · NtSetInformationFile: clase %u no permitida", ARG(4));
         if (PTR(1)) {

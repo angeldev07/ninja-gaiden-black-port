@@ -324,3 +324,13 @@ Detalle en [[gpu-nv2a]].
 
 Detalle en [[audio-apu]].
 
+## [2026-10-22] fix | Nueva partida: el capítulo 1 ya no se queda en negro
+- **Síntoma:** tras la tarjeta del capítulo 1, pantalla negra con el juego dibujando a 60 fps.
+- **Causa:** al cambiar de nivel, el juego borra un AFS viejo de su caché en Z: (`DeleteFile`). `NtSetInformationFile`
+  rechazaba el borrado (clase 13), y el juego lo reintentaba sin fin detrás del fundido en negro.
+- **Arreglo:** el borrado se permite solo dentro del disco duro virtual de NGB_DATA.
+- **Resultado:** el capítulo 1 se juega. Se cerró con RenderDoc (el último draw era el fundido) y con `--log-cap`
+  (el bucle de `DeleteFile`).
+
+Detalle en [[arranque-nativo]].
+
