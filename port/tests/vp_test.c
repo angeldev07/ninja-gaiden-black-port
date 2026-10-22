@@ -194,6 +194,14 @@ int main(void) {
     vp_advance(&s, 1.0);
     CHECK(s.voices_on == 2, "solo cuentan los VOICE_ON válidos (%u)", s.voices_on);
 
+    /* Voces libres a avisar: la 9 terminó sola y la 5 recibió VOICE_OFF, en ese orden. */
+    {
+        uint32_t h = 0xFFFF;
+        CHECK(vp_take_idle(&s, &h) && h == 9, "voz libre: fin del búfer (%u)", h);
+        CHECK(vp_take_idle(&s, &h) && h == 5, "voz libre: VOICE_OFF (%u)", h);
+        CHECK(!vp_take_idle(&s, &h), "cola de voces libres vacía");
+    }
+
     test_mix();
     if (g_fail)
         return 1;

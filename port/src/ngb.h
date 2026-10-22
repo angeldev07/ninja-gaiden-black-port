@@ -153,6 +153,8 @@ uint32_t ngb_tls_total_size(const xbe_t *xbe);
 void ngb_crash_install(void);
 void ngb_apu_tick(void);    /* DSP falso y procesador de voces (lo llama el hilo de DPC) */
 void ngb_apu_summary(void); /* contadores del procesador de voces, al log */
+/* Entrega las voces libres pendientes: por cada una prepara la trampa y llama a isr(ctx). */
+void ngb_apu_interrupt(void (*isr)(void *ctx), void *ctx);
 
 /* symbols.c: nombres de funciones del XBE (--symbols, CSV de Ghidra en NGB_DATA) */
 int ngb_symbols_load(const char *path);

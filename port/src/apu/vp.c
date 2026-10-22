@@ -21,6 +21,21 @@ static void set_low24(uint8_t *voice, uint32_t offset, uint32_t value) {
     *w = (*w & ~VP_OFFSET_MASK) | (value & VP_OFFSET_MASK);
 }
 
+static void push_idle(vp_state_t *s, uint32_t handle) {
+    if (s->idle_tail - s->idle_head >= VP_IDLE_QUEUE) {
+        s->idle_dropped++;
+        return;
+    }
+    s->idle[s->idle_tail++ % VP_IDLE_QUEUE] = (uint16_t)handle;
+}
+
+int vp_take_idle(vp_state_t *s, uint32_t *handle) {
+    if (s->idle_head == s->idle_tail)
+        return 0;
+    *handle = s->idle[s->idle_head++ % VP_IDLE_QUEUE];
+    return 1;
+}
+
 void vp_init(vp_state_t *s) {
     memset(s, 0, sizeof *s);
     s->current = VP_NO_VOICE;
@@ -46,6 +61,7 @@ void vp_method(vp_state_t *s, uint32_t method, uint32_t value) {
             s->active[handle] = 0;
             if ((v = voice_at(s, handle)) != NULL)
                 *word(v, VP_VOICE_PAR_STATE) &= ~(VP_STATE_ACTIVE | VP_STATE_NEW_VOICE);
+            push_idle(s, handle); /* como xemu: todo VOICE_OFF avisa, estuviera activa o no */
         }
         return;
     case VP_PIO_VOICE_PAUSE:
@@ -152,6 +168,7 @@ int vp_voice_move(vp_state_t *s, uint32_t h, uint8_t *v, uint32_t step) {
             *word(v, VP_VOICE_PAR_STATE) &= ~VP_STATE_ACTIVE;
             s->active[h] = 0;
             s->voices_ended++;
+            push_idle(s, h);
             alive = 0;
         }
     }

@@ -96,6 +96,13 @@ static __declspec(thread) uint32_t t_mmio_page, t_mmio_addr, t_mmio_write;
 
 static volatile uint32_t g_apu_gpsaddr; /* NV_PAPU_GPSADDR: lista SG de la memoria del GP DSP */
 
+/* Trampa del front end de la APU que ve la ISR de DirectSound mientras se le entrega una voz
+ * libre (ngb_apu_interrupt): ISTS (0x1000), FECTL (0x1100, motivo en los bits 8-11) y el
+ * método y parámetro decodificados (FEDECMETH 0x1300, FEDECPARAM 0x1304). Sus lecturas los
+ * toman de aquí (mmio_access); fuera de una entrega, ISTS lee 0. */
+static volatile uint32_t g_apu_ists, g_apu_fe_meth, g_apu_fe_param, g_apu_trap;
+static uint32_t g_apu_idle_irqs;
+
 /* Procesador de voces (apu/vp.c): los métodos PIO llegan desde el hilo del juego que los
  * escribe y el avance desde el hilo de DPC. El tick usa TryEnter: un hilo del juego
  * suspendido con el lock tomado no puede colgar al hilo de DPC. */
@@ -225,10 +232,37 @@ static DWORD WINAPI audio_pump(LPVOID unused) {
     }
 }
 
+/*
+ * Voces libres (SE2FE_IDLE_VOICE): por cada una se prepara la trampa del front end (método
+ * 0x8000, parámetro = voz, motivo "requested" en FECTL, ISTS = GINTSTS | FETINTSTS) y se
+ * llama a la ISR de la APU que conectó DirectSound. Lo hace el hilo de DPC (impl_ke.c), que
+ * pasa la llamada a la ISR en `isr`. Sin ISR conectada las voces esperan en la cola.
+ */
+void ngb_apu_interrupt(void (*isr)(void *ctx), void *ctx) {
+    uint32_t handle;
+    int got;
+    for (;;) {
+        if (!TryEnterCriticalSection(&g_vp_lock))
+            return; /* lo tiene un hilo del juego: en el siguiente tick */
+        got = vp_take_idle(&g_vp, &handle);
+        LeaveCriticalSection(&g_vp_lock);
+        if (!got)
+            return;
+        g_apu_fe_meth = 0x8000u;
+        g_apu_fe_param = handle;
+        g_apu_trap = 1;
+        g_apu_ists = 0x11u;
+        isr(ctx);
+        g_apu_ists = 0;
+        g_apu_trap = 0;
+        g_apu_idle_irqs++;
+    }
+}
+
 void ngb_apu_summary(void) {
-    ngb_log("apu: %u VOICE_ON, %u voces terminadas solas; audio %s, %u frames descartados, "
-            "%u vaciados",
-            g_vp.voices_on, g_vp.voices_ended,
+    ngb_log("apu: %u VOICE_ON, %u voces terminadas solas, %u avisos de voz libre (%u perdidos); "
+            "audio %s, %u frames descartados, %u vaciados",
+            g_vp.voices_on, g_vp.voices_ended, g_apu_idle_irqs, g_vp.idle_dropped,
             g_audio == 1 ? "waveOut 48 kHz" : g_audio == 0 ? "sin dispositivo" : "sin usar",
             audio_out_dropped(), audio_out_underruns());
     if (g_audio_wav && TryEnterCriticalSection(&g_vp_lock)) {
@@ -345,10 +379,19 @@ static LONG mmio_access(EXCEPTION_RECORD *rec, CONTEXT *c) {
     if (!VirtualProtect((void *)(uintptr_t)page, 0x1000, PAGE_READWRITE, &old))
         return EXCEPTION_CONTINUE_SEARCH;
     if (rec->ExceptionInformation[0] == 0) {
-        uint32_t i;
+        uint32_t i, reg = addr & ~3u;
+        volatile uint32_t *r = (volatile uint32_t *)(uintptr_t)reg;
         for (i = 0; i < sizeof k_mmio_fixed / sizeof k_mmio_fixed[0]; i++)
-            if ((addr & ~3u) == k_mmio_fixed[i].addr)
-                *(volatile uint32_t *)(uintptr_t)k_mmio_fixed[i].addr = k_mmio_fixed[i].value;
+            if (reg == k_mmio_fixed[i].addr)
+                *r = k_mmio_fixed[i].value;
+        if (reg == 0xFE801000u)
+            *r = g_apu_ists;
+        else if (reg == 0xFE801100u)
+            *r = (*r & ~0xF00u) | (g_apu_trap ? 0xF00u : 0u);
+        else if (reg == 0xFE801300u && g_apu_trap)
+            *r = g_apu_fe_meth;
+        else if (reg == 0xFE801304u && g_apu_trap)
+            *r = g_apu_fe_param;
     }
     n = InterlockedIncrement(&g_mmio_count);
     if (n <= MMIO_LOG_MAX) {

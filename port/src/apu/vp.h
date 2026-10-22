@@ -53,6 +53,7 @@
 #define VP_VOICE_PAR_NEXT 0x5C   /* EBO: última muestra del búfer (24 bits) */
 #define VP_VOICE_TAR_PITCH_LINK 0x7C /* pitch (16 altos, con signo) | siguiente voz */
 #define VP_OFFSET_MASK 0x00FFFFFFu
+#define VP_IDLE_QUEUE 512
 
 typedef struct vp_state {
     uint8_t *voices;  /* tabla de voces (NULL hasta que el juego fija VPVADDR) */
@@ -61,6 +62,12 @@ typedef struct vp_state {
     uint8_t active[VP_MAX_VOICES];
     double frac[VP_MAX_VOICES]; /* fracción de muestra acumulada */
     uint32_t voices_on, voices_ended; /* contadores para el resumen */
+    /* Voces que han pasado a libres (VOICE_OFF, VOICE_RELEASE o fin del búfer). El hardware
+     * avisa de cada una con una trampa del front end (SE2FE_IDLE_VOICE) y la interrupción de
+     * la APU; DirectSound solo da un búfer por parado cuando la recibe. */
+    uint16_t idle[VP_IDLE_QUEUE];
+    uint32_t idle_head, idle_tail; /* cola circular: se saca en head, se mete en tail */
+    uint32_t idle_dropped;
 } vp_state_t;
 
 void vp_init(vp_state_t *s);
@@ -76,5 +83,7 @@ double vp_voice_rate(const uint8_t *voice);
  *   vp_voice_move: avanza su CBO `step` muestras con bucle o fin; 0 si la voz terminó. */
 uint8_t *vp_voice_begin(vp_state_t *s, uint32_t h);
 int vp_voice_move(vp_state_t *s, uint32_t h, uint8_t *v, uint32_t step);
+/* Saca la siguiente voz libre pendiente de avisar; 0 si no hay. */
+int vp_take_idle(vp_state_t *s, uint32_t *handle);
 
 #endif

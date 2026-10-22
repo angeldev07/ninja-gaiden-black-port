@@ -8,8 +8,9 @@
  * - Objetos dispatcher (KEVENT, KTIMER...) que viven en memoria del juego: cada dirección
  *   se asocia a un objeto de Windows creado al primer uso según DISPATCHER_HEADER.Type.
  * - Timers y DPC: un hilo Xbox propio ("DPC") ejecuta las rutinas diferidas a DPC level.
- * - Interrupciones: se aceptan (KeConnectInterrupt devuelve TRUE) pero nunca se disparan:
- *   no hay hardware. Es la frontera de H6.
+ * - Interrupciones: se aceptan todas (KeConnectInterrupt devuelve TRUE). El hilo de DPC
+ *   dispara dos: la del NV2A (nivel 3, vblank sintético) y la de la APU (nivel 5, avisos
+ *   de voz libre); las demás nunca se disparan.
  */
 #include "../ngb.h"
 
@@ -435,6 +436,7 @@ static INIT_ONCE g_dpc_once = INIT_ONCE_STATIC_INIT;
 typedef void(__stdcall *dpc_routine_fn)(uint32_t dpc, uint32_t ctx, uint32_t a1, uint32_t a2);
 
 static uint8_t *g_gpu_interrupt; /* KINTERRUPT conectado al nivel 3 (NV2A) */
+static uint8_t *g_apu_interrupt; /* KINTERRUPT conectado al nivel 5 (APU, DirectSound) */
 static ULONGLONG g_next_vblank;
 
 typedef uint8_t(__stdcall *isr_fn)(uint32_t interrupt, uint32_t context);
@@ -454,6 +456,17 @@ static void vblank_tick(ULONGLONG now, ULONGLONG *next) {
     }
     if (g_next_vblank < *next)
         *next = g_next_vblank;
+}
+
+/* Llama a la ISR de un KINTERRUPT conectado, a su IRQL. */
+static void call_isr(void *k) {
+    uint8_t *ki = (uint8_t *)k;
+    uint32_t old;
+    if (!ki[0x10])
+        return;
+    old = raise_irql(*(uint32_t *)(ki + 0xC) & 0xFF);
+    ((isr_fn)(uintptr_t) * (uint32_t *)ki)((uint32_t)(uintptr_t)ki, *(uint32_t *)(ki + 4));
+    lower_irql(old);
 }
 
 static void run_dpc(uint32_t dpc) {
@@ -504,6 +517,8 @@ static void __stdcall dpc_thread(uint32_t unused) {
             run_dpc(fire[i]);
         vblank_tick(now, &next);
         ngb_apu_tick();
+        if (g_apu_interrupt)
+            ngb_apu_interrupt(call_isr, g_apu_interrupt);
         ngb_watch_tick();
         if (next > now + 16)
             next = now + 16;
@@ -664,9 +679,14 @@ static uint64_t KeInitializeInterrupt(uint32_t *args) {
 /* 98 BOOLEAN KeConnectInterrupt(PKINTERRUPT) / 100 BOOLEAN KeDisconnectInterrupt(PKINTERRUPT) */
 static uint64_t KeConnectInterrupt(uint32_t *args) {
     uint8_t *k = (uint8_t *)PTR(0);
-    ngb_log("    · interrupción conectada: nivel %u, ISR 0x%08X (nunca se disparará)",
-            *(uint32_t *)(k + 8), *(uint32_t *)k);
+    uint32_t level = *(uint32_t *)(k + 8);
+    ngb_log("    · interrupción conectada: nivel %u, ISR 0x%08X%s", level, *(uint32_t *)k,
+            level == 3 || level == 5 ? "" : " (nunca se disparará)");
     k[0x10] = 1;
+    if (level == 5) { /* la APU: avisos de voz libre (crash.c, ngb_apu_interrupt) */
+        g_apu_interrupt = k;
+        dpc_init_once();
+    }
     if (*(uint32_t *)(k + 8) == 3) { /* el NV2A: el vblank sintético llama a esta ISR */
         g_gpu_interrupt = k;
         dpc_init_once();

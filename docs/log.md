@@ -266,3 +266,16 @@ Detalle en [[gpu-nv2a]].
 - **Lección:** volcar los registros reales antes de suponer qué escribe D3D en ellos.
 
 Detalle en [[gpu-nv2a]].
+
+## [2026-10-22] fix | La demo pasa de la primera cinemática: avisos de voz libre de la APU
+- **Síntoma:** al entrar la primera cinemática de la demo, el juego esperaba en bucle a que
+  `IDirectSoundBuffer_GetStatus` dejara de decir PLAYING tras un `StopEx`.
+- **Causa:** DirectSound solo marca un búfer como parado cuando la ISR de la APU recibe la trampa
+  `SE2FE_IDLE_VOICE`. Hasta ahora no se disparaba ninguna interrupción de la APU.
+- **Arreglo:** cola de voces libres en el procesador de voces, e interrupción de nivel 5 desde el hilo de DPC
+  con `ISTS`, `FECTL`, `FEDECMETH` y `FEDECPARAM` simulados.
+- **Resultado:** la demo sigue, y además se recuperan las voces; en 200 s pasa de 46 a 993 sonidos.
+- **Herramienta nueva:** `H5DecompAt.java` (en NGB_DATA, fuera del repo) decompila rutinas que no tienen función
+  en el análisis, como las ISR y las DPC registradas en ejecución.
+
+Detalle en [[audio-apu]].
