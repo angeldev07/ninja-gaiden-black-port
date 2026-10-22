@@ -30,6 +30,24 @@ uint32_t pb_run(pb_state_t *st, const uint8_t *base, uint32_t limit, uint32_t ge
             }
             ok_page = get >> 12;
         }
+        if (st->count > 1 && st->non_increasing && cb && cb->bulk) {
+            /* Racha de datos: hasta PUT (o el límite), el fin de la página y el tope de palabras. */
+            uint32_t n = st->count, room = ((put > get && put < limit ? put : limit) - get) / 4;
+            uint32_t page = (0x1000u - (get & 0xFFFu)) / 4;
+            if (n > room)
+                n = room;
+            if (n > page)
+                n = page;
+            if (n > max_words - done)
+                n = max_words - done;
+            if (n > 1 && cb->bulk(user, st->subchannel, st->method, (const uint32_t *)(base + get), n)) {
+                get += n * 4;
+                done += n;
+                st->words += n;
+                st->count -= n;
+                continue;
+            }
+        }
         memcpy(&word, base + get, 4);
         get += 4;
         done++;

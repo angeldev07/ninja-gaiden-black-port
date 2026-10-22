@@ -189,7 +189,55 @@ static void test_unreadable_page(void) {
     CHECK(s.nevents == 2 && s.events[0] == PB_EVENT_JUMP && s.events[1] == PB_EVENT_ERROR);
 }
 
+/* Rachas en bloque: el callback recibe los datos sin pasar de PUT ni de la página. */
+static uint32_t g_bulk_sum, g_bulk_words, g_bulk_calls;
+static int g_bulk_accept;
+
+static int on_bulk(void *user, uint32_t sub, uint32_t method, const uint32_t *words, uint32_t n) {
+    uint32_t i;
+    (void)user;
+    (void)sub;
+    if (!g_bulk_accept || method != 0x1818)
+        return 0;
+    for (i = 0; i < n; i++)
+        g_bulk_sum += words[i];
+    g_bulk_words += n;
+    g_bulk_calls++;
+    return 1;
+}
+
+static void test_bulk(void) {
+    static uint32_t buf[0x2000 / 4];
+    static const pb_callbacks_t cb = {on_method, on_event, NULL, on_bulk};
+    pb_state_t st;
+    sink_t s;
+    uint32_t get, i;
+    /* Cabecera en 0xFF8: 1 palabra en la página 0 y 999 en la 1 */
+    buf[0xFF8 / 4] = noninc(0, 0x1818, 1000);
+    for (i = 0; i < 1000; i++)
+        buf[0xFFC / 4 + i] = i + 1;
+    memset(&st, 0, sizeof st);
+    memset(&s, 0, sizeof s);
+    g_bulk_accept = 1;
+    /* PUT a 100 palabras de datos: el resto llega en el segundo avance. */
+    get = pb_run(&st, (const uint8_t *)buf, sizeof buf, 0xFF8, 0xFFC + 100 * 4, 1u << 20, &cb, &s);
+    CHECK(get == 0xFFC + 100 * 4 && st.count == 900);
+    get = pb_run(&st, (const uint8_t *)buf, sizeof buf, get, 0xFFC + 1000 * 4, 1u << 20, &cb, &s);
+    CHECK(get == 0xFFC + 1000 * 4 && st.count == 0 && st.errors == 0);
+    /* La primera palabra va sola (fin de la página 0, n = 1 no usa el bloque). */
+    CHECK(s.n == 1 && s.r[0].param == 1);
+    CHECK(g_bulk_words == 999 && g_bulk_sum == 1000u * 1001u / 2u - 1u && g_bulk_calls == 2);
+    CHECK(st.words == 1001);
+    /* Si el callback no lo atiende, todo va palabra a palabra. */
+    memset(&st, 0, sizeof st);
+    memset(&s, 0, sizeof s);
+    g_bulk_accept = 0;
+    get = pb_run(&st, (const uint8_t *)buf, sizeof buf, 0xFF8, 0xFFC + 20 * 4, 1u << 20, &cb, &s);
+    CHECK(get == 0xFFC + 20 * 4 && s.n == 20 && s.r[19].param == 20);
+}
+
 int main(void) {
+    test_bulk();
     test_unreadable_page();
     test_increasing_methods();
     test_non_increasing_and_subchannel();
@@ -201,6 +249,6 @@ int main(void) {
         fprintf(stderr, "pushbuf_test: %d fallos\n", g_failures);
         return 1;
     }
-    printf("pushbuf_test: OK (7 pruebas)\n");
+    printf("pushbuf_test: OK (8 pruebas)\n");
     return 0;
 }

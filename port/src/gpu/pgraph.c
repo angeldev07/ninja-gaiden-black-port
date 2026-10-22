@@ -1254,6 +1254,67 @@ static void on_event(void *user, int kind, uint32_t at, uint32_t word, uint32_t 
                   at, word, target);
 }
 
+/* Datos de vértices en bloque (INLINE_ARRAY y ARRAY_ELEMENT16/32): son dos tercios de las
+ * palabras del push buffer, y por on_method cada una pagaba el despacho entero. Con el log
+ * del frame activo van palabra a palabra, para que record() las vea. */
+static int on_bulk(void *user, uint32_t sub, uint32_t method, const uint32_t *words, uint32_t n) {
+    uint32_t i, *dst;
+    (void)user;
+    if ((method != 0x1818 && method != 0x1800 && method != 0x1808) || logging() ||
+        (g_class[sub & 7] && g_class[sub & 7] != 0x97))
+        return 0;
+    g_words += n;
+    g_hist[method / 4] += n;
+    if (!g_frame0_done)
+        g_hist_frame0[method / 4] += n;
+    g_run.active = 0;
+    if (g_gl && g_r.m[method / 4] != words[n - 1]) { /* lo mismo que gl_track con la última */
+        g_r.m[method / 4] = words[n - 1];
+        g_r.blk_stamp[method / PGL_BLOCK] = ++g_r.stamp;
+    }
+    if (method == 0x1818) {
+        while (n) {
+            uint32_t k = g_inline_cap - g_inline_n;
+            if (!k) { /* lleno: inline_push lo hace crecer, o descarta la palabra en el tope */
+                inline_push(*words++);
+                n--;
+                if (g_inline_n == g_inline_cap)
+                    return 1;
+                continue;
+            }
+            if (k > n)
+                k = n;
+            memcpy(g_inline + g_inline_n, words, (size_t)k * 4);
+            g_inline_n += k;
+            words += k;
+            n -= k;
+        }
+        return 1;
+    }
+    if (!g_gl)
+        return 1;
+    if (method == 0x1808) {
+        for (i = 0; i < n; i++)
+            aidx_push(words[i]);
+        return 1;
+    }
+    /* ARRAY_ELEMENT16: dos índices por palabra, el bajo primero */
+    if (g_aidx_cap - g_aidx_n >= 2 * n) {
+        dst = g_aidx + g_aidx_n;
+        for (i = 0; i < n; i++) {
+            dst[2 * i] = words[i] & 0xFFFF;
+            dst[2 * i + 1] = words[i] >> 16;
+        }
+        g_aidx_n += 2 * n;
+    } else {
+        for (i = 0; i < n; i++) {
+            aidx_push(words[i] & 0xFFFF);
+            aidx_push(words[i] >> 16);
+        }
+    }
+    return 1;
+}
+
 /* Base en el host del objeto DMA del kick en curso (para on_readable). */
 static const uint8_t *g_kick_base;
 
@@ -1267,7 +1328,7 @@ static int on_readable(void *user, uint32_t offset) {
            !(m.Protect & (PAGE_NOACCESS | PAGE_GUARD));
 }
 
-static const pb_callbacks_t k_cb = {on_method, on_event, on_readable};
+static const pb_callbacks_t k_cb = {on_method, on_event, on_readable, on_bulk};
 
 typedef struct kick_args {
     uint32_t dma_instance, get, put;

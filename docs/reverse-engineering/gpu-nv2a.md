@@ -259,6 +259,14 @@ input. Los agentes tienen que limpiar sus capturas y buscar antes el caso de pru
     que aquí no hace falta.
 - **Diagnóstico:** un kick que no llega a PUT vuelca al log sus primeros saltos.
 
+**Datos de vértices en bloque (`on_bulk`):**
+- `ARRAY_ELEMENT16` e `INLINE_ARRAY` son dos tercios de las palabras del push buffer (1 097 M y 751 M
+  en una partida de 70 min).
+- `pb_run` entrega las rachas no crecientes de una vez, sin cruzar de página ni pasar de PUT. Con el log
+  del frame activo siguen yendo palabra a palabra.
+- **Medida:** en la demo determinista, frames 2400-6000, `pb_run` baja de ~8,4 a ~7,3 ms por frame.
+- **Queda sin explicar:** unos 4 ms de `pb_run` fuera del GL. Hace falta perfilarlo.
+
 **Probado y descartado:** sustituir el traspaso por eventos al hilo de render por una espera activa. En esta CPU
 (Ryzen 7 5700G) añadía ~17 ms por frame, así que se queda el traspaso por eventos (~1,6 ms por frame en total).
 

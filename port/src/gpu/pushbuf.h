@@ -49,6 +49,10 @@ typedef struct pb_callbacks {
     /* Opcional: 0 si la página de 4 KB de `offset` no se puede leer (memoria sin reservar en
      * el host). Se pregunta al entrar en cada página; si dice 0, error y parada. */
     int (*readable)(void *user, uint32_t offset);
+    /* Opcional: `n` palabras seguidas de un método no creciente (datos de vértices), de una
+     * vez y sin cruzar de página. Devuelve 0 si no lo atiende: entonces van palabra a palabra
+     * por `method`. */
+    int (*bulk)(void *user, uint32_t subchannel, uint32_t method, const uint32_t *words, uint32_t n);
 } pb_callbacks_t;
 
 /*
