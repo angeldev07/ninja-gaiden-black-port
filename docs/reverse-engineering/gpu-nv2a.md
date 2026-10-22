@@ -303,7 +303,9 @@ en el modo fijo.
     suma de los demás;
   - las model-view están en `0x0480 + m·0x40` y sus inversas en `0x0580 + m·0x40`, ponderadas con los pesos del
     atributo 1;
-  - la posición es la suma en espacio de ojo multiplicada por la proyección `0x0440`;
+  - la posición es la suma en espacio de ojo multiplicada por la **matriz compuesta**. Con skinning, D3D deja en
+    ella solo la proyección y el viewport, y el registro de proyección `0x0440` queda a cero. #53 usaba `0x0440`, y
+    las piezas con skinning (hombros, cuello, torso) desaparecían; se corrigió en #54;
   - sin skinning se sigue usando la matriz compuesta.
 - **Resultado:** el templo aparece completo y la escena coincide con la captura de xemu.
 

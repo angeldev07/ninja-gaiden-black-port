@@ -56,7 +56,7 @@ typedef struct gl_prog {
     GLuint prog;
     int failed;
     GLint u_c, u_surface, u_clip, u_ffmat;
-    GLint u_ffmv, u_ffinv, u_ffproj, u_fftm, u_ffplane, u_ffl, u_ffm, u_ffi; /* pipeline fijo */
+    GLint u_ffmv, u_ffinv, u_fftm, u_ffplane, u_ffl, u_ffm, u_ffi; /* pipeline fijo */
     GLint u_psc0, u_psc1, u_fc0, u_fc1, u_fog, u_bump, u_bscale, u_boff;
     GLint u_atest, u_afunc, u_aref, u_texscale, u_tex[4], u_fogcfg, u_fogparam;
     uint32_t const_serial; /* constantes subidas por última vez (+1; 0 = nunca) */
@@ -747,7 +747,8 @@ static void bind_textures(const pgl_regs *r, float tex_scale[8]) {
  *     0x0480, normales con la model-view inversa 0x0580;
  *   - skinning (SET_SKIN_MODE 0x0328: 1/2 = 2 matrices, 3/4 = 3, 5/6 = 4; los impares calculan
  *     el último peso): model-view 0x0480 + m·0x40 e inversas 0x0580 + m·0x40 ponderadas con los
- *     pesos del atributo 1; la posición sale de la suma en el ojo por la proyección 0x0440;
+ *     pesos del atributo 1; la posición sale de la suma en el ojo por la matriz compuesta, que
+ *     con skinning D3D deja en solo proyección y viewport (0x0440 queda a cero);
  *   - luces 0..7 en 0x1000 + i·0x80 (ambiente, difusa, especular, rango, half vector, dirección
  *     infinita, posición local, atenuación) y el modo de cada una en 0x03BC (2 bits: 1
  *     infinita, 2 local, 3 foco, tratado como local);
@@ -768,7 +769,7 @@ static const char k_ff_vs[] =
     "layout(location = 11) in vec4 v11;\nlayout(location = 12) in vec4 v12;\n"
     "layout(location = 5) in vec4 v5;\n"
     "uniform vec4 ffMat[4];\nuniform vec2 surfaceSize;\nuniform vec2 clipRange;\n"
-    "uniform vec4 ffMV[16];\nuniform vec4 ffInv[16];\nuniform vec4 ffProj[4];\nuniform vec4 ffTM[16];\n"
+    "uniform vec4 ffMV[16];\nuniform vec4 ffInv[16];\nuniform vec4 ffTM[16];\n"
     "uniform vec4 ffPlane[16];\n"
     "uniform vec4 ffL[64];\nuniform vec4 ffM[3];\nuniform int ffI[32];\n"
     FOG_GLSL
@@ -781,7 +782,8 @@ static const char k_ff_vs[] =
     "vec3 invMul(int m, vec3 n) { return n.x * ffInv[m * 4].xyz + n.y * ffInv[m * 4 + 1].xyz + n.z * ffInv[m * 4 + 2].xyz; }\n"
     "void main() {\n"
     "    /* Skinning (SET_SKIN_MODE): 2-4 model-view ponderadas por v1; en los modos \"G\" el\n"
-    "     * último peso es 1 - la suma de los demás. Sin skinning, la matriz compuesta. */\n"
+    "     * último peso es 1 - la suma de los demás. Con skinning, D3D deja en la matriz\n"
+    "     * compuesta solo la proyección (con el viewport); sin él, es la transformación entera. */\n"
     "    int nm = ffI[26] == 0 ? 0 : (ffI[26] + 3) / 2, nw = (ffI[26] & 1) != 0 ? nm - 1 : nm;\n"
     "    vec4 pe = mvMul(0, v0);\n"
     "    vec3 ne = invMul(0, v2.xyz);\n"
@@ -797,7 +799,7 @@ static const char k_ff_vs[] =
     "            ne += wi * invMul(i, v2.xyz);\n"
     "        }\n"
     "        pe.w = 1.0;\n"
-    "        p = vec4(dot(ffProj[0], pe), dot(ffProj[1], pe), dot(ffProj[2], pe), dot(ffProj[3], pe));\n"
+    "        p = vec4(dot(ffMat[0], pe), dot(ffMat[1], pe), dot(ffMat[2], pe), dot(ffMat[3], pe));\n"
     "    }\n"
     "    float w = p.w < 0.0 ? clamp(p.w, -1.84467e19, -5.42101e-20) : clamp(p.w, 5.42101e-20, 1.84467e19);\n"
     "    vec3 s = p.xyz / w;\n"
@@ -935,7 +937,6 @@ static void link_uniforms(gl_prog *p) {
     p->u_ffmat = ngl_glGetUniformLocation(g, "ffMat");
     p->u_ffmv = ngl_glGetUniformLocation(g, "ffMV");
     p->u_ffinv = ngl_glGetUniformLocation(g, "ffInv");
-    p->u_ffproj = ngl_glGetUniformLocation(g, "ffProj");
     p->u_fftm = ngl_glGetUniformLocation(g, "ffTM");
     p->u_ffplane = ngl_glGetUniformLocation(g, "ffPlane");
     p->u_ffl = ngl_glGetUniformLocation(g, "ffL");
@@ -1048,7 +1049,7 @@ static int texgen_code(uint32_t mode) {
 
 /* Uniforms del pipeline fijo (ver k_ff_vs). */
 static void set_ff_uniforms(const pgl_regs *r, gl_prog *p) {
-    static float l[64 * 4], big[16 * 4], proj[16];
+    static float l[64 * 4], big[16 * 4];
     GLint ints[32];
     float m[3 * 4];
     int i, k, e, c;
@@ -1060,10 +1061,6 @@ static void set_ff_uniforms(const pgl_regs *r, gl_prog *p) {
         big[i] = as_float(M(r, 0x0580 + 4 * i));
     if (p->u_ffinv >= 0)
         ngl_glUniform4fv(p->u_ffinv, 16, big);
-    for (i = 0; i < 16; i++)
-        proj[i] = as_float(M(r, 0x0440 + 4 * i));
-    if (p->u_ffproj >= 0)
-        ngl_glUniform4fv(p->u_ffproj, 4, proj);
     for (i = 0; i < 64; i++)
         big[i] = as_float(M(r, 0x06C0 + 4 * i));
     if (p->u_fftm >= 0)
@@ -1147,7 +1144,7 @@ static void set_uniforms(const pgl_regs *r, gl_prog *p, const gl_state *st, cons
     if (p->u_ffl >= 0) { /* pipeline fijo: luces, material, matrices y texgen */
         h = rc_hash(&r->m[0x0280 / 4], 0x0180, h); /* 0x0280-0x03FF: control, material, texgen */
         h = rc_hash(&r->m[0x0420 / 4], 0x0010, h); /* activación de matrices de textura */
-        h = rc_hash(&r->m[0x0440 / 4], 0x0240, h); /* proyección, 4 model-view y 4 inversas */
+        h = rc_hash(&r->m[0x0480 / 4], 0x0200, h); /* 4 model-view y 4 inversas */
         h = rc_hash(&r->m[0x06C0 / 4], 0x0100, h); /* matrices de textura */
         h = rc_hash(&r->m[0x0840 / 4], 0x0100, h); /* planos de texgen */
         h = rc_hash(&r->m[0x0A10 / 4], 0x0010, h); /* ambiente de escena */

@@ -255,3 +255,14 @@ un depurador de frames responde en minutos lo que las trazas a ciegas no respond
   conclusiones falsas.
 
 Detalle en [[gpu-nv2a]].
+
+## [2026-10-22] fix | Personajes completos: la proyección del skinning está en la matriz compuesta
+- **Síntoma:** el usuario vio a los personajes con partes que faltaban, como si fueran transparentes.
+- **Diagnóstico:**
+  - el *pixel history* mostró que ningún draw del personaje tocaba esos píxeles;
+  - un log temporal de matrices mostró que el registro de proyección `0x0440` está a cero, y que con skinning
+    (`SET_SKIN_MODE` 1) la matriz compuesta contiene solo proyección y viewport.
+- **Arreglo:** la posición con skinning es la compuesta por la suma de las model-view ponderadas.
+- **Lección:** volcar los registros reales antes de suponer qué escribe D3D en ellos.
+
+Detalle en [[gpu-nv2a]].
