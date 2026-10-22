@@ -595,3 +595,18 @@ Details in [[gpu-nv2a]].
 - **Gotcha:** Windows demands elevation for an unmanifested exe named `*update*`, so the C test is `upd_test.exe`.
 - **Not verified:** the workflow itself has not run on GitHub yet. The first run will be a `workflow_dispatch`
   rehearsal.
+
+## [2026-10-22] milestone | Release v0.3.0: internal resolution, native widescreen, updater
+- The first `workflow_dispatch` rehearsal of `release.yml` (run 39867021002) was green on GitHub: vswhere found
+  Visual Studio, and `build.cmd` (C tests included), the Python tests and the packaging all passed.
+- `version.h` goes to `0.3.0` and the `v0.3.0` tag makes the first automatic draft release, which the owner
+  authorized publishing.
+- **In v0.3.0:**
+  - internal resolution up to 4x, with "Match my screen";
+  - native 16:9 widescreen, fullscreen and 16x anisotropic filtering;
+  - the launcher's Debugging section, short log by default, the About page and its credits;
+  - the governance and legal files;
+  - the updater.
+- The updater needs a public repository: anonymous downloads from a private repo's releases fail, and the launcher
+  stays silent. It works for players once the repo is public. v0.2.0 users update by hand once.
+- Next: `version.h` goes back to `0.4.0-dev`.
