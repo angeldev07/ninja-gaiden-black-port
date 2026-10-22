@@ -12,7 +12,7 @@ on top of a reimplemented Xbox kernel, an NV2A → OpenGL renderer and an APU au
 The game is playable from the title screen through chapter 6, with saves, music, voices and
 effects at 60 fps. Known gaps:
 
-- Lighting is brighter and flatter than on the console.
+- Some lighting details still differ from the console (pending comparison with reference captures).
 - Floor reflections and the sword glow are missing.
 - Some in-game cutscenes drop to about 45 fps.
 

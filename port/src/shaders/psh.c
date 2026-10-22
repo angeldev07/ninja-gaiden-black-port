@@ -482,6 +482,9 @@ int nv2a_psh_to_glsl(const psh_program *p, char *out, size_t outlen) {
               "uniform mat2 bumpMat[%d];\nuniform float bumpScale[%d];\n"
               "uniform float bumpOffset[%d];\nuniform int alphaTest;\nuniform int alphaFunc;\n"
               "uniform float alphaRef;\n"
+              "/* Bit 0: SPECULAR_ENABLE (0x03B8); bit 1: ALPHA_FROM_MATERIAL_SPECULAR is off (0x0294\n"
+              " * bit 17), so D1.a is 1. Without specular D1 is (0, 0, 0, 1), as in xemu's vsh.c. */\n"
+              "uniform int specMode;\n"
               "/* Linear textures (LU_IMAGE): the NV2A addresses them in texels and texScale =\n"
               " * 1/(width, height) maps them to [0, 1]. For the others it is 1. */\n"
               "uniform vec2 texScale[%d];\nout vec4 fragColor;\n\n"
@@ -506,7 +509,9 @@ int nv2a_psh_to_glsl(const psh_program *p, char *out, size_t outlen) {
         emit_texture(&b, p, i);
     }
     glsl_emit(&b,
-              "    vec4 v0 = oD0;\n    vec4 v1 = oD1;\n"
+              "    vec4 v0 = clamp(oD0, 0.0, 1.0);\n"
+              "    vec4 v1 = (specMode & 1) != 0 ? clamp(oD1, 0.0, 1.0) : vec4(0.0, 0.0, 0.0, 1.0);\n"
+              "    if ((specMode & 3) == 3) v1.a = 1.0;\n"
               "    vec4 fog = vec4(fogColor.rgb, clamp(oFog.x, 0.0, 1.0));\n"
               "    vec4 r0 = vec4(0.0, 0.0, 0.0, %s);\n    vec4 r1 = vec4(0.0);\n",
               p->tex_mode[0] != PSH_TEX_NONE ? "t0.a" : "1.0");

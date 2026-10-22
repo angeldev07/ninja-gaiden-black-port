@@ -466,3 +466,14 @@ Details in [[gpu-nv2a]].
   non-commercial fan port that requires your own copy of the game), machine-specific paths became `%NGB_DATA%` or
   generic descriptions, and the project rules now say that code, comments and docs are in English.
 - Quoted CLI and log output was updated to match the English output of the tools and the loader.
+
+## [2026-10-22] fix | Fixed-function lighting matches xemu: no more washed-out scenes
+- `SET_MATERIAL_EMISSION` (`0x03A8`) was added as a color. It scales the vertex color, and D3D sets it to
+  (1,1,1) for vertex-colored ambient, so those objects went white (the "white chest").
+- Rewrote `k_ff_vs` after xemu's `vsh-ff.c`:
+  - color-material sources, the rational specular through `SET_SPECULAR_PARAMS`, the spot cone, local eye and
+    light range;
+  - specular folding without `SEPARATE_SPECULAR`;
+  - `SPECULAR_ENABLE` / `ALPHA_FROM_MATERIAL_SPECULAR` in the pixel shader for both pipelines.
+- Demo: mean frame brightness ~130 → ~70. The scene is dark and contrasted, like the console.
+- Detail in [[gpu-nv2a]].

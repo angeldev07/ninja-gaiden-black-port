@@ -64,7 +64,7 @@ static const struct {
     {0x06C0, 0x07C0, 0, 0},           /* texture matrices */
     {0x0840, 0x0940, 0, 0},           /* texgen planes */
     {0x1000, 0x1400, 0, 0},           /* 8 lights */
-    {0x03A8, 0x03B8, 0x0A10, 0x0A20}, /* material and scene ambient */
+    {0x03A8, 0x03B8, 0x09C0, 0x0A60}, /* material, specular params, scene ambient, eye */
     {0x0280, 0x0440, 0, 0},           /* control, color material, texgen and skinning (ffI) */
     {0x0A60, 0x0AA0, 0, 0},           /* psC0 and psC1 */
     {0x1B00, 0x1C00, 0, 0},           /* bump of the 4 stages */
@@ -77,7 +77,7 @@ typedef struct gl_prog {
     GLint u_c, u_surface, u_clip, u_ffmat;
     GLint u_ffmv, u_ffinv, u_fftm, u_ffplane, u_ffl, u_ffm, u_ffi; /* fixed pipeline */
     GLint u_psc0, u_psc1, u_fc0, u_fc1, u_fog, u_bump, u_bscale, u_boff;
-    GLint u_atest, u_afunc, u_aref, u_texscale, u_tex[4], u_fogcfg, u_fogparam;
+    GLint u_atest, u_afunc, u_aref, u_texscale, u_tex[4], u_fogcfg, u_fogparam, u_spec;
     uint32_t ug_mask;      /* uniform groups the program uses (UG_* bits) */
     uint64_t ug_up[UG_N];  /* stamp + 1 of each group at its last upload (0 = never) */
     uint64_t c_up;         /* stamp + 1 of the last upload of c[] (0 = never) */
@@ -800,7 +800,7 @@ static const char k_ff_vs[] =
     "uniform vec4 ffMat[4];\nuniform vec2 surfaceSize;\nuniform vec2 clipRange;\n"
     "uniform vec4 ffMV[16];\nuniform vec4 ffInv[16];\nuniform vec4 ffTM[16];\n"
     "uniform vec4 ffPlane[16];\n"
-    "uniform vec4 ffL[64];\nuniform vec4 ffM[3];\nuniform int ffI[32];\n"
+    "uniform vec4 ffL[64];\nuniform vec4 ffM[4];\nuniform int ffI[32];\n"
     FOG_GLSL
     "out vec4 oD0;\nout vec4 oD1;\nout vec4 oB0;\nout vec4 oB1;\nout vec4 oFog;\nout vec4 oPts;\n"
     "out vec4 oT0;\nout vec4 oT1;\nout vec4 oT2;\nout vec4 oT3;\n"
@@ -839,38 +839,72 @@ static const char k_ff_vs[] =
     "    ne = dot(ne, ne) > 0.0 ? normalize(ne) : vec3(0.0, 0.0, 1.0);\n"
     "    oD0 = v3; oD1 = v4;\n"
     "    if (ffI[0] != 0) {\n"
-    "        vec3 amb = vec3(0.0), dif = vec3(0.0), spe = vec3(0.0);\n"
+    "        /* Base color, as xemu's vsh-ff.c: the scene ambient (0x0A10) already carries the\n"
+    "         * material emission and the global ambient; MATERIAL_EMISSION (0x03A8) scales the\n"
+    "         * vertex color used as emission or ambient source. It is NOT added as a color: D3D\n"
+    "         * sets it to (1,1,1) for vertex-colored ambient, which washed those objects to white. */\n"
+    "        int cm = ffI[2], es = cm & 3, as = (cm >> 2) & 3, ds = (cm >> 4) & 3, ss = (cm >> 6) & 3;\n"
+    "        bool localEye = (ffI[4] & 0x10000) != 0;\n"
+    "        vec3 col;\n"
+    "        if (es == 0 || as == 0) {\n"
+    "            col = ffM[0].rgb;\n"
+    "            if (es != 0) col += cmSource(es, vec3(0.0)) * ffM[1].rgb;\n"
+    "            else if (as != 0) col += cmSource(as, vec3(0.0)) * ffM[1].rgb;\n"
+    "        } else {\n"
+    "            col = cmSource(es, vec3(0.0)) + cmSource(as, vec3(0.0)) * ffM[1].rgb;\n"
+    "        }\n"
+    "        float a = ds == 1 ? v3.a : ds == 2 ? v4.a : ffM[1].w;\n"
+    "        vec3 spe = vec3(0.0);\n"
+    "        vec3 vpEye = normalize(ffM[3].xyz / (ffM[3].w != 0.0 ? ffM[3].w : 1.0) - eyeP);\n"
     "        for (int i = 0; i < 8; i++) {\n"
     "            int mode = (ffI[1] >> (2 * i)) & 3;\n"
     "            if (mode == 0) continue;\n"
-    "            vec3 L, H;\n"
-    "            float att = 1.0;\n"
+    "            vec3 L;\n"
+    "            float att = 1.0, nh;\n"
     "            if (mode == 1) {\n"
     "                L = normalize(ffL[i * 8 + 3].xyz);\n"
-    "                H = normalize(ffL[i * 8 + 4].xyz);\n"
+    "                nh = localEye ? dot(ne, normalize(L + vpEye)) : dot(ne, ffL[i * 8 + 4].xyz);\n"
     "            } else {\n"
     "                vec3 d = ffL[i * 8 + 5].xyz - eyeP;\n"
     "                float dist = length(d);\n"
+    "                if (ffL[i * 8 + 6].w > 0.0 && dist > ffL[i * 8 + 6].w) continue; /* out of range */\n"
     "                L = dist > 0.0 ? d / dist : vec3(0.0, 0.0, 1.0);\n"
-    "                vec3 a = ffL[i * 8 + 6].xyz;\n"
-    "                float den = a.x + a.y * dist + a.z * dist * dist;\n"
-    "                att = den > 0.0 ? 1.0 / den : 1.0;\n"
-    "                if (ffL[i * 8 + 6].w > 0.0 && dist > ffL[i * 8 + 6].w) att = 0.0;\n"
-    "                H = normalize(L + vec3(0.0, 0.0, 1.0));\n"
+    "                vec3 k = ffL[i * 8 + 6].xyz;\n"
+    "                att = 1.0 / (k.x + k.y * dist + k.z * dist * dist);\n"
+    "                nh = dot(ne, normalize(L + (localEye ? vpEye : vec3(0.0))));\n"
+    "                if (mode == 3) {\n"
+    "                    /* Spot: s = dot(dir, L) + dir.w through the rational falloff (L, M, N). */\n"
+    "                    vec4 sd = ffL[i * 8 + 7];\n"
+    "                    vec3 fo = vec3(ffL[i * 8].w, ffL[i * 8 + 1].w, ffL[i * 8 + 2].w);\n"
+    "                    float s = dot(sd.xyz, L) + sd.w, sf = 1.0;\n"
+    "                    if (s <= 0.0) sf = 0.0;\n"
+    "                    else if (s < 1.0) {\n"
+    "                        float den = fo.y * s + fo.z;\n"
+    "                        sf = s <= -fo.x ? 0.0 : den == 0.0 ? 1.0 : den > 0.0 ? clamp((s + fo.x) / den, 0.0, 1.0) : 0.0;\n"
+    "                    }\n"
+    "                    att *= sf;\n"
+    "                }\n"
     "            }\n"
     "            float nl = max(dot(ne, L), 0.0);\n"
-    "            amb += ffL[i * 8].rgb * att;\n"
-    "            dif += ffL[i * 8 + 1].rgb * nl * att;\n"
-    "            if (nl > 0.0) spe += ffL[i * 8 + 2].rgb * pow(max(dot(ne, H), 0.0), 16.0) * att;\n"
+    "            nh = max(nh, 0.0);\n"
+    "            /* Specular power through SET_SPECULAR_PARAMS: (x + L) / (M x + N). */\n"
+    "            float pf = 0.0;\n"
+    "            if (nl > 0.0 && nh > -ffM[2].x) {\n"
+    "                float den = ffM[2].y * nh + ffM[2].z;\n"
+    "                pf = den == 0.0 ? 10000.0 : den > 0.0 ? clamp((nh + ffM[2].x) / den, 0.0, 10000.0) : 0.0;\n"
+    "            }\n"
+    "            col += ffL[i * 8].rgb * att * cmSource(as, vec3(1.0));\n"
+    "            col += ffL[i * 8 + 1].rgb * att * nl * cmSource(ds, vec3(1.0));\n"
+    "            spe += ffL[i * 8 + 2].rgb * att * pf * cmSource(ss, vec3(1.0));\n"
     "        }\n"
-    "        int cm = ffI[2];\n"
-    "        vec3 emi = cmSource(cm & 3, vec3(0.0));\n"
-    "        vec3 col = ffM[0].rgb + ffM[1].rgb + emi + amb * cmSource((cm >> 2) & 3, vec3(1.0))\n"
-    "                 + dif * cmSource((cm >> 4) & 3, vec3(1.0));\n"
-    "        float a = ((cm >> 4) & 3) == 1 ? v3.a : ((cm >> 4) & 3) == 2 ? v4.a : ffM[1].w;\n"
-    "        oD0 = vec4(clamp(col, 0.0, 1.0), clamp(a, 0.0, 1.0));\n"
-    "        oD1 = ffI[3] != 0 ? vec4(clamp(spe * cmSource((cm >> 6) & 3, vec3(1.0)), 0.0, 1.0), 1.0)\n"
-    "                         : vec4(0.0, 0.0, 0.0, 1.0);\n"
+    "        oD0 = vec4(col, a);\n"
+    "        oD1 = vec4(spe, v4.a);\n"
+    "        /* Without SEPARATE_SPECULAR (0x0294 bit 0) the specular folds into the diffuse and\n"
+    "         * D1 carries the vertex specular. SPECULAR_ENABLE is applied in the pixel shader. */\n"
+    "        if (ffI[3] != 0 && (ffI[4] & 1) == 0) {\n"
+    "            oD0.rgb += oD1.rgb;\n"
+    "            oD1 = v4;\n"
+    "        }\n"
     "    }\n"
     "    vec4 tin[4] = vec4[4](v9, v10, v11, v12);\n"
     "    vec4 tout[4];\n"
@@ -895,6 +929,7 @@ static const char k_ff_vs[] =
     "    /* Fog distance (SET_FOG_GEN_MODE): specular alpha, FOG_X (attribute 5) or, in the\n"
     "     * eye modes, the distance in eye space. */\n"
     "    float fogd = ffI[25] == 0 ? v4.a : ffI[25] == 6 ? v5.x : ffI[25] == 1 ? length(eyeP) : abs(eyeP.z);\n"
+    "    oD0 = clamp(oD0, 0.0, 1.0); oD1 = clamp(oD1, 0.0, 1.0);\n"
     "    oB0 = oD0; oB1 = oD1; oFog = vec4(ngbFog(fogd)); oPts = vec4(1.0);\n"
     "    oT0 = tout[0]; oT1 = tout[1]; oT2 = tout[2]; oT3 = tout[3];\n"
     "}\n";
@@ -982,6 +1017,7 @@ static void link_uniforms(gl_prog *p) {
     p->u_atest = ngl_glGetUniformLocation(g, "alphaTest");
     p->u_afunc = ngl_glGetUniformLocation(g, "alphaFunc");
     p->u_aref = ngl_glGetUniformLocation(g, "alphaRef");
+    p->u_spec = ngl_glGetUniformLocation(g, "specMode");
     p->u_texscale = ngl_glGetUniformLocation(g, "texScale");
     p->u_fogcfg = ngl_glGetUniformLocation(g, "fogCfg");
     p->u_fogparam = ngl_glGetUniformLocation(g, "fogParam");
@@ -1163,7 +1199,7 @@ static void upload_constants(const pgl_regs *r, gl_prog *p) {
 static void set_ff_uniforms(const pgl_regs *r, gl_prog *p, uint32_t dirty) {
     static float l[64 * 4];
     GLint ints[32];
-    float m[3 * 4];
+    float m[4 * 4];
     int i, k, e, c;
     if (dirty & (1u << UG_MV))
         u4_regs(p->u_ffmv, r, 0x0480);
@@ -1177,11 +1213,14 @@ static void set_ff_uniforms(const pgl_regs *r, gl_prog *p, uint32_t dirty) {
         memset(l, 0, sizeof l);
         for (i = 0; i < 8; i++) {
             uint32_t b = 0x1000 + 0x80 * (uint32_t)i;
-            static const uint32_t src[7] = {0x00, 0x0C, 0x18, 0x34, 0x28, 0x5C, 0x68};
-            for (k = 0; k < 7; k++)
+            static const uint32_t src[8] = {0x00, 0x0C, 0x18, 0x34, 0x28, 0x5C, 0x68, 0x4C};
+            for (k = 0; k < 8; k++)
                 for (c = 0; c < 3; c++)
                     l[(i * 8 + k) * 4 + c] = as_float(M(r, b + src[k] + 4 * (uint32_t)c));
             l[(i * 8 + 6) * 4 + 3] = as_float(M(r, b + 0x24)); /* range of the local light */
+            l[(i * 8 + 7) * 4 + 3] = as_float(M(r, b + 0x58)); /* spot direction w */
+            for (c = 0; c < 3; c++) /* spot falloff (L, M, N) in the w of ambient/diffuse/specular */
+                l[(i * 8 + c) * 4 + 3] = as_float(M(r, b + 0x40 + 4 * (uint32_t)c));
         }
         u4(p->u_ffl, 64, l);
     }
@@ -1192,7 +1231,11 @@ static void set_ff_uniforms(const pgl_regs *r, gl_prog *p, uint32_t dirty) {
             m[4 + c] = as_float(M(r, 0x03A8 + 4 * (uint32_t)c));
         }
         m[7] = as_float(M(r, 0x03B4));
-        u4(p->u_ffm, 3, m);
+        for (c = 0; c < 3; c++) /* SET_SPECULAR_PARAMS (L, M, N) */
+            m[8 + c] = as_float(M(r, 0x09E0 + 4 * (uint32_t)c));
+        for (c = 0; c < 4; c++) /* SET_EYE_POSITION */
+            m[12 + c] = as_float(M(r, 0x0A50 + 4 * (uint32_t)c));
+        u4(p->u_ffm, 4, m);
     }
     if ((dirty & (1u << UG_FFI)) && p->u_ffi >= 0) {
         memset(ints, 0, sizeof ints);
@@ -1215,7 +1258,7 @@ static void set_ff_uniforms(const pgl_regs *r, gl_prog *p, uint32_t dirty) {
 
 static void set_uniforms(const pgl_regs *r, gl_prog *p, const gl_state *st, const float tex_scale[8]) {
     float v[16 * 4], surf[2], clip[2];
-    uint32_t src[24], dirty = 0;
+    uint32_t src[26], dirty = 0;
     uint64_t h;
     int i, g;
     if (R.cur_prog != p->prog) {
@@ -1252,6 +1295,8 @@ static void set_uniforms(const pgl_regs *r, gl_prog *p, const gl_state *st, cons
     src[14] = M(r, 0x09C4);
     memcpy(&src[15], tex_scale, 8 * sizeof(float));
     src[23] = 0x554Eu;
+    src[24] = M(r, 0x03B8);
+    src[25] = M(r, 0x0294);
     h = rc_hash(src, sizeof src, 0) | 1u;
     if (p->misc_hash != h) {
         p->misc_hash = h;
@@ -1287,6 +1332,9 @@ static void set_uniforms(const pgl_regs *r, gl_prog *p, const gl_state *st, cons
         }
         if (p->u_atest >= 0)
             ngl_glUniform1i(p->u_atest, st->alpha_test);
+        if (p->u_spec >= 0)
+            ngl_glUniform1i(p->u_spec, (GLint)((M(r, 0x03B8) & 1u) |
+                                               ((M(r, 0x0294) & (1u << 17)) ? 0u : 2u)));
         if (p->u_afunc >= 0)
             ngl_glUniform1i(p->u_afunc, (GLint)st->alpha_func);
         if (p->u_aref >= 0)

@@ -295,8 +295,31 @@ color.
   `depth · max` with the projected z (`0xFFFFFF` at 24 bits, `0xFFFF` at 16) using the function in
   `0x1E6C`.
 
-**Approximations:** fixed specular power (16) instead of `SET_SPECULAR_PARAMS`, spotlights without cone and no skinning
-in fixed mode.
+**Approximations (superseded 2026-10-22, see below):** fixed specular power (16) instead of `SET_SPECULAR_PARAMS`,
+spotlights without cone and no skinning in fixed mode.
+
+**Lighting rewrite to match xemu's `vsh-ff.c` (2026-10-22, `VERIFIED` with RenderDoc on a gameplay capture):**
+- **Symptom:** gameplay looked brighter and washed out, and some objects (the opened chest, some walls) went white.
+- **Cause:** `k_ff_vs` always *added* `SET_MATERIAL_EMISSION` (`0x03A8`) as a color. On the NV2A it is a *scale* for
+  the vertex color when the color-material source of emission or ambient is a vertex color. The scene ambient
+  (`0x0A10`) already carries the material emission plus the global ambient.
+  - In a mansion capture, 49 of 183 fixed-function draws use color material `4` (ambient from the vertex diffuse)
+    with `0x03A8 = (1,1,1)`. We added full white to them.
+- **Now:**
+  - **Base color:** `sceneAmbient + src·0x03A8` when emission or ambient comes from the material, and `emission_src
+    + ambient_src·0x03A8` when both come from the vertex.
+  - **Per light:**
+    - ambient, diffuse and specular, each scaled by its color-material source;
+    - specular power through `SET_SPECULAR_PARAMS` (`0x09E0`), the rational `(x+L)/(Mx+N)`;
+    - spot cone through falloff `0x1040` and direction `0x104C`;
+    - local eye through `SET_LIGHT_CONTROL` bit 16 and `SET_EYE_POSITION` (`0x0A50`);
+    - lights out of range contribute nothing.
+  - **Specular folding:** without `SEPARATE_SPECULAR` (`0x0294` bit 0), the specular folds into D0.
+  - **`SPECULAR_ENABLE` (`0x03B8`) and `ALPHA_FROM_MATERIAL_SPECULAR` (`0x0294` bit 17):** applied in the pixel
+    shader for both pipelines (uniform `specMode`). D1 = (0,0,0,1) without specular, and D1.a = 1 when the
+    alpha flag is off. D0 and D1 are clamped.
+- **Result** (deterministic demo, same frames): the mean brightness of the gameplay frames drops from ~130 to ~70
+  (0-255). The temple is dark and contrasted, and the reflective floor reads correctly.
 
 **Open:**
 - **The sky** is still the clear color (`0xFFA1A5E8`, lavender) and **the floor is missing**.
