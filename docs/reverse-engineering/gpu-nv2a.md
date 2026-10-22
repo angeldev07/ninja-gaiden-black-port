@@ -237,6 +237,28 @@ input. Los agentes tienen que limpiar sus capturas y buscar antes el caso de pru
 - un kick de más de 1 M palabras se registra con sus primeros saltos;
 - cada cambio de destino del semáforo de D3D va al log.
 
+**Carrera con el pusher asíncrono (el cuelgue del render en partidas largas), `VERIFIED` en Ghidra:**
+- **Síntoma:** una vez por hora de juego, más o menos, el render se congela; en el log aparece
+  `pb: parada en X sin llegar a PUT`.
+- **La lista de registros:** `D3DDevice_RunPushBuffer` mira si el último registro (`dev+0x58`, con el dispositivo
+  en `0x3D85E0`) tiene el siguiente a 0, es decir, si su interrupción sigue pendiente. Si es así, encadena el
+  registro nuevo ahí y no mete otro NOP.
+- **La carrera:** nuestro fixup corre en el hilo de render, en paralelo con el juego. Leía el siguiente y lo
+  cerraba (`0xFFFFFFFF`) en dos pasos, y si el juego enlazaba en medio, ese registro se perdía. Su JUMP de vuelta
+  quedaba viejo y la GPU daba vueltas hasta el tope de 4 M palabras (`INFERRED`: no salió el aviso de kick enorme,
+  así que el bucle era casi todo saltos, que no cuentan como palabras de datos).
+- **Arreglo (`d3d_fixup_chain` y `d3d_fixup_late`):**
+  - el cierre es un `InterlockedExchange`;
+  - si el juego aún enlaza al registro ya cerrado, ese enlace se atiende antes del siguiente salto del pb. Solo
+    cuenta si la cadena llega al último registro de D3D: un registro del anillo puede estar ya reescrito.
+- **ISR fiel (`h5-decomp-d3d-vblank.txt`):**
+  - los NOP `0xC` y `0xD` descuentan las interrupciones pendientes (`dev+0x50`, `DAT_003d8630`), que antes no
+    bajaban nunca;
+  - el `0xE` (registro en el anillo, sin descuento) ya se atiende.
+  - Tras el fixup, la ISR escribe el bit 16 de `0x100410` y espera a que baje (`FUN_003cd540`), un flush de PFB
+    que aquí no hace falta.
+- **Diagnóstico:** un kick que no llega a PUT vuelca al log sus primeros saltos.
+
 **Probado y descartado:** sustituir el traspaso por eventos al hilo de render por una espera activa. En esta CPU
 (Ryzen 7 5700G) añadía ~17 ms por frame, así que se queda el traspaso por eventos (~1,6 ms por frame en total).
 

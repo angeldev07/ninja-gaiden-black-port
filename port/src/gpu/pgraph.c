@@ -961,31 +961,90 @@ static void d3d_apply_fixups(uint32_t list, uint32_t base) {
     }
 }
 
-static void d3d_pushbuffer_fixup(uint32_t param) {
-    uint32_t rec, n;
-    if ((param & 0x1Fu) == 0xDu) {
-        uint32_t *dev = (uint32_t *)game_mem(D3D_G_PDEVICE_VA, 4);
-        if (!dev)
-            return;
-        rec = *dev + 0x99u * 4u + (param >> 5) * 20u;
-    } else {
-        rec = (param >> 5) | 0x80000000u;
-    }
+/* Último registro que cerró el fixup (su siguiente quedó en 0xFFFFFFFF), o 0. */
+static uint32_t g_fix_tail;
+static uint32_t g_pb_fixups_late;
+
+/* Recorre la cadena de registros desde rec, como FUN_003cd5e0. */
+static void d3d_fixup_chain(uint32_t rec) {
+    uint32_t n;
     for (n = 0; n < 64 && rec != 0 && rec != 0xFFFFFFFFu; n++) {
         uint32_t *r = (uint32_t *)game_mem(rec, 20), *end, w0, next;
         if (!r || (end = (uint32_t *)game_mem(r[2], 4)) == NULL) {
             ngb_log("    · PGRAPH: fixup de push buffer con registro inválido 0x%08X", rec);
+            g_fix_tail = 0;
             return;
         }
         w0 = r[0];
         *end = (w0 & 0x0FFFFFFFu) + 1u; /* JUMP de vuelta al anillo */
         if (w0 & 0x20000000u)
             d3d_apply_fixups(r[3], r[4]);
-        next = r[1];
-        r[1] = 0xFFFFFFFFu;
         if ((int32_t)w0 < 0)
             r[0] = w0 & 0xBFFFFFFFu;
+        /* En la Xbox esto lo hace la ISR; aquí corre en paralelo con el juego, que en
+           D3DDevice_RunPushBuffer lee el siguiente del último registro y, si es 0, le encadena uno
+           nuevo. Leer y cerrar en dos pasos perdía ese registro (su JUMP de vuelta quedaba viejo y
+           la GPU daba vueltas hasta el tope: el cuelgue del render). */
+        next = (uint32_t)InterlockedExchange((volatile LONG *)&r[1], (LONG)0xFFFFFFFFu);
+        g_fix_tail = rec;
         rec = next;
+    }
+}
+
+/* El juego aún puede encadenar un registro al que acabamos de cerrar (leyó el 0 antes del
+ * cierre y escribe después). Ese registro llega a la GPU sin interrupción propia: se atiende
+ * antes de seguir un salto, y el JUMP del anillo al push buffer estático va después del enlace. */
+static void d3d_fixup_late(void) {
+    uint32_t *r, *dev, *last, next;
+    if (!g_fix_tail)
+        return;
+    dev = (uint32_t *)game_mem(D3D_G_PDEVICE_VA, 4);
+    r = (uint32_t *)game_mem(g_fix_tail, 20);
+    last = dev && *dev ? (uint32_t *)game_mem(*dev + 0x58u, 4) : NULL; /* último registro de D3D */
+    if (!r || !last) {
+        g_fix_tail = 0;
+        return;
+    }
+    if (*last == g_fix_tail) /* D3D no ha creado otro registro: aún puede encadenarlo */
+        return;
+    next = r[1];
+    g_fix_tail = 0; /* D3D ya pasó a otro registro: este no se encadena más */
+    if (next == 0xFFFFFFFFu || next == 0)
+        return;
+    {
+        /* Un enlace de verdad lleva, siguiendo los siguientes, al último registro de D3D. Si
+           no, el registro estaba en el anillo y el juego ya lo ha reescrito: es basura. */
+        uint32_t k, at = next, *q;
+        for (k = 0; k < 64 && at != *last; k++) {
+            if ((q = (uint32_t *)game_mem(at, 20)) == NULL || q[1] == 0 || q[1] == 0xFFFFFFFFu)
+                return;
+            at = q[1];
+        }
+        if (at != *last)
+            return;
+    }
+    next = (uint32_t)InterlockedExchange((volatile LONG *)&r[1], (LONG)0xFFFFFFFFu);
+    if (next == 0xFFFFFFFFu || next == 0)
+        return;
+    g_pb_fixups_late++;
+    d3d_fixup_chain(next);
+}
+
+static void d3d_pushbuffer_fixup(uint32_t param) {
+    uint32_t *dev = (uint32_t *)game_mem(D3D_G_PDEVICE_VA, 4);
+    if ((param & 0x1Fu) == 0xDu) {
+        if (!dev)
+            return;
+        d3d_fixup_chain(*dev + 0x99u * 4u + (param >> 5) * 20u);
+    } else {
+        d3d_fixup_chain((param >> 5) | 0x80000000u);
+    }
+    /* La ISR de D3D descuenta las interrupciones de fixup pendientes (dev + 0x50) en 0xC y 0xD,
+       no en 0xE. D3D solo encadena registros mientras queda alguna pendiente. */
+    if ((param & 0x1Fu) != 0xEu && dev && *dev) {
+        LONG *pending = (LONG *)game_mem(*dev + 0x50u, 4);
+        if (pending && *pending > 0)
+            InterlockedDecrement(pending);
     }
     g_pb_fixups++;
 }
@@ -998,7 +1057,7 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
     if (!g_frame0_done)
         g_hist_frame0[method / 4]++;
     record(sub, method, param, non_inc);
-    if (method == 0x0100 && ((param & 0x1Fu) == 0xCu || (param & 0x1Fu) == 0xDu)) {
+    if (method == 0x0100 && (param & 0x1Fu) >= 0xCu && (param & 0x1Fu) <= 0xEu) {
         d3d_pushbuffer_fixup(param); /* NO_OPERATION con interrupción: fixup de D3D */
         return;
     }
@@ -1180,6 +1239,8 @@ static int g_kick_nev;
 static void on_event(void *user, int kind, uint32_t at, uint32_t word, uint32_t target) {
     static const char *names[] = {"?", "JMP", "JMP antiguo", "CALL", "RETURN", "ERROR"};
     (void)user;
+    if (kind == PB_EVENT_JUMP || kind == PB_EVENT_OLD_JUMP || kind == PB_EVENT_CALL)
+        d3d_fixup_late();
     if (g_kick_nev < 6) {
         g_kick_ev[g_kick_nev].kind = kind;
         g_kick_ev[g_kick_nev].at = at;
@@ -1254,8 +1315,15 @@ static void kick_body(void *arg) {
                     g_kicks, g_words - words0, get, put, end);
     }
     flush_run();
-    if (end != put)
+    if (end != put) {
+        int e;
         pg_printf("   pb: parada en 0x%08X sin llegar a PUT 0x%08X; se fuerza GET = PUT\n", end, put);
+        ngb_log("    · PGRAPH: kick %u parado en 0x%08X (GET 0x%08X, PUT 0x%08X); primeros saltos:", g_kicks,
+                end, get, put);
+        for (e = 0; e < g_kick_nev; e++)
+            ngb_log("        %d en 0x%08X (palabra 0x%08X) -> 0x%08X", g_kick_ev[e].kind, g_kick_ev[e].at,
+                    g_kick_ev[e].word, g_kick_ev[e].target);
+    }
     fflush(g_pg);
     g_perf.body += qpc() - t_body;
 }
@@ -1433,9 +1501,9 @@ void pgraph_summary(void) {
         ngb_log("pgraph: última medida: %s", g_perf.last);
     ngb_log("pgraph: %u kicks, %u palabras de datos, %u frames (FLIP_STALL), %u BEGIN_END, "
             "%u DRAW_ARRAYS, %u clears (%u de color), %u semáforos, %u errores del pb, "
-            "%u fixups de push buffer, %u esperas de D3D_BlockOnTime despertadas",
+            "%u fixups de push buffer (%u encadenados tarde), %u esperas de D3D_BlockOnTime despertadas",
             g_kicks, g_words, g_flips, g_begin_end, g_draw_arrays, g_clears, g_color_clears,
-            g_sem_releases, g_pb.errors, g_pb_fixups, g_block_wakes);
+            g_sem_releases, g_pb.errors, g_pb_fixups, g_pb_fixups_late, g_block_wakes);
     ngb_log("pgraph: rasterizador: %u triángulos, %u píxeles escritos; %u primitivas sin dibujar "
             "(%u con posición no XYZRHW, %u sin superficie, %u puntos/líneas); %u DRAW_ARRAYS y "
             "ARRAY_ELEMENT sin dibujar",

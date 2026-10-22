@@ -387,3 +387,23 @@ Detalle en [[audio-apu]].
 - **Pendientes:** escalado DPI distinto del 100 %, navegación por teclado en el launcher, y que cerrar el launcher
   con el juego abierto no registre la sesión.
 - Lo hizo un subagente (Sonnet) en un worktree; lo revisó e integró el líder.
+
+## [2026-10-22] fix | El render ya no se congela en partidas largas (carrera del fixup de push buffers)
+- **Síntoma:** más o menos una vez por hora de juego (el cofre, el dragón rojo), el render se congelaba con
+  `pb: parada en X sin llegar a PUT`.
+- **Causa (`VERIFIED` en Ghidra):**
+  - `D3DDevice_RunPushBuffer` encadena un registro nuevo al último si su siguiente es 0;
+  - nuestro fixup HLE, que corre en el hilo de render, leía ese siguiente y lo cerraba en dos pasos;
+  - si el juego enlazaba en medio, el registro se perdía, su JUMP de vuelta quedaba viejo y la GPU daba vueltas
+    hasta el tope.
+- **Arreglo:**
+  - el cierre es atómico, y un enlace tardío se atiende antes del siguiente salto (validado contra el último
+    registro de D3D, `dev+0x58`);
+  - la ISR descuenta las interrupciones pendientes (`dev+0x50`), que antes no bajaban nunca, y se atiende el NOP
+    `0xE`.
+- **Prueba:** demo de 150 s y prueba de 20 min (70 969 frames): 0 errores del pb y 0 paradas. La confirmación
+  definitiva será una partida larga del usuario.
+- **Error evitado en el camino:** la primera versión del enlace tardío leía registros del anillo ya reescritos
+  (`registro inválido 0x09AB09BA`). Por eso ahora se valida la cadena.
+
+Detalle en [[gpu-nv2a]].
