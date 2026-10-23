@@ -634,3 +634,27 @@ Details in [[gpu-nv2a]].
   - the current repository is renamed to `ninja-gaiden-black-port-dev`, archived and kept private, with its PRs;
   - a new repository with the original name gets the rewritten history: the noreply email and no personal paths;
   - this is because GitHub keeps the commits of closed PRs forever, so an in-place rewrite would not hide them.
+
+## [2026-10-23] milestone | Clean repository for publication
+- GitHub keeps the commits of closed PRs forever, so an in-place rewrite would still expose the old author email.
+  Instead:
+  - the development repository was renamed `ninja-gaiden-black-port-dev`, archived and kept private, with its 84
+    PRs;
+  - a new `ninja-gaiden-black-port` received the rewritten history.
+- **Rewrite** (`git filter-repo` on a fresh clone of `main` and the tags):
+  - every commit is `angeldev07 <noreply>`;
+  - the owner's profile paths in old files became `%USERPROFILE%` / `<repo>`;
+  - PR references in messages read `(dev PR N)`, so they cannot link to unrelated new issues.
+  - A full bundle of the old history is kept outside the repo, under `NGB_DATA\backups`.
+- **Settings recreated:**
+  - squash-only merges and branch deletion on merge;
+  - protection on `main`: the five required checks, linear history, no force push, admins included;
+  - topics and Discussions.
+- **Releases:**
+  - v0.3.0 was rebuilt by the release workflow from the rewritten tag and checked (the hash matches the manifest,
+    and no personal path is in the binaries);
+  - v0.1.0 and v0.2.0 keep their notes only. Their old hand-built binaries embedded the owner's PDB path, so they
+    are not republished.
+- **Gotchas:**
+  - GitHub does not trigger workflows when more than three tags are pushed at once, so re-push a release tag alone;
+  - `printf` eats `\1` in `filter-repo` rules, so write the rules file with an editor.
