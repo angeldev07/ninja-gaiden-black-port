@@ -46,10 +46,17 @@ make backups of their own discs; this project does not provide tools or download
    keeps its settings (`ngb.ini`) next to itself and updates itself there.
 3. Run `ngb-launcher.exe`.
 
-**"Windows protected your PC" (SmartScreen):** the binaries are not code-signed, so Windows warns the first time.
-Click **More info**, then **Run anyway**. The source code of every binary is in this repository, and each release is
-built by GitHub Actions from a tagged commit. Some antivirus programs also flag unsigned programs that download
-updates. If yours does, you can verify the zip against the SHA-256 in the release's `ngb-update.txt`.
+**"Windows protected your PC" (SmartScreen):** this is not a virus detection.
+- **Why:** SmartScreen warns about any program that is not code-signed and that few people have downloaded yet. The
+  port's binaries are not signed yet.
+- **To run it:** click **More info**, then **Run anyway**. Or, before unzipping, right-click the zip, choose
+  **Properties**, tick **Unblock**, then unzip.
+- **The source:** the source code of every binary is in this repository, and each release is built by GitHub Actions
+  from a tagged commit.
+- **Antivirus:** some antivirus programs also flag unsigned programs that download updates. If yours does:
+  - check the zip with `Get-FileHash` in PowerShell against the SHA-256 in the release's `ngb-update.txt`;
+  - report the false positive to the vendor (for Defender: microsoft.com/wdsi/filesubmission) and open an issue with
+    the detection name.
 
 ![The launcher on first start](../images/launcher-play.png)
 
