@@ -658,3 +658,16 @@ Details in [[gpu-nv2a]].
 - **Gotchas:**
   - GitHub does not trigger workflows when more than three tags are pushed at once, so re-push a release tag alone;
   - `printf` eats `\1` in `filter-repo` rules, so write the rules file with an editor.
+
+## [2026-10-23] milestone | Played into chapter 9; the repository goes public
+- The owner played v0.3.0 through chapter 8 and into the start of chapter 9 (until now, chapter 6 was the furthest
+  checked). The README's status says so.
+- **SmartScreen note** in the README and in [[getting-started]]:
+  - it is not a virus detection: SmartScreen warns about unsigned programs with few downloads;
+  - *More info > Run anyway*, or *Unblock* the zip;
+  - check the zip with `Get-FileHash` against `ngb-update.txt`;
+  - report antivirus false positives.
+  - On the owner's PC, Defender was active with no detection recorded, and Smart App Control was off.
+- **Planned:** code-signing the releases (SignPath Foundation, which is free for open source, or Azure Trusted Signing)
+  in `release.yml`.
+- With the owner's confirmation, the repository is made public.

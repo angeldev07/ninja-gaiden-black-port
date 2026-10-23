@@ -15,7 +15,7 @@ OpenGL renderer and an APU audio engine.
 
 ## Features
 
-- **Plays the game:** from the title screen through chapter 6 so far, with saves, music, voices and effects at 60 fps.
+- **Plays the game:** from the title screen into chapter 9 so far, with saves, music, voices and effects at 60 fps.
 - **Sharper than the console:** the internal resolution goes up to 4x, with *Match my screen* rendering at your
   monitor's resolution. Textures get 16x anisotropic filtering.
 - **Native widescreen:** the game's own 16:9 mode (a wider field of view, not a stretch), borderless fullscreen and
@@ -30,24 +30,44 @@ OpenGL renderer and an APU audio engine.
 
 1. Download the zip of the [latest release](https://github.com/angeldev07/ninja-gaiden-black-port/releases/latest)
    and unzip it.
-2. Run `ngb-launcher.exe`. Windows SmartScreen may warn because the binaries are not code-signed: **More info**, then
-   **Run anyway**.
+2. Run `ngb-launcher.exe`. If Windows shows **"Windows protected your PC"**, see
+   [the SmartScreen note](#windows-smartscreen) below.
 3. Click **Import game** and pick the image of your disc.
 4. Click **PLAY**.
 
 The **[getting started guide](docs/guide/getting-started.md)** covers each step in detail, including what the launcher
 accepts from your own copy, the controls, where saves live, the settings, updates and troubleshooting.
 
+### Windows SmartScreen
+
+The first time you run the launcher, Windows may show **"Windows protected your PC"** or call it an unrecognized
+app. **It is not a virus detection.** SmartScreen warns about any program that is not code-signed and that few
+people have downloaded yet. It does not look at what the program does. The port's binaries are not signed yet.
+
+- **To run it:** click **More info**, then **Run anyway**. Windows asks only once per version.
+- **Or, before unzipping:** right-click the zip, choose **Properties**, tick **Unblock**, click **OK**, then unzip.
+- **To check what you downloaded:**
+  - every release is built by GitHub Actions from a tagged commit of this repository;
+  - its `ngb-update.txt` lists the zip's SHA-256. In PowerShell, `Get-FileHash ngb-port-*.zip` must print the same
+    value.
+- **If your antivirus quarantines a file,** please
+  [open an issue](https://github.com/angeldev07/ninja-gaiden-black-port/issues/new/choose) with the detection name, and
+  report it to the vendor as a false positive. For Microsoft Defender that is
+  [microsoft.com/wdsi/filesubmission](https://www.microsoft.com/wdsi/filesubmission).
+
+Code-signing the releases, which removes most of these warnings, is planned.
+
 ## Status
 
-v0.3.0 is playable through chapter 6. Known gaps:
+v0.3.0 has been played from the title screen into chapter 9 (tested through chapter 8 and the start of chapter 9).
+Known gaps:
 
 - Some lighting details still differ from the console.
 - Floor reflections and the sword glow are missing.
 - Some in-game cutscenes drop below 60 fps.
 
 The [roadmap](docs/target/roadmap.md) lists what is next, and the [development log](docs/log.md) records every step.
-Compatibility reports for chapters past 6 and for other regions are very welcome.
+Compatibility reports for chapter 9 onward and for other regions are very welcome.
 
 ## Building from source
 
