@@ -3,11 +3,18 @@
  * driver (OHCI) finds no device: here the gamepad query and read functions are replaced
  * by ours, with a JMP rel32 at their entry.
  *
+ * Builds: the addresses below are those of the reference (PAL) XBE. XAPI is linked into the XPP
+ * section, which every release carries unchanged, so libaddr.c moves each one to the loaded XBE
+ * by its offset in XPP (the NTSC-U XBE has it 0x26C0 bytes lower).
+ *
  * Patch safety: each function is patched only if the first 8 bytes of the loaded XBE are
- * the expected ones and if its epilogue holds the expected `ret N` (C2 N 00): N is what
+ * the expected ones (except the bytes of an absolute address: `call [kernel thunk + 0xA4]`
+ * points into the game's .rdata, which moves between releases) and if its epilogue holds the
+ * expected `ret N` (C2 N 00): N is what
  * a __stdcall function cleans up, so it confirms the argument count against the XBE itself
  * (each table entry was disassembled with capstone on default.xbe). With --symbols,
- * the address must also match the one in the Ghidra CSV (H5). If anything does not
+ * the address must also match the one in the Ghidra CSV (H5, made from the reference XBE, so
+ * only checked when the XBE is that one). If anything does not
  * add up, that function is left alone (another XBE, another version) and a warning is logged.
  *
  *   function                VA         ret   prototype (nxdk, XboxDevWiki)
@@ -40,8 +47,9 @@
 #include <string.h>
 
 #include "input.h"
+#include "libaddr.h"
 
-#define XDEVICE_TYPE_GAMEPAD_TABLE 0x003DBD54u
+#define XDEVICE_TYPE_GAMEPAD_TABLE 0x003DBD54u /* reference VA; g_gamepad_table in this XBE */
 #define GAMEPAD_PORT_MASK 0x1u
 #define XERROR_SUCCESS 0u
 #define XERROR_IO_PENDING 0x3E5u
@@ -145,7 +153,8 @@ static void count_call(int which, uint32_t caller, const char *fmt, ...) {
 
 #define CALLER ((uint32_t)(uintptr_t)_ReturnAddress())
 
-static int is_gamepad(uint32_t type) { return type == XDEVICE_TYPE_GAMEPAD_TABLE; }
+static uint32_t g_gamepad_table = XDEVICE_TYPE_GAMEPAD_TABLE;
+static int is_gamepad(uint32_t type) { return type == g_gamepad_table; }
 
 static int handle_port(uint32_t handle) {
     int port;
@@ -261,21 +270,22 @@ static DWORD __stdcall hle_XInputSetState(uint32_t handle, uint8_t *feedback) {
 
 typedef struct xapi_hook {
     const char *name;
-    uint32_t va;
+    uint32_t va;     /* reference VA; ngb_input_install moves it to this XBE */
     uint8_t expect[8];
     uint32_t ret_va; /* address of `ret N` (C2 N 00) in the epilogue */
     uint8_t ret_n;
     const void *fn;
     int patched;
+    uint8_t skip;    /* bit i: byte i of `expect` is part of an absolute address, not compared */
 } xapi_hook_t;
 
 static xapi_hook_t g_hooks[H_COUNT] = {
     {"XGetDevices", 0x003DCC99u, {0x56, 0xFF, 0x15, 0x84, 0x3B, 0x3E, 0x00, 0x8B}, 0x003DCCB8u,
-     4, (const void *)hle_XGetDevices, 0},
+     4, (const void *)hle_XGetDevices, 0, 0x78},
     {"XGetDeviceChanges", 0x003DCCBBu, {0x55, 0x8B, 0xEC, 0x56, 0x8B, 0x75, 0x08, 0x33},
      0x003DCD25u, 12, (const void *)hle_XGetDeviceChanges, 0},
     {"XPeekDevices", 0x003DCC58u, {0x56, 0x57, 0xFF, 0x15, 0x84, 0x3B, 0x3E, 0x00}, 0x003DCC91u,
-     12, (const void *)hle_XPeekDevices, 0},
+     12, (const void *)hle_XPeekDevices, 0, 0xF0},
     {"XInputOpen", 0x003DDFF1u, {0x55, 0x8B, 0xEC, 0x51, 0x8B, 0x4D, 0x08, 0x83}, 0x003DE044u,
      16, (const void *)hle_XInputOpen, 0},
     {"XInputClose", 0x003DE047u, {0x8B, 0x4C, 0x24, 0x04, 0xE8, 0xE9, 0x38, 0x00}, 0x003DE050u,
@@ -283,7 +293,7 @@ static xapi_hook_t g_hooks[H_COUNT] = {
     {"XInputGetCapabilities", 0x003DE053u, {0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x48, 0x83, 0x65},
      0x003DE228u, 8, (const void *)hle_XInputGetCapabilities, 0},
     {"XInputGetState", 0x003DE22Bu, {0x53, 0x56, 0x33, 0xDB, 0xFF, 0x15, 0x84, 0x3B},
-     0x003DE29Bu, 8, (const void *)hle_XInputGetState, 0},
+     0x003DE29Bu, 8, (const void *)hle_XInputGetState, 0, 0xC0},
     {"XInputSetState", 0x003DE29Eu, {0x8B, 0x4C, 0x24, 0x04, 0x8D, 0x81, 0xA3, 0x00},
      0x003DE2CEu, 8, (const void *)hle_XInputSetState, 0},
 };
@@ -319,15 +329,17 @@ static int verify(const xapi_hook_t *h, const char *csv, char *why, size_t whyle
     const uint8_t *code = (const uint8_t *)(uintptr_t)h->va;
     const uint8_t *ret = (const uint8_t *)(uintptr_t)h->ret_va;
     uint32_t addr;
+    int i;
     if (!in_image(h->va, 8) || !in_image(h->ret_va, 3)) {
         snprintf(why, whylen, "outside the image");
         return -1;
     }
-    if (memcmp(code, h->expect, sizeof h->expect)) {
-        snprintf(why, whylen, "different bytes (%02X %02X %02X %02X ...)", code[0], code[1],
-                 code[2], code[3]);
-        return -1;
-    }
+    for (i = 0; i < (int)sizeof h->expect; i++)
+        if (!(h->skip & (1u << i)) && code[i] != h->expect[i]) {
+            snprintf(why, whylen, "different bytes (%02X %02X %02X %02X ...)", code[0], code[1],
+                     code[2], code[3]);
+            return -1;
+        }
     if (ret[0] != 0xC2 || ret[1] != h->ret_n || ret[2] != 0) {
         snprintf(why, whylen, "no ret %u at 0x%08X", h->ret_n, h->ret_va);
         return -1;
@@ -343,6 +355,7 @@ static int verify(const xapi_hook_t *h, const char *csv, char *why, size_t whyle
 int ngb_input_install(const char *symbols_csv, const char *script, int host_input) {
     char err[160], why[H_COUNT][96];
     int ok[H_COUNT], i, patched = 0, matched = 0;
+    int32_t reloc;
     uint32_t table;
     if (!g_ready) {
         InitializeCriticalSection(&g_lock);
@@ -356,6 +369,22 @@ int ngb_input_install(const char *symbols_csv, const char *script, int host_inpu
     g_host_input = host_input;
     if (host_input)
         load_xinput();
+    /* Move the reference addresses to this XBE (the same offsets in its XPP section). */
+    reloc = (int32_t)(libaddr_va(&g_ngb_xbe, XDEVICE_TYPE_GAMEPAD_TABLE) - XDEVICE_TYPE_GAMEPAD_TABLE);
+    if (!libaddr_va(&g_ngb_xbe, XDEVICE_TYPE_GAMEPAD_TABLE)) {
+        ngb_log("input: Ninja Gaiden Black XAPI not recognized in this XBE (no XPP section like "
+                "the reference one): no input HLE");
+        return 0;
+    }
+    g_gamepad_table = XDEVICE_TYPE_GAMEPAD_TABLE + (uint32_t)reloc;
+    for (i = 0; i < H_COUNT; i++) {
+        g_hooks[i].va = libaddr_va(&g_ngb_xbe, g_hooks[i].va);
+        g_hooks[i].ret_va = libaddr_va(&g_ngb_xbe, g_hooks[i].ret_va);
+    }
+    if (reloc) {
+        ngb_log("input: XAPI (XPP) is %+d bytes from the reference XBE", reloc);
+        symbols_csv = NULL; /* the Ghidra CSV describes the reference XBE */
+    }
     for (i = 0; i < H_COUNT; i++)
         matched += (ok[i] = !verify(&g_hooks[i], symbols_csv, why[i], sizeof why[i]));
     if (!matched) {
@@ -365,9 +394,9 @@ int ngb_input_install(const char *symbols_csv, const char *script, int host_inpu
         return 0;
     }
     table = csv_address(symbols_csv, "XDEVICE_TYPE_GAMEPAD_TABLE");
-    if (table && table != XDEVICE_TYPE_GAMEPAD_TABLE)
+    if (table && table != g_gamepad_table)
         ngb_log("input: warning: XDEVICE_TYPE_GAMEPAD_TABLE in the CSV is 0x%08X, expected 0x%08X",
-                table, XDEVICE_TYPE_GAMEPAD_TABLE);
+                table, g_gamepad_table);
     for (i = 0; i < H_COUNT; i++) {
         xapi_hook_t *h = &g_hooks[i];
         uint8_t *code = (uint8_t *)(uintptr_t)h->va;

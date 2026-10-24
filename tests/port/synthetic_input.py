@@ -5,6 +5,10 @@ expected ones and its epilogue holds the expected `ret N` (port/src/input/xapi_h
 module adds to the `synthetic_loader` XBE a second section "XPP" that reproduces only those
 signatures (eight prologue bytes and `C2 N 00` per function: what the loader checks, not the
 XAPI code), and a `.text` that calls the patched addresses and writes the result with DbgPrint.
+
+The XPP section has the VA and size of the reference (PAL) build. `delta` moves it, as another
+release of the game does (the NTSC-U XBE: -0x26C0), and `thunk` replaces the absolute address of
+the kernel thunk slot that three prologues read, which also moves between releases.
 """
 
 from __future__ import annotations
@@ -22,8 +26,11 @@ from .synthetic_loader import (
     push_imm32,
 )
 
-XPP_VA = 0x003DB000
-XPP_SIZE = 0x4000
+XPP_VA = 0x003DBCA0  # the reference build's XPP section (port/src/libaddr.c)
+XPP_SIZE = 0x7E34
+NTSC_DELTA = -0x26C0  # where the NTSC-U release puts XPP, relative to the reference
+REF_THUNK = "84 3B 3E 00"  # [kernel thunk + 0xA4] in the reference build
+NTSC_THUNK = "C4 14 3E 00"
 XPP_RAW = TEXT_RAW + TEXT_SIZE
 GAMEPAD = 0x003DBD54  # XDEVICE_TYPE_GAMEPAD (&XDEVICE_TYPE_GAMEPAD_TABLE)
 
@@ -54,7 +61,7 @@ def call_va(at: int, target: int) -> bytes:
     return b"\xe8" + struct.pack("<i", target - (at + 5))
 
 
-def input_code() -> bytes:
+def input_code(delta: int = 0) -> bytes:
     """XGetDeviceChanges, XGetDevices, XInputOpen, XInputGetState and XInputSetState.
 
     Prints the results with DbgPrint (slot 0, cdecl). If a `ret N` did not match the
@@ -66,26 +73,27 @@ def input_code() -> bytes:
         out.extend(raw)
 
     def call(name: str) -> None:
-        emit(call_va(TEXT_VA + len(out), SIGNATURES[name][0]))
+        emit(call_va(TEXT_VA + len(out), SIGNATURES[name][0] + delta))
 
     def dbg(fmt_va: int, nargs: int) -> None:
         emit(push_imm32(fmt_va) + call_slot(0) + b"\x83\xc4" + bytes([4 * (nargs + 1)]))
 
+    gamepad = GAMEPAD + delta
     emit(b"\x53\x56")  # push ebx; push esi (callee-saved registers used below)
     # XGetDeviceChanges(GAMEPAD, &ins, &rem) -> eax
-    emit(push_imm32(INS_VA + 4) + push_imm32(INS_VA) + push_imm32(GAMEPAD))
+    emit(push_imm32(INS_VA + 4) + push_imm32(INS_VA) + push_imm32(gamepad))
     call("XGetDeviceChanges")
     emit(b"\xff\x35" + struct.pack("<I", INS_VA + 4))  # push [rem]
     emit(b"\xff\x35" + struct.pack("<I", INS_VA))  # push [ins]
     emit(b"\x50")  # push eax
     dbg(FMT_CHANGES_VA, 3)
     # XGetDevices(GAMEPAD) -> port mask
-    emit(push_imm32(GAMEPAD))
+    emit(push_imm32(gamepad))
     call("XGetDevices")
     emit(b"\x50")
     dbg(FMT_DEVICES_VA, 1)
     # XInputOpen(GAMEPAD, port 0, slot 0, NULL) -> handle in ebx
-    emit(b"\x6a\x00\x6a\x00\x6a\x00" + push_imm32(GAMEPAD))
+    emit(b"\x6a\x00\x6a\x00\x6a\x00" + push_imm32(gamepad))
     call("XInputOpen")
     emit(b"\x8b\xd8")  # mov ebx, eax
     # XInputGetState(handle, &state) -> esi
@@ -117,24 +125,28 @@ def input_extra() -> dict[int, bytes]:
     }
 
 
-def xpp_section(signatures: dict[str, tuple[int, str, int, int]] = SIGNATURES) -> bytes:
+def xpp_section(
+    signatures: dict[str, tuple[int, str, int, int]] = SIGNATURES, thunk: str = REF_THUNK
+) -> bytes:
     """Section with the signatures the loader checks (int3 elsewhere)."""
     data = bytearray(b"\xcc" * XPP_SIZE)
     for va, prologue, ret_va, ret_n in signatures.values():
-        raw = bytes.fromhex(prologue)
+        raw = bytes.fromhex(prologue.replace(REF_THUNK, thunk))
         data[va - XPP_VA : va - XPP_VA + len(raw)] = raw
         data[ret_va - XPP_VA : ret_va - XPP_VA + 3] = bytes((0xC2, ret_n, 0))
     return bytes(data)
 
 
-def build_input_xbe(code: bytes, xpp: bytes | None = None) -> bytes:
-    """`synthetic_loader` XBE with `code` in .text, imports [DbgPrint] and the XPP section."""
+def build_input_xbe(code: bytes, xpp: bytes | None = None, delta: int = 0) -> bytes:
+    """`synthetic_loader` XBE with `code` in .text, imports [DbgPrint] and the XPP section
+    (moved by `delta` bytes from the reference VA)."""
     data = bytearray(build_loader_xbe(code, imports=(DBG_PRINT,), extra=input_extra()))
     xpp = xpp_section() if xpp is None else xpp
-    data[0x10C:0x110] = struct.pack("<I", XPP_VA + XPP_SIZE - BASE)  # SizeOfImage
+    xpp_va = XPP_VA + delta
+    data[0x10C:0x110] = struct.pack("<I", xpp_va + XPP_SIZE - BASE)  # SizeOfImage
     data[0x11C:0x120] = struct.pack("<I", 2)  # two sections
     data[0x210:0x214] = b"XPP\0"
-    header = struct.pack("<9I", 0x07, XPP_VA, XPP_SIZE, XPP_RAW, XPP_SIZE, BASE + 0x210, 0, 0, 0)
+    header = struct.pack("<9I", 0x07, xpp_va, XPP_SIZE, XPP_RAW, XPP_SIZE, BASE + 0x210, 0, 0, 0)
     data[0x400 + 0x38 : 0x400 + 0x38 + len(header)] = header
     if len(data) != XPP_RAW:
         raise ValueError("the base XBE does not end where the XPP section begins")

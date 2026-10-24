@@ -22,7 +22,8 @@ technical knowledge. If something goes wrong, see [Troubleshooting](#troubleshoo
   has no right stick for the camera.
 - **A disc image of your own Ninja Gaiden Black (original Xbox) disc.** See the next step.
 
-The port is developed and tested with the PAL (European) release. Other regions are untested: if you try one, a
+The port runs the **PAL (European)** and the **NTSC-U (North American)** releases. It is developed mostly with the
+PAL one. The Japanese release is untested: if you try it, a
 [compatibility report](https://github.com/angeldev07/ninja-gaiden-black-port/issues/new/choose) helps.
 
 ## 2. Bring your own copy

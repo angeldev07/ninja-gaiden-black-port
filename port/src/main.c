@@ -21,6 +21,7 @@
 #include "gpu/nv2a.h"
 #include "gfx/present.h"
 #include "input/input.h"
+#include "kernel/eeprom.h"
 #include "kernel/kernel.h"
 
 ngb_options_t g_ngb_opts;
@@ -341,6 +342,15 @@ __declspec(dllexport) int __cdecl ngb_main(void) {
     if (xbe_load_file(g_ngb_opts.xbe_path, &g_ngb_xbe, err, sizeof err))
         ngb_stop(NGB_EXIT_USAGE, "invalid XBE: %s", err);
     log_header(&g_ngb_xbe);
+    {
+        /* The console's region follows the XBE: one that may run in North America (game region
+         * bit 0, e.g. the NTSC-U release) gets an NTSC console; any other (the PAL release),
+         * a PAL one, as before. */
+        const uint8_t *r = xbe_va_ptr(&g_ngb_xbe, g_ngb_xbe.cert_addr + 0xA0u, 4);
+        uint32_t region = r ? (uint32_t)(r[0] | r[1] << 8 | r[2] << 16 | (uint32_t)r[3] << 24) : 0;
+        eeprom_set_ntsc((region & 1u) != 0);
+        ngb_log("xbe: game region 0x%X: %s console", region, region & 1u ? "NTSC (North America)" : "PAL");
+    }
     if (g_ngb_opts.symbols && ngb_symbols_load(g_ngb_opts.symbols))
         ngb_log("symbols: could not read %s", g_ngb_opts.symbols);
 

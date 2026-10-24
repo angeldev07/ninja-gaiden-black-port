@@ -16,6 +16,7 @@ OpenGL renderer and an APU audio engine.
 ## Features
 
 - **Plays the game:** from the title screen into chapter 9 so far, with saves, music, voices and effects at 60 fps.
+  The PAL (European) and NTSC-U (North American) releases are supported.
 - **Sharper than the console:** the internal resolution goes up to 4x, with *Match my screen* rendering at your
   monitor's resolution. Textures get 16x anisotropic filtering.
 - **Native widescreen:** the game's own 16:9 mode (a wider field of view, not a stretch), borderless fullscreen and
@@ -67,7 +68,7 @@ Known gaps:
 - Some in-game cutscenes drop below 60 fps.
 
 The [roadmap](docs/target/roadmap.md) lists what is next, and the [development log](docs/log.md) records every step.
-Compatibility reports for chapter 9 onward and for other regions are very welcome.
+Compatibility reports for chapter 9 onward, for the NTSC-U release and for the Japanese one are very welcome.
 
 ## Building from source
 
