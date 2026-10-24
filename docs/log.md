@@ -704,3 +704,7 @@ Details in [[gpu-nv2a]].
   start-up nothing changes, so a folder used in place keeps working.
 - The game card says which release it will run: "Verified: this is Ninja Gaiden Black (PAL)" or "(NTSC-U)", from
   the certificate's game region (bit 0, the same rule the loader uses for the console).
+
+## [2026-10-24] milestone | Release v0.4.1: the data folder fix
+- A patch release with the launcher fix above (a new data folder brings its own game; the card shows PAL or
+  NTSC-U), at the owner's request. `version.h` goes to `0.4.1` and then back to `0.5.0-dev`.
