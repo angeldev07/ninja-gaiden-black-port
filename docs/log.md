@@ -686,3 +686,12 @@ Details in [[gpu-nv2a]].
   - PAL: unchanged;
   - an XBE with the game's own sections modified and an extra section also boots and runs the demo, because only
     the library sections have to match.
+
+## [2026-10-23] milestone | Release v0.4.0: NTSC-U release support
+- `version.h` goes to `0.4.0`, and the `v0.4.0` tag makes the draft that the owner asked to publish.
+- **Main change:** the port runs the NTSC-U release as well as the PAL one (see the previous entry).
+- **Also:**
+  - the README and the guide cover play into chapter 9 and explain SmartScreen;
+  - no personal paths remain in the tree.
+- **First real updater release:** a v0.3.0 launcher should offer v0.4.0 on its daily check.
+- Next: `version.h` goes back to `0.5.0-dev`.
