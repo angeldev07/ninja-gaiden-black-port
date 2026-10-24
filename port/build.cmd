@@ -20,7 +20,7 @@ rc /nologo /DNGB_RC_LOADER /I"%PORT%res" /fo"%OUT%\obj\loader.res" "%PORT%res\ng
 
 rem 1) ngb-core.dll: the loader, the emulated kernel and the generated stubs.
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\core.pdb" /c ^
-  "%SRC%\main.c" "%SRC%\symbols.c" "%SRC%\xbe.c" "%SRC%\memory.c" "%SRC%\log.c" "%SRC%\logfilter.c" "%SRC%\watch.c" "%SRC%\thread.c" "%SRC%\crash.c" ^
+  "%SRC%\main.c" "%SRC%\symbols.c" "%SRC%\xbe.c" "%SRC%\memory.c" "%SRC%\log.c" "%SRC%\logfilter.c" "%SRC%\libaddr.c" "%SRC%\watch.c" "%SRC%\thread.c" "%SRC%\crash.c" ^
   "%SRC%\kernel\stubs.c" "%SRC%\kernel\dispatch.c" "%SRC%\kernel\data.c" ^
   "%SRC%\kernel\impl_mm.c" "%SRC%\kernel\impl_rtl.c" "%SRC%\kernel\impl_ke.c" ^
   "%SRC%\kernel\impl_ps.c" "%SRC%\kernel\impl_io.c" "%SRC%\kernel\impl_misc.c" "%SRC%\kernel\hostpath.c" ^
@@ -32,7 +32,7 @@ cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\core.pdb" /c ^
   "%SRC%\gfx\present.c" || exit /b 1
 link /nologo /DLL /DEBUG /OUT:"%OUT%\ngb-core.dll" /PDB:"%OUT%\ngb-core.pdb" ^
   /BASE:0x60000000 /LARGEADDRESSAWARE ^
-  "%OUT%\obj\main.obj" "%OUT%\obj\symbols.obj" "%OUT%\obj\xbe.obj" "%OUT%\obj\memory.obj" "%OUT%\obj\log.obj" "%OUT%\obj\logfilter.obj" "%OUT%\obj\watch.obj" ^
+  "%OUT%\obj\main.obj" "%OUT%\obj\symbols.obj" "%OUT%\obj\xbe.obj" "%OUT%\obj\memory.obj" "%OUT%\obj\log.obj" "%OUT%\obj\logfilter.obj" "%OUT%\obj\libaddr.obj" "%OUT%\obj\watch.obj" ^
   "%OUT%\obj\thread.obj" "%OUT%\obj\crash.obj" "%OUT%\obj\stubs.obj" "%OUT%\obj\dispatch.obj" ^
   "%OUT%\obj\data.obj" "%OUT%\obj\impl_mm.obj" "%OUT%\obj\impl_rtl.obj" "%OUT%\obj\impl_ke.obj" ^
   "%OUT%\obj\impl_ps.obj" "%OUT%\obj\impl_io.obj" "%OUT%\obj\impl_misc.obj" "%OUT%\obj\hostpath.obj" ^
@@ -57,6 +57,9 @@ cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\hostpath_test.pdb" /Fe"%OUT%\hostpath
 rem 3a2) Short log filter and user-name scrub (logfilter.c).
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\logfilter_test.pdb" /Fe"%OUT%\logfilter_test.exe" "%PORT%tests\logfilter_test.c" "%SRC%\logfilter.c" || exit /b 1
 "%OUT%\logfilter_test.exe" || exit /b 1
+rem 3a3) Library addresses moved between builds of the game (libaddr.c).
+cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\libaddr_test.pdb" /Fe"%OUT%\libaddr_test.exe" "%PORT%tests\libaddr_test.c" "%SRC%\libaddr.c" || exit /b 1
+"%OUT%\libaddr_test.exe" || exit /b 1
 rem 3b) Push buffer decoder test (hand-made buffers).
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\pushbuf_test.pdb" /Fe"%OUT%\pushbuf_test.exe" "%PORT%tests\pushbuf_test.c" "%SRC%\gpu\pushbuf.c" || exit /b 1
 "%OUT%\pushbuf_test.exe" || exit /b 1

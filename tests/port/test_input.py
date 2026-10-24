@@ -12,7 +12,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from .synthetic_input import SIGNATURES, build_input_xbe, input_code, xpp_section
+from .synthetic_input import (
+    NTSC_DELTA,
+    NTSC_THUNK,
+    SIGNATURES,
+    build_input_xbe,
+    input_code,
+    xpp_section,
+)
 from .synthetic_loader import boot_code, build_loader_xbe
 from .test_loader import EXIT_OK, LOADER
 
@@ -59,6 +66,20 @@ class InputHleTest(unittest.TestCase):
         # SetState: ERROR_IO_PENDING like the real XAPI, completed immediately (dwStatus 0).
         self.assertIn(f"DbgPrint: feedback={ERROR_IO_PENDING:x} status=0", log)
         self.assertRegex(log, r"input: T1 @0001[0-9A-F]{4} XInputGetState\(0x[0-9A-F]+\)")
+
+    def test_another_release_is_found_by_section(self) -> None:
+        # The NTSC-U layout: XPP lower and the kernel thunk elsewhere; the same library code.
+        xbe = build_input_xbe(
+            input_code(NTSC_DELTA), xpp_section(thunk=NTSC_THUNK), delta=NTSC_DELTA
+        )
+        code, log = self.run_xbe(xbe, "--no-host-input", "--input-script", "t=0ms:A@60s")
+        self.assertEqual(code, EXIT_OK, log)
+        self.assertIn(f"input: XAPI (XPP) is {NTSC_DELTA} bytes from the reference XBE", log)
+        self.assertIn("input: 8 of 8 XAPI functions patched", log)
+        va = SIGNATURES["XInputGetState"][0] + NTSC_DELTA
+        self.assertIn(f"input: XInputGetState 0x{va:08X} ", log)
+        self.assertIn("DbgPrint: devices=1", log)
+        self.assertIn("DbgPrint: state=0 pkt=2 btn=0000 a=255 b=0 lt=0", log)
 
     def test_without_script_the_pad_is_idle(self) -> None:
         code, log = self.run_xbe(build_input_xbe(input_code()), "--no-host-input")

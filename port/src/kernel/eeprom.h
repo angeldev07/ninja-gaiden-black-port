@@ -21,16 +21,27 @@
 #define EEPROM_USER_OFFSET 0x60u
 #define EEPROM_USER_SIZE 0xA0u
 
-/* Values returned by the emulated kernel (the same as for the individual indices). */
+/* Values returned by the emulated kernel (the same as for the individual indices). The
+ * regions are those of a PAL console unless eeprom_set_ntsc() turns it into a North American
+ * one (an NTSC-U XBE: see main.c). */
 #define EEPROM_LANGUAGE 1u              /* English */
 #define EEPROM_AV_REGION 0x00800300u    /* PAL-I */
 #define EEPROM_GAME_REGION 4u           /* rest of the world */
 #define EEPROM_DVD_REGION 2u
+#define EEPROM_AV_REGION_NTSC 0x00400100u /* NTSC-M */
+#define EEPROM_GAME_REGION_NTSC 1u        /* North America */
+#define EEPROM_DVD_REGION_NTSC 1u
 #define EEPROM_SERIAL "000000000000"    /* 12 characters */
 
 /* Fills `out` (EEPROM_SIZE bytes) with a deterministic EEPROM: keys at zero, serial
  * number and the regions above, and default user settings. */
 void eeprom_image(uint8_t out[EEPROM_SIZE]);
+
+/* 1: the console is North American (NTSC-M video, game and DVD region 1); 0: PAL (default). */
+void eeprom_set_ntsc(int ntsc);
+uint32_t eeprom_av_region(void);
+uint32_t eeprom_game_region(void);
+uint32_t eeprom_dvd_region(void);
 
 /* Block returned by the indices XC_MAX_OS (0xFF), XC_MAX_FACTORY (0x1FF) and XC_MAX_ALL
  * (0xFFFF): offset and length inside the image. 0 if `index` is one of them; -1 if not. */

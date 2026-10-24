@@ -14,6 +14,7 @@
 #include "xdvdfs.h"
 
 #define XBE_HEADER_READ 4096
+#define NGB_TITLE_ID 0x5443000Du /* Tecmo ("TC"), title 0x000D */
 #define SPARE_BYTES (256LL * 1024 * 1024) /* free space to leave besides the game itself */
 
 /* ------------------------------------------------------------------ XBE header ---- */
@@ -61,7 +62,10 @@ int xbe_probe_header(const uint8_t *hdr, uint32_t n, xbe_info_t *out) {
         len--;
     out->title[len] = 0;
     out->valid = 1;
-    out->is_ngb = has_word_ci(out->title, L"GAIDEN") && has_word_ci(out->title, L"BLACK");
+    /* The title id is the same in every release (PAL "NINJA GAIDEN Black", NTSC-U "Ninja
+     * Gaiden: Black"); the name is a second chance for an XBE whose id was changed. */
+    out->is_ngb = rd32(hdr + off + 8) == NGB_TITLE_ID ||
+                  (has_word_ci(out->title, L"GAIDEN") && has_word_ci(out->title, L"BLACK"));
     return 1;
 }
 

@@ -67,9 +67,9 @@ static uint64_t ExQueryNonVolatileSetting(uint32_t *args) {
         case 0xB: name = "PARENTAL_CONTROL_PASSWORD"; value = 0; break;
         case 0xC: name = "PARENTAL_CONTROL_MOVIES"; value = 0; break;
         case 0x11: name = "MISC_FLAGS"; value = 0; break;
-        case 0x12: name = "DVD_REGION"; value = EEPROM_DVD_REGION; break;
-        case 0x103: name = "FACTORY_AV_REGION"; value = EEPROM_AV_REGION; break; /* PAL-I */
-        case 0x104: name = "FACTORY_GAME_REGION"; value = EEPROM_GAME_REGION; break; /* rest of the world */
+        case 0x12: name = "DVD_REGION"; value = eeprom_dvd_region(); break;
+        case 0x103: name = "FACTORY_AV_REGION"; value = eeprom_av_region(); break;
+        case 0x104: name = "FACTORY_GAME_REGION"; value = eeprom_game_region(); break;
         case 0x101: name = "FACTORY_ETHERNET_ADDR"; type = REG_BINARY_; len = 6; break;
         case 0x100: name = "FACTORY_SERIAL_NUMBER"; type = REG_BINARY_; len = 12;
             memcpy(blob, EEPROM_SERIAL, 12); break;

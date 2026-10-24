@@ -17,6 +17,7 @@
 #include <string.h>
 
 #include "../ngb.h"
+#include "../libaddr.h"
 #include "nv2a.h"
 #include "../gfx/present.h"
 #include "png.h"
@@ -936,7 +937,19 @@ static void do_clear(uint32_t flags) {
  * up to the 4 M word cap, overwrote the D3D fence with old values and the game hung in
  * D3D_BlockOnTime (at the start of the title demo).
  */
-#define D3D_G_PDEVICE_VA 0x003DAA88u /* D3D_g_pDevice of NGB (H5 symbols.csv) */
+#define D3D_G_PDEVICE_REF 0x003DAA88u /* D3D_g_pDevice of the reference XBE (H5 symbols.csv) */
+/* The same global in the loaded XBE (D3D is linked into its own section: libaddr.c). */
+static uint32_t d3d_g_pdevice_va(void) {
+    static uint32_t va;
+    static int resolved;
+    if (!resolved) {
+        resolved = 1;
+        va = libaddr_va(&g_ngb_xbe, D3D_G_PDEVICE_REF);
+        if (!va)
+            ngb_log("pgraph: D3D_g_pDevice not found in this XBE: no push buffer fixups");
+    }
+    return va;
+}
 static uint32_t g_pb_fixups;
 
 /* Accessible game memory: contiguous RAM or the XBE image. */
@@ -1003,7 +1016,7 @@ static void d3d_fixup_late(void) {
     uint32_t *r, *dev, *last, next;
     if (!g_fix_tail)
         return;
-    dev = (uint32_t *)game_mem(D3D_G_PDEVICE_VA, 4);
+    dev = (uint32_t *)game_mem(d3d_g_pdevice_va(), 4);
     r = (uint32_t *)game_mem(g_fix_tail, 20);
     last = dev && *dev ? (uint32_t *)game_mem(*dev + 0x58u, 4) : NULL; /* last D3D record */
     if (!r || !last) {
@@ -1036,7 +1049,7 @@ static void d3d_fixup_late(void) {
 }
 
 static void d3d_pushbuffer_fixup(uint32_t param) {
-    uint32_t *dev = (uint32_t *)game_mem(D3D_G_PDEVICE_VA, 4);
+    uint32_t *dev = (uint32_t *)game_mem(d3d_g_pdevice_va(), 4);
     if ((param & 0x1Fu) == 0xDu) {
         if (!dev)
             return;
@@ -1096,7 +1109,7 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
     if (method == 0x0100 && (param & 0x1Fu) == 5u) {
         /* D3D_BlockOnTime, with the GPU far behind, puts in NO_OPERATION(5) and waits for the device
          * KEVENT (+0x773 words) that its ISR signals when the GPU gets there. */
-        uint32_t *dev = (uint32_t *)game_mem(D3D_G_PDEVICE_VA, 4);
+        uint32_t *dev = (uint32_t *)game_mem(d3d_g_pdevice_va(), 4);
         if (dev && *dev)
             ngb_ke_set_event(*dev + 0x773u * 4u);
         g_block_wakes++;

@@ -1,6 +1,6 @@
 ---
 tags: [ngb, reverse-engineering, runtime, input, h8]
-updated: 2026-10-22
+updated: 2026-10-23
 status: current
 ---
 
@@ -20,6 +20,24 @@ functions** with its own implementations that read the PC gamepad or the keyboar
   - the epilogue ends in `C2 N 00`, with the same N;
   - with `--symbols`, the VA matches the CSV.
 - If anything does not add up, the original function is left alone and a note goes to the log. That way another XBE is not corrupted.
+
+### Other releases of the game (`VERIFIED` with the NTSC-U XBE)
+
+- The VAs in the table are those of the **reference build**, the PAL `default.xbe` (title id `0x5443000D`, version
+  3).
+- **Same library code in every release:** XAPI is linked into the `XPP` section. The NTSC-U XBE (version 5) carries
+  every XDK library section (`D3D`, `XPP`, `DSOUND`, `XONLINE`...) with the same virtual size and the same bytes.
+  Only the bases change: `XPP` is `0x26C0` bytes lower.
+- **Relocation:** `port/src/libaddr.c` moves a reference VA to the loaded XBE as "the same offset in the section of
+  the same name". If the section is missing or has another size, it returns 0 and the hook is not attempted.
+  `D3D_g_pDevice` (`port/src/gpu/pgraph.c`) is found the same way.
+- **Masked bytes:** three prologues (`XGetDevices`, `XPeekDevices`, `XInputGetState`) read `[kernel thunk + 0xA4]`
+  with an absolute address. The thunk lives in the game's `.rdata`, which moves between releases: `84 3B 3E 00` in
+  PAL, `C4 14 3E 00` in NTSC-U. Those bytes are not compared (the `skip` mask in `xapi_hle.c`).
+- The Ghidra CSV describes the reference build, so `--symbols` is only cross-checked when nothing moved.
+- **The game's own sections** (`.text`, `.rdata`, `.data`) differ between releases and are never located this way.
+- **Result:** in the NTSC-U XBE the 8 functions are patched, and the title demo reaches gameplay with the scripted
+  pad. `tests/port/test_input.py` covers the moved layout with a synthetic XBE.
 
 | Function | VA | `ret` |
 | --- | --- | --- |

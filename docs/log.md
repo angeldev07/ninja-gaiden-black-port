@@ -671,3 +671,18 @@ Details in [[gpu-nv2a]].
 - **Planned:** code-signing the releases (SignPath Foundation, which is free for open source, or Azure Trusted Signing)
   in `release.yml`.
 - With the owner's confirmation, the repository is made public.
+
+## [2026-10-23] feat | NTSC-U release support: library code found by section, console region from the XBE
+- The NTSC-U `default.xbe` (version 5, 4,571,136 bytes) stopped at the warnings screen: the XAPI input hooks were
+  tied to PAL VAs, so the pad never reached the game.
+- **Found:** every XDK library section (`D3D`, `XPP`, `DSOUND`...) has the same size and bytes as in the PAL XBE, at
+  another base. `port/src/libaddr.c` (plus `libaddr_test.c`) moves reference VAs by section and offset, and the
+  three prologues that hold the kernel thunk address are compared with a mask. See [[xapi-input]].
+- **Console region:** an XBE that may run in North America (game region bit 0) now gets an NTSC-M / region 1
+  console. The PAL XBE (region 0x4) keeps the PAL console as before.
+- **Launcher:** it recognizes the game by title id `0x5443000D`, with the title name as a second chance.
+- **Verified:**
+  - NTSC-U: warnings, title and demo gameplay, with all 8 XAPI functions patched;
+  - PAL: unchanged;
+  - an XBE with the game's own sections modified and an extra section also boots and runs the demo, because only
+    the library sections have to match.
