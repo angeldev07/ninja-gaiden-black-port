@@ -323,13 +323,15 @@ static void game_refresh(void) {
         xbe_probe_file(g_set.xbe, &g_game);
 }
 
-/* If the chosen xbe is unset or gone and <data>\game\default.xbe exists, use that one. */
-static void adopt_default_game(void) {
+/* If the chosen xbe is unset or gone and <data>\game\default.xbe exists, use that one. With
+ * `prefer` (a data folder was just chosen), the data folder's own game wins even over a valid
+ * one: the saves and the virtual hard disk live in the data folder, so they go with its game. */
+static void adopt_default_game(int prefer) {
     wchar_t def[MAX_PATH];
     if (!g_data[0])
         return;
     wfmt(def, MAX_PATH, L"%ls\\game\\default.xbe", g_data);
-    if ((!g_set.xbe[0] || !file_exists(g_set.xbe)) && file_exists(def))
+    if ((prefer || !g_set.xbe[0] || !file_exists(g_set.xbe)) && file_exists(def))
         wfmt(g_set.xbe, MAX_PATH, L"%ls", def);
 }
 
@@ -375,7 +377,7 @@ static void load_settings(void) {
         g_last.code = SESSION_NONE;
 
     resolve_data();
-    adopt_default_game();
+    adopt_default_game(0);
     game_refresh();
     save_settings();
 }
@@ -639,7 +641,7 @@ static void change_data_folder(void) {
     strip_trailing_slash(dir);
     wfmt(g_set.data, MAX_PATH, L"%ls", dir);
     resolve_data();
-    adopt_default_game();
+    adopt_default_game(1);
     game_refresh();
     g_log_sig = 0;
     save_settings();
@@ -1155,7 +1157,10 @@ static void play_game_card(int x, int y, int w, int h) {
     txt_chrome(F_H2, x + 22, y + 36, w - 44, 32, DT_SINGLELINE | DT_VCENTER, 0, 1, title);
     if (xbe_ok() && g_game.is_ngb) {
         status_dot(x + 30, y + 86, C_OK);
-        txt(F_SMALL, C_OK, x + 50, y + 76, w - 72, 20, T_LINE, tr(S_GAME_VERIFIED));
+        wchar_t verified[96];
+        /* The release, as the port will run it (main.c: bit 0 makes an NTSC console). */
+        wfmt(verified, 96, L"%ls%ls", tr(S_GAME_VERIFIED), tr(g_game.region & 1u ? S_GAME_NTSC : S_GAME_PAL));
+        txt(F_SMALL, C_OK, x + 50, y + 76, w - 72, 20, T_LINE, verified);
     } else if (xbe_ok()) {
         status_dot(x + 30, y + 86, C_WARN);
         wfmt(buf, 300, tr(S_GAME_UNKNOWN), g_game.title);

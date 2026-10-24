@@ -695,3 +695,12 @@ Details in [[gpu-nv2a]].
   - no personal paths remain in the tree.
 - **First real updater release:** a v0.3.0 launcher should offer v0.4.0 on its daily check.
 - Next: `version.h` goes back to `0.5.0-dev`.
+
+## [2026-10-24] fix | Launcher: a new data folder brings its own game; the card shows the release
+- **Bug:** choosing another data folder kept the previous `[game] xbe` path when it still existed. The launcher
+  then ran the old folder's game with the new folder's saves and virtual hard disk. The owner switched to a folder
+  holding an NTSC-U copy, and every session still booted the PAL XBE (`game region 0x4` in the logs).
+- **Fix:** when a data folder is chosen, its own `game\default.xbe` wins if it exists (`adopt_default_game(1)`). At
+  start-up nothing changes, so a folder used in place keeps working.
+- The game card says which release it will run: "Verified: this is Ninja Gaiden Black (PAL)" or "(NTSC-U)", from
+  the certificate's game region (bit 0, the same rule the loader uses for the console).

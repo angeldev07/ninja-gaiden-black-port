@@ -31,6 +31,7 @@ enum imp_err {
 typedef struct xbe_info {
     int valid;  /* has the XBEH magic and a readable certificate */
     int is_ngb; /* the certificate title says Ninja Gaiden Black */
+    uint32_t region; /* certificate game region: bit 0 North America, bit 2 rest of the world */
     wchar_t title[48];
     int64_t size; /* bytes (files only) */
 } xbe_info_t;

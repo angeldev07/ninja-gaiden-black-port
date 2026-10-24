@@ -50,7 +50,7 @@ int xbe_probe_header(const uint8_t *hdr, uint32_t n, xbe_info_t *out) {
     if (cert < base)
         return 0;
     off = cert - base;
-    if ((uint64_t)off + 0x0C + 80 > n)
+    if ((uint64_t)off + 0xA4 > n)
         return 0;
     for (i = 0; i < 40; i++) {
         wchar_t ch = (wchar_t)(hdr[off + 0x0C + 2 * i] | (hdr[off + 0x0C + 2 * i + 1] << 8));
@@ -62,6 +62,7 @@ int xbe_probe_header(const uint8_t *hdr, uint32_t n, xbe_info_t *out) {
         len--;
     out->title[len] = 0;
     out->valid = 1;
+    out->region = rd32(hdr + off + 0xA0);
     /* The title id is the same in every release (PAL "NINJA GAIDEN Black", NTSC-U "Ninja
      * Gaiden: Black"); the name is a second chance for an XBE whose id was changed. */
     out->is_ngb = rd32(hdr + off + 8) == NGB_TITLE_ID ||
