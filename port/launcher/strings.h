@@ -45,6 +45,8 @@
     X(CARD_GAME, L"GAME", L"JUEGO")                                                              \
     X(CARD_LAST, L"LAST SESSION", L"ÚLTIMA SESIÓN")                                              \
     X(GAME_VERIFIED, L"Verified: this is Ninja Gaiden Black", L"Verificado: es Ninja Gaiden Black") \
+    X(GAME_NTSC, L" (NTSC-U)", L" (NTSC-U)")                                                    \
+    X(GAME_PAL, L" (PAL)", L" (PAL)")                                                           \
     X(GAME_UNKNOWN, L"Not recognised as Ninja Gaiden Black (%ls)", L"No se reconoce como Ninja Gaiden Black (%ls)") \
     X(GAME_MISSING, L"The game file is missing", L"Falta el archivo del juego")                  \
     X(GAME_BAD_XBE, L"default.xbe is not a valid Xbox executable", L"default.xbe no es un ejecutable de Xbox válido") \
