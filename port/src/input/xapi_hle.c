@@ -300,6 +300,8 @@ static xapi_hook_t g_hooks[H_COUNT] = {
 
 /* ---------------------------------------------------------------- installation ---- */
 
+static int g_relocated; /* g_hooks[] already moved to this XBE */
+
 static int in_image(uint32_t va, uint32_t len) {
     return va >= NGB_RESERVE_BASE && va + len > va && va + len <= NGB_RESERVE_END;
 }
@@ -377,9 +379,12 @@ int ngb_input_install(const char *symbols_csv, const char *script, int host_inpu
         return 0;
     }
     g_gamepad_table = XDEVICE_TYPE_GAMEPAD_TABLE + (uint32_t)reloc;
-    for (i = 0; i < H_COUNT; i++) {
-        g_hooks[i].va = libaddr_va(&g_ngb_xbe, g_hooks[i].va);
-        g_hooks[i].ret_va = libaddr_va(&g_ngb_xbe, g_hooks[i].ret_va);
+    if (!g_relocated) { /* the table holds reference VAs until the first install */
+        g_relocated = 1;
+        for (i = 0; i < H_COUNT; i++) {
+            g_hooks[i].va = libaddr_va(&g_ngb_xbe, g_hooks[i].va);
+            g_hooks[i].ret_va = libaddr_va(&g_ngb_xbe, g_hooks[i].ret_va);
+        }
     }
     if (reloc) {
         ngb_log("input: XAPI (XPP) is %+d bytes from the reference XBE", reloc);

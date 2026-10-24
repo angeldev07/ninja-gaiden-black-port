@@ -941,8 +941,13 @@ static void do_clear(uint32_t flags) {
 /* The same global in the loaded XBE (D3D is linked into its own section: libaddr.c). */
 static uint32_t d3d_g_pdevice_va(void) {
     static uint32_t va;
-    if (!va)
+    static int resolved;
+    if (!resolved) {
+        resolved = 1;
         va = libaddr_va(&g_ngb_xbe, D3D_G_PDEVICE_REF);
+        if (!va)
+            ngb_log("pgraph: D3D_g_pDevice not found in this XBE: no push buffer fixups");
+    }
     return va;
 }
 static uint32_t g_pb_fixups;
