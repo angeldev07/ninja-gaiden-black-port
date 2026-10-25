@@ -729,3 +729,21 @@ Details in [[gpu-nv2a]].
   audio goes on. The logs show the GPU still drawing 200-500 primitives per frame at 60 fps, with no pb errors, so
   the game logic waits on something while the render keeps redrawing. The minimal log does not say what. A
   frozen-picture detector with a per-thread dump is the next step.
+
+## [2026-10-24] fix | Shadow maps: texel addressing and the border color
+- **Symptom (owner, right after the viewport fix):** hard-edged dark wedges on walls and floors in chapters 11 and
+  12. The PAL demo shows them too at frame 6000, which makes the case deterministic.
+- **Cause:** the 19-instruction shadow pass draws for the first time, now that vertex programs see the viewport.
+  Two bugs were hiding behind it:
+  - the linear depth formats (`0x2E`-`0x31`) never got the `1/width` texel scale, because texconv does not
+    describe depth formats;
+  - `SET_TEXTURE_BORDER_COLOR` was never passed to GL. The game samples the map in BORDER, so outside the light's
+    frustum it read depth 0 and shadowed everything.
+- **How it was found:** RenderDoc scripts (`qrenderdoc --python`) for post-VS data, pixel history, raw depth
+  values and uniforms, plus diffs of the render target after each draw. A temporary shader mode then wrote out the
+  shadow coordinates and the depth read: outside the map it read 0.
+  - Discarded on the way: a winding inversion (both paths end with the same NDC Y); clamping linear textures (xemu
+    binds them as `GL_TEXTURE_2D` with the normal wrap); and rounding the compare to integers (no change).
+- **Fix:** `stage_texture` scales linear depth textures by texel, and `bind_textures` sets `GL_TEXTURE_BORDER_COLOR`
+  from `0x1B24` when a stage is in BORDER. The demo frame goes from about 95,000 darkened pixels to 429.
+  Details in [[gpu-nv2a]].

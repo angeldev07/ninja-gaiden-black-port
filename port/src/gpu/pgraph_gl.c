@@ -736,7 +736,7 @@ static GLuint stage_texture(const pgl_regs *r, int i, GLenum *target, float scal
     const uint8_t *src, *palette = NULL;
     size_t pal_bytes = 0;
     unsigned dead;
-    int derr, action;
+    int derr, action, linear;
     uint64_t hash;
     *target = GL_TEXTURE_2D;
     scale[0] = scale[1] = 1.0f;
@@ -749,6 +749,9 @@ static GLuint stage_texture(const pgl_regs *r, int i, GLenum *target, float scal
         /* Depth texture (shadow map): the Z surface the game drew earlier
            in this frame is already a GL texture; there is nothing to convert from memory. */
         s = rc_surface_find(&R.surf, c >= 0x2A && c <= 0x31 ? RC_ZETA : RC_COLOR, phys);
+        /* texconv does not describe depth formats; 0x2E-0x31 (LIN_D24S8, LIN_F24S8, LIN_D16,
+           LIN_F16) are linear, addressed in texels like any other linear texture. */
+        linear = derr ? c >= 0x2E && c <= 0x31 : d.linear;
     }
     if (s && s->gl_tex && !(R.has_color && s->addr == R.color_addr) &&
         cpu_wrote(s->addr, s->bytes, s->drawn_frame) && surface_sig(s) != s->mem_sig) {
@@ -762,7 +765,7 @@ static GLuint stage_texture(const pgl_regs *r, int i, GLenum *target, float scal
     }
     if (s && s->gl_tex) {
         R.rtt_binds++;
-        if (!derr && d.linear) {
+        if (linear) {
             scale[0] = 1.0f / (float)s->width;
             scale[1] = 1.0f / (float)s->height;
         }
@@ -861,6 +864,17 @@ static void bind_textures(const pgl_regs *r, float tex_scale[8]) {
             continue;
         glTexParameteri(target, GL_TEXTURE_WRAP_S, wrap_mode(addr & 0xF));
         glTexParameteri(target, GL_TEXTURE_WRAP_T, wrap_mode((addr >> 8) & 0xF));
+        if ((addr & 0xF) == 4 || ((addr >> 8) & 0xF) == 4) {
+            /* SET_TEXTURE_BORDER_COLOR (ARGB). A shadow map in BORDER reads its red as the
+             * depth outside the map: white keeps everything beyond the light's frustum lit. */
+            uint32_t bc = M(r, mb + 0x24);
+            GLfloat c[4];
+            c[0] = (float)((bc >> 16) & 0xFF) / 255.0f;
+            c[1] = (float)((bc >> 8) & 0xFF) / 255.0f;
+            c[2] = (float)(bc & 0xFF) / 255.0f;
+            c[3] = (float)(bc >> 24) / 255.0f;
+            glTexParameterfv(target, GL_TEXTURE_BORDER_COLOR, c);
+        }
         glTexParameteri(target, GL_TEXTURE_MIN_FILTER, min_filter((filter >> 16) & 0xFF));
         glTexParameteri(target, GL_TEXTURE_MAG_FILTER, ((filter >> 24) & 0xF) == 1 ? GL_NEAREST : GL_LINEAR);
     }
