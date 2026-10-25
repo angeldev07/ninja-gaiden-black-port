@@ -261,8 +261,15 @@ void ngb_apu_interrupt(void (*isr)(void *ctx), void *ctx) {
         isr(ctx);
         g_apu_ists = 0;
         g_apu_trap = 0;
+        /* Without the lock (TryEnter could fail): a VOICE_OFF during the ISR was not queued. */
+        vp_idle_delivered(&g_vp, handle);
         g_apu_idle_irqs++;
     }
+}
+
+/* Read without the lock: a voice queued right after is delivered on the next tick. */
+int ngb_apu_interrupt_pending(void) {
+    return g_vp.idle_head != g_vp.idle_tail;
 }
 
 void ngb_apu_summary(void) {

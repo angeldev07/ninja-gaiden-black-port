@@ -200,6 +200,23 @@ int main(void) {
         CHECK(vp_take_idle(&s, &h) && h == 9, "free voice: end of buffer (%u)", h);
         CHECK(vp_take_idle(&s, &h) && h == 5, "free voice: VOICE_OFF (%u)", h);
         CHECK(!vp_take_idle(&s, &h), "free-voice queue empty");
+        vp_idle_delivered(&s, 9); /* the ISR returned for both */
+        vp_idle_delivered(&s, 5);
+
+        /* A voice that ends and gets VOICE_OFF before the notice is delivered is notified once:
+           a second notice would reach DirectSound after it freed the voice. */
+        vp_method(&s, VP_PIO_SET_CURRENT_VOICE, 9);
+        vp_method(&s, VP_PIO_SET_VOICE_BUF_CBO, 0);
+        vp_method(&s, VP_PIO_VOICE_ON, 9);
+        vp_advance(&s, 0.1);
+        vp_method(&s, VP_PIO_VOICE_OFF, 9);
+        CHECK(vp_take_idle(&s, &h) && h == 9, "free voice: ended, then VOICE_OFF (%u)", h);
+        CHECK(!vp_take_idle(&s, &h), "one notice for a voice already pending");
+        vp_method(&s, VP_PIO_VOICE_OFF, 9); /* during the ISR: still pending */
+        CHECK(!vp_take_idle(&s, &h), "no notice for a VOICE_OFF during the delivery");
+        vp_idle_delivered(&s, 9);
+        vp_method(&s, VP_PIO_VOICE_OFF, 9);
+        CHECK(vp_take_idle(&s, &h) && h == 9, "VOICE_OFF after the delivery notifies again");
     }
 
     test_mix();

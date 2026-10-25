@@ -64,8 +64,13 @@ typedef struct vp_state {
     uint32_t voices_on, voices_ended; /* counters for the summary */
     /* Voices that have become free (VOICE_OFF, VOICE_RELEASE or end of buffer). The hardware
      * notifies each one with a front end trap (SE2FE_IDLE_VOICE) and the APU interrupt;
-     * DirectSound only hands out one buffer per stop when it receives it. */
+     * DirectSound only hands out one buffer per stop when it receives it. A voice already
+     * waiting in the queue is not queued again: the hardware notifies at once, so a voice that
+     * ends and then gets VOICE_OFF is notified before the second event, and DirectSound
+     * ignores it while the voice is still its own. Delivered later, after DirectSound freed the
+     * voice, the second notice reads a voice that no longer exists. */
     uint16_t idle[VP_IDLE_QUEUE];
+    uint8_t idle_pending[VP_MAX_VOICES];
     uint32_t idle_head, idle_tail; /* circular queue: taken out at head, put in at tail */
     uint32_t idle_dropped;
 } vp_state_t;
@@ -83,7 +88,10 @@ double vp_voice_rate(const uint8_t *voice);
  *   vp_voice_move: advances its CBO `step` samples with loop or end; 0 if the voice ended. */
 uint8_t *vp_voice_begin(vp_state_t *s, uint32_t h);
 int vp_voice_move(vp_state_t *s, uint32_t h, uint8_t *v, uint32_t step);
-/* Takes the next free voice pending notification; 0 if there is none. */
+/* Takes the next free voice pending notification; 0 if there is none. The voice stays pending
+ * (a new end or VOICE_OFF is not queued) until vp_idle_delivered, once the ISR has returned.
+ * vp_idle_delivered is a single byte store, so it may be called without the caller's lock. */
 int vp_take_idle(vp_state_t *s, uint32_t *handle);
+void vp_idle_delivered(vp_state_t *s, uint32_t handle);
 
 #endif

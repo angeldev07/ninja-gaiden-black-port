@@ -22,10 +22,13 @@ static void set_low24(uint8_t *voice, uint32_t offset, uint32_t value) {
 }
 
 static void push_idle(vp_state_t *s, uint32_t handle) {
+    if (handle >= VP_MAX_VOICES || s->idle_pending[handle])
+        return; /* one notice per voice until it is delivered (vp.h) */
     if (s->idle_tail - s->idle_head >= VP_IDLE_QUEUE) {
         s->idle_dropped++;
         return;
     }
+    s->idle_pending[handle] = 1;
     s->idle[s->idle_tail++ % VP_IDLE_QUEUE] = (uint16_t)handle;
 }
 
@@ -34,6 +37,11 @@ int vp_take_idle(vp_state_t *s, uint32_t *handle) {
         return 0;
     *handle = s->idle[s->idle_head++ % VP_IDLE_QUEUE];
     return 1;
+}
+
+void vp_idle_delivered(vp_state_t *s, uint32_t handle) {
+    if (handle < VP_MAX_VOICES)
+        ((volatile uint8_t *)s->idle_pending)[handle] = 0;
 }
 
 void vp_init(vp_state_t *s) {
