@@ -777,3 +777,16 @@ Details in [[gpu-nv2a]].
   - one crash in the mission mode after 2.9 h of play, an `ACCESS_VIOLATION` in the game's `DSOUND` library code
     on the port's DPC thread (`h6-20261025-121530.log`). It is the next task.
 - `version.h` goes to `0.5.0` and then back to `0.6.0-dev`.
+
+## [2026-10-25] fix | Mission mode crash: a stale free-voice notice in DSOUND
+- **Symptom (owner, mission mode, after 2.9 h):** the game closed with an `ACCESS_VIOLATION`, a read of `0x64` in
+  the game's `DSOUND` code (`DSOUND + 0x3C89`, PAL `0x380A09`) on the port's DPC thread.
+- **Cause:** the free-voice handler (`0x3809D7`) read the voice slot of a handle that DirectSound had already
+  released. The port could notify a voice twice (it ends, then gets `VOICE_OFF` before delivery: 66,373 notices
+  for 65,960 `VOICE_ON` in that session), and the DPC thread ran DPCs before ISRs with game threads free to run in
+  between. Details in [[audio-apu]].
+- **Fix:** one pending notice per voice (`vp.c`), and the DPC thread delivers interrupts and then DPCs in one
+  `DISPATCH_LEVEL` section (`impl_ke.c`), as on the Xbox.
+- **Tests:** `vp_test` 42 checks (new case for the double notice). The 150 s PAL demo: 8864 frames, 0 pb errors,
+  587 `VOICE_ON` and 577 notices, none lost. The crash itself is not reproducible on demand; the owner's mission
+  mode play is the real check.

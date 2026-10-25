@@ -170,6 +170,7 @@ void ngb_apu_tick(void);    /* fake DSP and voice processor (called by the DPC t
 void ngb_apu_summary(void); /* voice processor counters, to the log */
 /* Delivers the pending free voices: for each one it sets up the trap and calls isr(ctx). */
 void ngb_apu_interrupt(void (*isr)(void *ctx), void *ctx);
+int ngb_apu_interrupt_pending(void); /* 1 if there are free voices to deliver */
 
 /* symbols.c: XBE function names (--symbols, Ghidra CSV in NGB_DATA) */
 int ngb_symbols_load(const char *path);

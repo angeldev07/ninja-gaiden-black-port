@@ -1,6 +1,6 @@
 ---
 tags: [ngb, reverse-engineering, runtime, audio, apu, h8]
-updated: 2026-10-22
+updated: 2026-10-25
 status: current
 ---
 
@@ -34,7 +34,7 @@ The code is in `port/src/apu/vp.c`.
   - it clears `NEW_VOICE`;
   - it advances the CBO at `48000 · 2^(pitch/4096)` samples per second;
   - at EBO, it returns to LBO if the voice has `LOOP`; otherwise it turns it off.
-- Test: `port/tests/vp_test.c`, with 16 checks on a synthetic voice table.
+- Test: `port/tests/vp_test.c`, with 42 checks on a synthetic voice table.
 
 ## Result (`VERIFIED`)
 
@@ -102,6 +102,34 @@ ends the game carries on by itself. The leader reviewed the captures `vp2-pgraph
   - the demo continues with its cutscene montage and reaches at least frame 10500;
   - in 200 s, 993 `VOICE_ON` against 46, because DirectSound now recovers the free voices;
   - 986 notifications delivered and none lost.
+
+### A stale notice crashed DSOUND (2026-10-25)
+
+- **Symptom (owner, mission mode, after 2.9 h of play):** `ACCESS_VIOLATION`, a read of `0x64` at
+  `DSOUND + 0x3C89`, on the DPC thread (`h6-20261025-121530.log`; PAL `0x380A09`, same bytes, the library sections
+  match at the same offsets).
+- **The handler (`VERIFIED` in Ghidra, `0x3809D7`):** `this` is the APU object, the parameter the voice handle.
+  - It does nothing if the handle is `>= 0x100`, if `this+0x84` is set, or if bit 23 of `+0x04` of the voice in the
+    table is set.
+  - Otherwise it reads the voice object `this[0x88 + 4·handle]` with no NULL check. It acts only if the notice is
+    for the object's last hardware voice (`+0xC`, count at `+0x64`) and the object is still in its list (`+0x4C`).
+  - Acting is `0x381F74`: it unlinks the voice from the hardware list, marks it free (`+0x65 = 0xFF`) and queues
+    the DPC at `this+0x4C8` (routine `0x380EB2`), which finishes the release later.
+  - The crash is that read with the slot already NULL: a notice for a voice that DirectSound had released.
+- **Why the port produced it (`INFERRED`, matches the counters):**
+  - the summary shows 66,373 notices for 65,960 `VOICE_ON`: some voices were notified twice;
+  - a voice that ends at EBO and then gets `VOICE_OFF` before the notice is delivered was queued twice;
+  - the DPC thread ran the DPCs before the ISRs, with no lock between them. A notice could arrive after the DPC
+    that frees its voice, and a game thread could run between an ISR and the DPC it queued. On the Xbox,
+    pending DPCs run as soon as the ISRs return, before any thread.
+- **Fix:**
+  - `vp.c` keeps one pending notice per voice (`idle_pending`);
+  - `dpc_thread` (`impl_ke.c`) goes to `DISPATCH_LEVEL` when there is work, delivers the interrupts first, then
+    runs the DPCs, including the ones the ISRs queued, and only then lowers.
+  - It takes the lock only when there is work, so a game thread waiting at `DISPATCH_LEVEL` for the fake DSP
+    does not block it.
+- **Test:** `vp_test` covers a voice that ends and then gets `VOICE_OFF` before delivery: one notice, and a later
+  `VOICE_OFF` notifies again. The crash itself does not reproduce on demand; it took one 2.9 h session.
 
 ## Choppy music: CRI's vsync thread without its priority (`VERIFIED`)
 

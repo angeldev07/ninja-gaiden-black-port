@@ -501,27 +501,50 @@ static void call_isr(void *k) {
 
 static void run_dpc(uint32_t dpc) {
     uint8_t *d = (uint8_t *)(uintptr_t)dpc;
-    uint32_t routine = *(uint32_t *)(d + 0x0C);
+    uint32_t routine = *(uint32_t *)(d + 0x0C), old;
     d[2] = 0; /* Inserted = FALSE */
     if (!routine)
         return;
-    raise_irql(2);
+    old = raise_irql(2);
     ((dpc_routine_fn)(uintptr_t)routine)(dpc, *(uint32_t *)(d + 0x10), *(uint32_t *)(d + 0x14),
                                          *(uint32_t *)(d + 0x18));
-    lower_irql(0);
+    lower_irql(old);
 }
 
-/* Routine of the Xbox "DPC" thread (stdcall, runs on an Xbox stack with its fake KPCR). */
+static int vblank_due(void) {
+    return g_gpu_interrupt && nv2a_vblank_enabled() && dpc_now_us() >= g_next_vblank;
+}
+
+/* Moves the queued DPCs to fire[] (the caller holds g_timer_lock); the ones that do not fit
+ * stay queued for the next tick. */
+static int take_dpcs(uint32_t *fire, int nfire) {
+    int i, n = 0;
+    while (n < g_dpc_count && nfire < MAX_TIMERS + MAX_DPCS)
+        fire[nfire++] = g_dpc_queue[n++];
+    for (i = n; i < g_dpc_count; i++)
+        g_dpc_queue[i - n] = g_dpc_queue[i];
+    g_dpc_count -= n;
+    return nfire;
+}
+
+/*
+ * Routine of the Xbox "DPC" thread (stdcall, runs on an Xbox stack with its fake KPCR).
+ *
+ * Interrupts go first and then the DPCs, including the ones the ISRs queue, all at
+ * DISPATCH_LEVEL so no game thread runs in between: on the Xbox a pending DPC runs as soon as
+ * the ISRs return, before any thread. DirectSound relies on it: its free-voice ISR queues the
+ * DPC that frees the voice, and a VOICE_OFF from a game thread in between gave a second notice
+ * that DirectSound read after the voice was gone (a NULL voice in DSOUND).
+ */
 static void __stdcall dpc_thread(uint32_t unused) {
     (void)unused;
     for (;;) {
         ULONGLONG now = dpc_now_ms(), next = now + 50;
         uint32_t fire[MAX_TIMERS + MAX_DPCS];
-        int nfire = 0, i;
+        int nfire = 0, i, apu, section;
+        uint32_t old = 0;
         EnterCriticalSection(&g_timer_lock);
-        for (i = 0; i < g_dpc_count; i++)
-            fire[nfire++] = g_dpc_queue[i];
-        g_dpc_count = 0;
+        nfire = take_dpcs(fire, nfire);
         for (i = 0; i < MAX_TIMERS; i++) {
             ktimer_slot_t *s = &g_timers[i];
             uint8_t *tm;
@@ -546,12 +569,23 @@ static void __stdcall dpc_thread(uint32_t unused) {
             }
         }
         LeaveCriticalSection(&g_timer_lock);
+        ngb_apu_tick();
+        /* The lock is taken only when there is work: a game thread waiting at DISPATCH_LEVEL
+           for the fake DSP (ngb_apu_tick) must not leave this thread blocked here. */
+        apu = g_apu_interrupt && ngb_apu_interrupt_pending();
+        section = nfire || apu || vblank_due();
+        if (section)
+            old = raise_irql(2);
+        vblank_tick(&next);
+        if (apu)
+            ngb_apu_interrupt(call_isr, g_apu_interrupt);
+        EnterCriticalSection(&g_timer_lock);
+        nfire = take_dpcs(fire, nfire);
+        LeaveCriticalSection(&g_timer_lock);
         for (i = 0; i < nfire; i++)
             run_dpc(fire[i]);
-        vblank_tick(&next);
-        ngb_apu_tick();
-        if (g_apu_interrupt)
-            ngb_apu_interrupt(call_isr, g_apu_interrupt);
+        if (section)
+            lower_irql(old);
         ngb_watch_tick();
         if (next > now + 16)
             next = now + 16;

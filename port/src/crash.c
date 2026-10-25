@@ -265,6 +265,11 @@ void ngb_apu_interrupt(void (*isr)(void *ctx), void *ctx) {
     }
 }
 
+/* Read without the lock: a voice queued right after is delivered on the next tick. */
+int ngb_apu_interrupt_pending(void) {
+    return g_vp.idle_head != g_vp.idle_tail;
+}
+
 void ngb_apu_summary(void) {
     ngb_log("apu: %u VOICE_ON, %u voices ended on their own, %u free-voice notices (%u lost); "
             "audio %s, %u frames dropped, %u flushed",
