@@ -764,3 +764,16 @@ Details in [[gpu-nv2a]].
   the 150 s PAL demo with 0 pb errors and 0 program errors (the demo has no heat haze).
 - **Still open:** a band about 11 px wide at the right edge stays dark under the heat haze. The heat quad does not
   cover the last column of its target with GL's pixel centers (half-pixel offset, [[shaders-nv2a]] § Pending).
+
+## [2026-10-25] milestone | Release v0.5.0: the whole story mode
+- **Played through:** the owner finished the whole story mode with the launcher build of the heat haze fix. No more
+  visual defects showed in chapter 12, and the rest of the story played well overall, with an occasional glitch.
+- **Main changes since v0.4.1:** vertex programs see the viewport (the water in chapter 12), shadow maps with texel
+  addressing and the border color, F12 screenshots of the GL render, and the heat haze over the lava (`DOTPRODUCT`
+  and `DOT_ST`).
+- **Known gaps, in the README:**
+  - fights with many enemies in the mission mode drop below 60 fps;
+  - a dark band at the right edge under the heat haze;
+  - one crash in the mission mode after 2.9 h of play, an `ACCESS_VIOLATION` in the game's `DSOUND` library code
+    on the port's DPC thread (`h6-20261025-121530.log`). It is the next task.
+- `version.h` goes to `0.5.0` and then back to `0.6.0-dev`.
