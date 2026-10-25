@@ -310,6 +310,16 @@ static int run_stress(void) {
         snprintf(what, sizeof what, "texture mode %u", k);
         ok += stress_fs(&r, what, &total);
     }
+    for (k = 0; k < 4; k++) { /* DOTPRODUCT + DOT_ST with every emulated dot mapping */
+        memset(&r, 0, sizeof r);
+        r.combiner_control = 1;
+        r.rgb_inputs[0] = 0x0A000000u;
+        r.rgb_outputs[0] = 0xC0;
+        r.texture_modes = 1u | (17u << 5) | (9u << 10);
+        r.dot_mapping = k | (k << 4);
+        snprintf(what, sizeof what, "dot mapping %u", k);
+        ok += stress_fs(&r, what, &total);
+    }
     for (k = 0; k < 8; k++) { /* final combiner: complements, clamp, EF_PROD and V1R0_SUM */
         memset(&r, 0, sizeof r);
         r.combiner_control = 1;
