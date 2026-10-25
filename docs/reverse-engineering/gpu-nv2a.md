@@ -1,6 +1,6 @@
 ---
 tags: [ngb, reverse-engineering, runtime, gpu, h7]
-updated: 2026-10-24
+updated: 2026-10-25
 status: current
 ---
 
@@ -474,6 +474,42 @@ spotlights without cone and no skinning in fixed mode.
   - FPS with pacing: **60.0 at 1x, 2x and 4x**. With `--debug-shots`, 4x drops to about 58.7, because each 2880x1920
     PNG stalls the render thread. Without pacing the 3D windows run at 80-100 fps at every scale, so the
     bottleneck is still the CPU (push buffer decoding), not the GPU.
+
+## Movies at 30 fps: the AV cable and the interlaced field (`VERIFIED`)
+
+- **Symptom (owner):** in the pre-rendered movies, subtitles faded out and came back, and the voice seemed out of
+  step with them.
+- **What the movies are:** the 26 `movie\*.sfd` are MPEG at 29.97 fps with ADX audio (44.1 kHz in the story movies,
+  48 kHz in the intro). Sofdec carries the subtitles in the file as a `SUBTITLE` stream: entries with `TUNIT` 29970,
+  `INTIME`, `DURTIME` and `CONTENT` such as `MA001,MF201,MD301,MI401,ME501` (English, French, German, Italian,
+  Spanish) or `MJ101` (Japanese).
+- **How the game shows them (Ghidra, PAL addresses):**
+  - each frame, `0x3207F0` asks Sofdec (`mwPlyGetTime`, `0x3472D0`) for the movie time and copies the entry
+    active at that time to `0x9EDBE0`;
+  - `0x19B4E0` picks the token of the console language and `0x234E60` shows that message for a number of game
+    frames taken from a table at `0x453850`. The table is in frames of 30 fps: entry 0 is 5 + 89 + 5 = 99 frames,
+    the 3.3 s (`DURTIME` 99000) of the first subtitle. With the progressive present flag (480p) the count is
+    doubled.
+  - At 60 fps the message ran out halfway; the entry was still active in the movie, so it was shown again.
+- **Why the loop ran at 60:** the main loop (`0x310790`) waits for the vblank event while a movie plays. It waits a
+  second time when the display mode is interlaced or field-based (`dev+0x1DDC & 0x1200000`) and the current field
+  (`dev+0x1DF8`) is 0. That gives one frame per two fields, 30 fps, on a 480i TV.
+  - D3D's vblank ISR (`0x3D2040`) and DPC (`0x3D2310`) read the field from MCPX I/O port `0x80C0`, bit 5. The port
+    read 0, so the field never changed.
+  - Worse, the mode flags were `0xFFFFFFFF`. `CMiniport::SetVideoMode` (`0x3D2C31`) looks the mode up by the AV
+    capabilities (`AvSendTVEncoderOption`, option 6), and the kernel answered 0, "no cable". With cable 0 the
+    mode table yields its terminator.
+- **Fix:**
+  - the capabilities are a composite cable (`AV_PACK_STANDARD`) plus the standard and refresh rate of the AV
+    region and the user video flags (`eeprom_av_capabilities`). The mode flags become `0x600300` on PAL (interlaced,
+    60 Hz) and the NTSC equivalent;
+  - port `0x80C0` returns the parity of the vblank count in bit 5;
+  - a PAL console reports PAL60. Without it the game asks for 60 Hz with the emulate-refresh flag (`0x200`) and D3D
+    emulates 60 Hz on a 50 Hz TV with a `KTIMER` due on the GPU clock (`0x3D1F0D`), which the port never fires:
+    the first run hung in `0x3CE5B0` waiting for a vblank. The port's vblank is 60 Hz anyway.
+- **Result:** the New Game movie runs at 30.0 fps on PAL and NTSC-U and no subtitle shows twice (it did 6 times
+  before); the game goes back to 60 fps when the movie ends. The title demo: 0 push buffer errors; its intro video
+  now also runs at 30 fps, so 150 s give 8403 flips instead of 8973. `--widescreen` still sets its mode.
 
 ## Next
 

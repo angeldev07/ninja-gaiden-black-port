@@ -425,7 +425,12 @@ static LONG mmio_access(EXCEPTION_RECORD *rec, CONTEXT *c) {
     return EXCEPTION_CONTINUE_EXECUTION;
 }
 
-/* IN/OUT, CLI/STI and WBINVD: they are logged and skipped; IN returns 0. */
+/* MCPX I/O port 0x80C0: bit 5 is the field the TV encoder is sending (odd or even). D3D reads it
+ * at each vblank of an interlaced mode; the game waits for a frame boundary with it, so a movie
+ * shows each frame for two fields. The field changes at every vblank. */
+#define PORT_FIELD 0x80C0u
+
+/* IN/OUT, CLI/STI and WBINVD: they are logged and skipped; IN returns 0, except the field. */
 static LONG port_io(CONTEXT *c) {
     uint8_t b[3] = {0, 0, 0};
     SIZE_T got = 0;
@@ -453,6 +458,11 @@ static LONG port_io(CONTEXT *c) {
         c->Eip += len + pre;
         return EXCEPTION_CONTINUE_EXECUTION;
     default: return EXCEPTION_CONTINUE_SEARCH;
+    }
+    if (in && port == PORT_FIELD && !(b[0] & 1)) {
+        c->Eax = (c->Eax & ~0xFFu) | ((nv2a_vblank_count() & 1u) << 5);
+        c->Eip += len + pre;
+        return EXCEPTION_CONTINUE_EXECUTION;
     }
     if (InterlockedIncrement(&g_mmio_count) <= MMIO_LOG_MAX)
         ngb_log("    · port I/O: %s 0x%04X from EIP 0x%08lX (skipped%s)", in ? "IN" : "OUT",

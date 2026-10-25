@@ -348,6 +348,10 @@ int nv2a_vblank_enabled(void) {
     return g_ready && (g_regs[PCRTC_INTR_EN_0 / 4] & 1u);
 }
 
+uint32_t nv2a_vblank_count(void) {
+    return (uint32_t)g_vblanks;
+}
+
 int nv2a_vblank(void) {
     if (!nv2a_vblank_enabled())
         return 0;

@@ -57,10 +57,10 @@ static uint64_t ExQueryNonVolatileSetting(uint32_t *args) {
         switch (index) {
         case 0x0: name = "TIMEZONE_BIAS"; value = 0; break;
         case 0x7: name = "LANGUAGE"; value = EEPROM_LANGUAGE; break;            /* English */
-        case 0x8: /* XC_VIDEO_FLAGS_WIDESCREEN (0x10000): the dashboard's 16:9 TV setting. The game
-                   * reads it and renders anamorphic 16:9 (a wider field of view in the same 720x480). */
+        case 0x8: /* With XC_VIDEO_FLAGS_WIDESCREEN the game renders anamorphic 16:9 (a wider field
+                   * of view in the same 720x480); PAL60 on a PAL console (eeprom.h). */
             name = "VIDEO_FLAGS";
-            value = g_ngb_opts.widescreen ? 0x10000u : 0;
+            value = eeprom_video_flags(g_ngb_opts.widescreen);
             break;
         case 0x9: name = "AUDIO_FLAGS"; value = 0; break;         /* stereo */
         case 0xA: name = "PARENTAL_CONTROL_GAMES"; value = 0; break;
@@ -115,10 +115,18 @@ static uint64_t AvGetSavedDataAddress(uint32_t *args) {
     return 0;
 }
 
-/* 2 VOID AvSendTVEncoderOption(PVOID RegisterBase, ULONG Option, ULONG Param, PULONG Result) */
+#define AV_QUERY_AV_CAPABILITIES 6u
+
+/* 2 VOID AvSendTVEncoderOption(PVOID RegisterBase, ULONG Option, ULONG Param, PULONG Result)
+ * The capabilities are a composite cable and the console's video settings (eeprom.h). With 0
+ * (no cable) D3D found no display mode: the mode flags stayed at 0xFFFFFFFF and the game never
+ * knew the picture was interlaced (crash.c, PORT_FIELD). */
 static uint64_t AvSendTVEncoderOption(uint32_t *args) {
+    uint32_t result = 0;
+    if (ARG(1) == AV_QUERY_AV_CAPABILITIES)
+        result = eeprom_av_capabilities(g_ngb_opts.widescreen);
     if (PTR(3))
-        *(uint32_t *)PTR(3) = 0;
+        *(uint32_t *)PTR(3) = result;
     return 0;
 }
 
