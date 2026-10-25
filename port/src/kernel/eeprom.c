@@ -40,3 +40,12 @@ void eeprom_set_ntsc(int ntsc) { g_ntsc = ntsc != 0; }
 uint32_t eeprom_av_region(void) { return g_ntsc ? EEPROM_AV_REGION_NTSC : EEPROM_AV_REGION; }
 uint32_t eeprom_game_region(void) { return g_ntsc ? EEPROM_GAME_REGION_NTSC : EEPROM_GAME_REGION; }
 uint32_t eeprom_dvd_region(void) { return g_ntsc ? EEPROM_DVD_REGION_NTSC : EEPROM_DVD_REGION; }
+
+uint32_t eeprom_video_flags(int widescreen) {
+    return (widescreen ? EEPROM_VIDEO_WIDESCREEN : 0) | (g_ntsc ? 0 : EEPROM_VIDEO_PAL_60HZ);
+}
+
+uint32_t eeprom_av_capabilities(int widescreen) {
+    /* Standard (bits 8-15) and refresh rate (bit 22 60 Hz, bit 23 50 Hz) of the AV region. */
+    return EEPROM_AV_PACK_STANDARD | (eeprom_av_region() & 0x00C0FF00u) | eeprom_video_flags(widescreen);
+}

@@ -32,6 +32,7 @@ int nv2a_single_step(CONTEXT *ctx);
 /* Synthetic vblank (called by the DPC thread at 60 Hz): 1 if the ISR must be called. */
 int nv2a_vblank(void);
 int nv2a_vblank_enabled(void);
+uint32_t nv2a_vblank_count(void); /* vblanks so far: its parity is the interlaced field */
 
 /* Register (shadow of what was written, or modeled value), offset from 0xFD000000. */
 uint32_t nv2a_reg_read(uint32_t off);

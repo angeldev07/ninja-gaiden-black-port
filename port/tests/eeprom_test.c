@@ -39,6 +39,15 @@ int main(void) {
     CHECK(!eeprom_section(0x1FF, &off, &len) && off == 0x30 && len == 0x30);
     CHECK(!eeprom_section(0xFF, &off, &len) && off == 0x60 && len == 0xA0);
     CHECK(eeprom_section(0x7, &off, &len) == -1);
+    /* AV capabilities: composite cable, PAL-I at 50 Hz plus PAL60 (60 Hz); NTSC-M at 60 Hz. */
+    CHECK(eeprom_video_flags(0) == EEPROM_VIDEO_PAL_60HZ);
+    CHECK(eeprom_av_capabilities(0) == 0x00C00301u);
+    CHECK(eeprom_av_capabilities(1) == 0x00C10301u);
+    eeprom_set_ntsc(1);
+    CHECK(eeprom_video_flags(1) == EEPROM_VIDEO_WIDESCREEN);
+    CHECK(eeprom_av_capabilities(0) == 0x00400101u);
+    CHECK(eeprom_av_capabilities(1) == 0x00410101u);
+    eeprom_set_ntsc(0);
     if (!g_fail)
         printf("eeprom_test: OK\n");
     return g_fail;

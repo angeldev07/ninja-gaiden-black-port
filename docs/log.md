@@ -790,3 +790,17 @@ Details in [[gpu-nv2a]].
 - **Tests:** `vp_test` 43 checks (new case for the double notice). The 150 s PAL demo: 8973 frames, 0 pb errors,
   590 `VOICE_ON` and 585 notices, none lost. The crash itself is not reproducible on demand; the owner's mission
   mode play is the real check.
+
+## [2026-10-25] fix | Movies at 30 fps: subtitles no longer show twice
+- **Symptom (owner):** in the pre-rendered movies the subtitles came back a second time and the voice seemed out of
+  step; the owner suspected the movies were meant for 30 fps, not 60.
+- **Cause (`VERIFIED` in Ghidra and with `--watch`):** the movies are 29.97 fps and the game counts each subtitle's
+  time on screen in 30 fps frames. On the Xbox the movie loop waits for the second field of an interlaced frame;
+  in the port the kernel reported no AV cable, so D3D had no display mode (mode flags `0xFFFFFFFF`), and the field
+  port `0x80C0` read 0. The loop ran at 60 and each subtitle ran out halfway and came back. Details in
+  [[gpu-nv2a]].
+- **Fix:** `AvSendTVEncoderOption` reports a composite cable with the console's standard and video flags
+  (`eeprom_av_capabilities`, tested in `eeprom_test`); port `0x80C0` alternates the field each vblank; a PAL
+  console reports PAL60, because without it D3D emulates 60 Hz with a timer the port does not run.
+- **Checks:** the New Game movie at 30.0 fps on PAL and NTSC-U with no repeated subtitle (6 before); 60 fps again
+  after it. 150 s PAL title demo: 0 pb errors, 63 programs (0 errors). `--widescreen` boots.
