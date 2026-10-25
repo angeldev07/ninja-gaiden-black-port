@@ -15,7 +15,8 @@ OpenGL renderer and an APU audio engine.
 
 ## Features
 
-- **Plays the game:** from the title screen into chapter 9 so far, with saves, music, voices and effects at 60 fps.
+- **Plays the game:** the whole story mode, from the title screen to the ending, with saves, music, voices and
+  effects at 60 fps.
   The PAL (European) and NTSC-U (North American) releases are supported.
 - **Sharper than the console:** the internal resolution goes up to 4x, with *Match my screen* rendering at your
   monitor's resolution. Textures get 16x anisotropic filtering.
@@ -60,15 +61,18 @@ Code-signing the releases, which removes most of these warnings, is planned.
 
 ## Status
 
-v0.3.0 has been played from the title screen into chapter 9 (tested through chapter 8 and the start of chapter 9).
-Known gaps:
+v0.5.0 has been played through the whole story mode, from the title screen to the ending. It plays well overall,
+with an occasional glitch. Known gaps:
 
 - Some lighting details still differ from the console.
 - Floor reflections and the sword glow are missing.
-- Some in-game cutscenes drop below 60 fps.
+- Some in-game cutscenes and fights with many enemies drop below 60 fps.
+- Under the heat haze over the lava, a thin dark band can show at the right edge of the screen.
+- In the mission mode the game closed once with an exception, after almost three hours of play. It is under
+  investigation.
 
 The [roadmap](docs/target/roadmap.md) lists what is next, and the [development log](docs/log.md) records every step.
-Compatibility reports for chapter 9 onward, for the NTSC-U release and for the Japanese one are very welcome.
+Compatibility reports for the mission mode, for both releases and for the Japanese one are very welcome.
 
 ## Building from source
 
