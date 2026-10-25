@@ -29,11 +29,16 @@
  *     20-23 (stage 1 always reads from 0).
  *   SHADER_CLIP_PLANE_MODE 0x17F8: bit 4i + k, component k of stage i: 1 = discard if
  *     the coordinate is >= 0, 0 = if it is < 0.
+ *   SET_DOT_RGBMAPPING 0x1E74: how stage i (1-3) reads its source texture as a vector, in bits
+ *     4(i-1) to 4(i-1)+2 (psh_dot_map; the layout of D3D's PS_DOTMAPPING in Cxbx-Reloaded).
  *
  * Emulated semantics: mapped inputs; AB = A·B (or dot), CD = C·D (or dot), SUM = AB + CD
  * or mux(AB, CD) with r0.a; scale and bias on the three outputs and clamped to [-1, 1];
  * writes happen after reading everything (RGB, then alpha, then blue-to-alpha). r0.a starts
- * as t0.a if stage 0 has a texture (1 otherwise). Final: rgb = A·B + (1 - A)·C + D,
+ * as t0.a if stage 0 has a texture (1 otherwise). Dot product textures (NVIDIA's
+ * GL_NV_texture_shader describes the same stages): DOTPRODUCT computes dot(oTi.xyz, source
+ * vector) and has no color of its own; DOT_ST, after a DOTPRODUCT, samples a 2D texture at
+ * (that dot, its own dot), in texels if the texture is linear. Final: rgb = A·B + (1 - A)·C + D,
  * alpha = G, with EF_PROD = E·F and V1R0_SUM = v1 + r0 (optional complements and clamp). The
  * constants and the fog are uniforms: the game changes them without recompiling the shader.
  */
@@ -154,8 +159,20 @@ static int is_dependent(uint8_t mode) {
     return mode >= PSH_TEX_BUMPENVMAP;
 }
 
-static int is_emulated(uint8_t mode) {
-    return mode <= PSH_TEX_BUMPENVMAP_LUM;
+/* Stage `i`, with every stage before it already decoded. */
+static int is_emulated(const psh_program *p, int i) {
+    uint8_t mode = p->tex_mode[i];
+    if (mode <= PSH_TEX_BUMPENVMAP_LUM) {
+        return 1;
+    }
+    if (p->dot_map[i] > PSH_DOT_MINUS1_TO_1) {
+        return 0; /* HILO */
+    }
+    if (mode == PSH_TEX_DOTPRODUCT) {
+        return 1;
+    }
+    return mode == PSH_TEX_DOT_ST && p->tex_mode[i - 1] == PSH_TEX_DOTPRODUCT &&
+           !((p->unsupported_tex >> (i - 1)) & 1u);
 }
 
 static int decode_textures(const psh_registers *r, psh_program *p) {
@@ -167,6 +184,9 @@ static int decode_textures(const psh_registers *r, psh_program *p) {
         }
         p->tex_mode[i] = mode;
         p->compare[i] = (uint8_t)((r->compare_mode >> (4 * i)) & 0xFu);
+        if (i > 0) {
+            p->dot_map[i] = (uint8_t)((r->dot_mapping >> (4 * (i - 1))) & 7u);
+        }
         if ((r->shadow >> i) & 1u && (mode == PSH_TEX_PROJECT2D || mode == PSH_TEX_PROJECT3D))
             p->shadow[i] = (r->shadow >> (4 + i)) & 1u ? 24 : 16;
         p->shadow_func = (uint8_t)((r->shadow >> 8) & 7u);
@@ -178,7 +198,7 @@ static int decode_textures(const psh_registers *r, psh_program *p) {
         if (i > 0 && p->tex_source[i] >= i) {
             return PSH_ERR_TEXMODE;
         }
-        if (!is_emulated(mode)) {
+        if (!is_emulated(p, i)) {
             p->unsupported_tex |= (uint8_t)(1u << i);
         }
     }
@@ -358,7 +378,8 @@ static const char *sampler_type(uint8_t mode) {
     switch (mode) {
     case PSH_TEX_PROJECT2D:
     case PSH_TEX_BUMPENVMAP:
-    case PSH_TEX_BUMPENVMAP_LUM: return "sampler2D";
+    case PSH_TEX_BUMPENVMAP_LUM:
+    case PSH_TEX_DOT_ST: return "sampler2D";
     case PSH_TEX_PROJECT3D: return "sampler3D";
     case PSH_TEX_CUBEMAP: return "samplerCube";
     default: return NULL;
@@ -385,6 +406,10 @@ static void emit_texture(glsl_buf *b, const psh_program *p, int i) {
                       i, ops[p->shadow_func], i, i, max);
         else
             glsl_emit(b, "    vec4 t%d = vec4(d%d %s 0.0 ? 1.0 : 0.0);\n", i, i, ops[p->shadow_func]);
+        return;
+    }
+    if ((p->unsupported_tex >> i) & 1u) {
+        glsl_emit(b, "    vec4 t%d = vec4(0.0); /* mode %s not emulated */\n", i, k_tex_names[mode]);
         return;
     }
     switch (mode) {
@@ -421,9 +446,18 @@ static void emit_texture(glsl_buf *b, const psh_program *p, int i) {
                       i, src, i, i);
         }
         break;
-    default:
-    glsl_emit(b, "    vec4 t%d = vec4(0.0); /* mode %s not emulated */\n", i,
-                  k_tex_names[mode]);
+    case PSH_TEX_DOTPRODUCT:
+        glsl_emit(b, "    float dot%d = dot(oT%d.xyz, nv_dotmap(t%d.rgb, %d));\n", i, i, src,
+                  p->dot_map[i]);
+        glsl_emit(b, "    vec4 t%d = vec4(0.0);\n", i);
+        break;
+    case PSH_TEX_DOT_ST:
+        glsl_emit(b, "    float dot%d = dot(oT%d.xyz, nv_dotmap(t%d.rgb, %d));\n", i, i, src,
+                  p->dot_map[i]);
+        glsl_emit(b, "    vec4 t%d = texture(tex%d, vec2(dot%d, dot%d) * texScale[%d]);\n", i, i,
+                  i - 1, i, i);
+        break;
+    default: /* every other mode is in unsupported_tex */
         break;
     }
 }
@@ -471,7 +505,9 @@ int nv2a_psh_to_glsl(const psh_program *p, char *out, size_t outlen) {
               "in vec4 oT0;\nin vec4 oT1;\nin vec4 oT2;\nin vec4 oT3;\n",
               p->n_stages);
     for (i = 0; i < PSH_TEXTURES; i++) {
-        const char *type = p->shadow[i] ? "sampler2D" : sampler_type(p->tex_mode[i]);
+        const char *type = p->shadow[i]                    ? "sampler2D"
+                           : (p->unsupported_tex >> i) & 1u ? NULL
+                                                            : sampler_type(p->tex_mode[i]);
         if (type) {
             glsl_emit(&b, "uniform %s tex%d;\n", type, i);
         }
@@ -503,8 +539,24 @@ int nv2a_psh_to_glsl(const psh_program *p, char *out, size_t outlen) {
               "    case 6: return ia >= ir;\n"
               "    default: return true;\n"
               "    }\n"
-              "}\n\nvoid main() {\n",
+              "}\n\n",
               PSH_MAX_STAGES, PSH_MAX_STAGES, PSH_TEXTURES, PSH_TEXTURES, PSH_TEXTURES, PSH_TEXTURES);
+    for (i = 1; i < PSH_TEXTURES; i++) {
+        if (p->tex_mode[i] == PSH_TEX_DOTPRODUCT && !((p->unsupported_tex >> i) & 1u)) {
+            glsl_emit(&b,
+                      "/* SET_DOT_RGBMAPPING: the RGB of a texture as the vector of a dot product\n"
+                      " * stage (psh_dot_map). */\n"
+                      "vec3 nv_dotmap(vec3 c, int m) {\n"
+                      "    vec3 b = round(c * 255.0);\n"
+                      "    if (m == 1) return clamp((b - 128.0) / 127.0, -1.0, 1.0);\n"
+                      "    if (m == 2) return c * 2.0 - 1.0;\n"
+                      "    if (m == 3) return max(mix(b, b - 256.0, step(128.0, b)) / 127.0, -1.0);\n"
+                      "    return c;\n"
+                      "}\n\n");
+            break;
+        }
+    }
+    glsl_emit(&b, "void main() {\n");
     for (i = 0; i < PSH_TEXTURES; i++) {
         emit_texture(&b, p, i);
     }

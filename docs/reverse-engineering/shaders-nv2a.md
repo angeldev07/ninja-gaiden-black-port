@@ -1,6 +1,6 @@
 ---
 tags: [ngb, reverse-engineering, gpu, shaders, h7]
-updated: 2026-10-24
+updated: 2026-10-25
 status: current
 ---
 
@@ -49,23 +49,40 @@ copying GPL code and without touching the XDK.
   - projective 2D, 3D and CUBE;
   - PASSTHRU;
   - CLIPPLANE;
-  - BUMPENVMAP and BUMPENVMAP_LUM.
-- **Real data:** 2 real pixel shaders were found, of 2 stages with dot-product bump
-  (`DOTPRODUCT` + `DOT_ST`). They are translated, but **the `DOT_*` modes are not emulated yet**, so their result is
-  not correct yet. `INFERRED`: most materials will use the fixed pipeline (texture stage states), not
-  pixel shaders.
+  - BUMPENVMAP and BUMPENVMAP_LUM;
+  - DOTPRODUCT and DOT_ST (since 2026-10-25, see below).
+- **Dot product textures** (`port/src/shaders/psh.c → emit_texture`):
+  - `DOTPRODUCT` (stage i) computes `dot(oTi.xyz, n)`, where `n` is the RGB of the source stage read as a vector.
+    It has no color of its own (`ti = 0`) and no sampler.
+  - `DOT_ST` (stage i, right after a `DOTPRODUCT`) samples a 2D texture at `(dot of stage i-1, dot(oTi.xyz, n))`,
+    times `texScale`: with a linear texture the dots are in texels. `DOT_ST` without a `DOTPRODUCT` before it stays
+    unsupported (`t = 0`).
+  - `n` comes from `SET_DOT_RGBMAPPING` (`0x1E74`), 3 bits per stage at bit `4(i-1)`, the layout of D3D's
+    `PS_DOTMAPPING` (`INFERRED`, from Cxbx-Reloaded's header). Mappings (`INFERRED` from their names): 0 = `c`,
+    1 = `(255c - 128) / 127` (D3D), 2 = `2c - 1` (GL), 3 = each byte as a signed value / 127. The HILO
+    mappings (4-7) need 16-bit components and stay unsupported.
+  - **Real case (`VERIFIED` in RenderDoc):** the heat haze over the lava in chapter 12. A 12-instruction vertex
+    program draws a full-screen quad into a 512x256 render target with t0 = a 128x128 distortion map, t1 =
+    `DOTPRODUCT`, t2 = `DOT_ST` over the 720x480 color buffer (linear, `oT1.z` and `oT2.z` run over 0-720 and
+    0-480). Then 4-indexed fixed-pipeline quads blend that target over the scene (`SrcAlpha / InvSrcAlpha`).
+    Without the dot modes the target stayed black and the blend painted irregular black patches.
+  - Replacing the fragment shader in the capture: mapping 1 gives the clean picture, mapping 0 a ghost shifted
+    about 11 texels. So the game uses a signed mapping here (`INFERRED`: the register value was not logged).
+- `INFERRED`: most materials use the fixed pipeline (texture stage states), not pixel shaders.
 
 ## Tests
 
-- `port/tests/shaders_test.c`: 219 checks, with instructions hand-encoded word by word.
+- `port/tests/shaders_test.c`: 242 checks, with instructions hand-encoded word by word.
 - **Compiled with the real driver (`VERIFIED`)**: the **18 real shaders** (16 vertex programs and 2 pixel shaders)
-  compile and link in OpenGL 4.6 (AMD RX 6600), without touching the emitter. So do the 62 variants of the
-  `--stress` mode of `gl_test`, which covers every operation, every mapping and every texture mode. It has only been tested on AMD.
+  compile and link in OpenGL 4.6 (AMD RX 6600), without touching the emitter. So do the 66 variants of the
+  `--stress` mode of `gl_test` (4 of them `DOTPRODUCT` + `DOT_ST` with each emulated mapping), which covers every operation, every mapping and every texture mode. It has only been tested on AMD.
 
 ## Pending
 
-- The `DOT_*` modes, BRDF and DPNDNT.
-- Non-linear fog, oB0/oB1 by face and the half-pixel offset.
+- The other `DOT_*` modes (`DOT_ZW`, `DOT_STR_*`, `DOT_RFLCT_*`), HILO mappings, BRDF and DPNDNT.
+- Non-linear fog, oB0/oB1 by face and the half-pixel offset. A visible case (`INFERRED`): the chapter 12 heat
+  quad ends at x = 511.03 of a 512-wide target, so with GL's pixel centers (x + 0.5) column 511 is never written.
+  The blend reads it in CLAMP and a band about 11 px wide stays dark at the right edge.
 - Alpha test, color key and alpha kill.
 - Merge the programs that arrive through the push buffer (`0x0B00` + LOAD/START) into the PGRAPH interpreter.
 

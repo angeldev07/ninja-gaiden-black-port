@@ -28,7 +28,8 @@ typedef struct psh_registers {
     uint32_t texture_modes;        /* 0x1E70 SET_SHADER_STAGE_PROGRAM: 5 bits per stage */
     uint32_t other_stage_input;    /* 0x1E78 SET_SHADER_OTHER_STAGE_INPUT */
     uint32_t compare_mode;         /* 0x17F8 SET_SHADER_CLIP_PLANE_MODE: 4 bits per stage */
-    uint32_t dot_mapping;          /* 0x1E74 SET_DOT_RGBMAPPING (unused: DOT_* modes) */
+    uint32_t dot_mapping;          /* 0x1E74 SET_DOT_RGBMAPPING: psh_dot_map of stage i in bits
+                                      4(i-1) to 4(i-1)+2 (stage 0 has none) */
     /* Shadow maps (not a register: composed by the caller from the texture format of each
      * stage and the shadow comparison function):
      *   bits 0-3: stage i has a depth texture (shadow map);
@@ -102,6 +103,15 @@ typedef enum psh_tex_mode {
     PSH_TEX_MODE_COUNT
 } psh_tex_mode;
 
+/* How a dot product stage reads the RGB of its source texture as a vector (3 bits). */
+typedef enum psh_dot_map {
+    PSH_DOT_ZERO_TO_ONE = 0,      /* c */
+    PSH_DOT_MINUS1_TO_1_D3D = 1,  /* (255c - 128) / 127: 128 is zero */
+    PSH_DOT_MINUS1_TO_1_GL = 2,   /* 2c - 1 */
+    PSH_DOT_MINUS1_TO_1 = 3,      /* each byte as a signed (two's complement) value / 127 */
+    /* 4-7: HILO variants, which need 16-bit components: not emulated */
+} psh_dot_map;
+
 typedef struct psh_input {
     uint8_t reg;   /* psh_reg */
     uint8_t alpha; /* channel: 1 = alpha; 0 = RGB (in the alpha part, the blue one) */
@@ -138,6 +148,7 @@ typedef struct psh_program {
     uint8_t tex_mode[PSH_TEXTURES];   /* psh_tex_mode */
     uint8_t tex_source[PSH_TEXTURES]; /* stage a dependent mode reads from */
     uint8_t compare[PSH_TEXTURES];    /* CLIPPLANE: bit k = discard if coord k >= 0 */
+    uint8_t dot_map[PSH_TEXTURES];    /* DOTPRODUCT and DOT_ST: psh_dot_map */
     uint8_t shadow[PSH_TEXTURES];     /* 0 normal, 16 or 24: shadow map of those bits */
     uint8_t shadow_func;              /* comparison function (see psh_registers.shadow) */
     uint8_t unsupported_tex;          /* bit i = the mode of stage i is not emulated */
@@ -162,7 +173,7 @@ int nv2a_psh_decode(const psh_registers *regs, psh_program *out);
  *
  * Interface:
  *   in vec4 oD0, oD1, oFog, oT0-oT3;       the vertex shader outputs (vsh.h)
- *   uniform sampler2D/3D/Cube tex0-tex3;   depending on each stage's mode
+ *   uniform sampler2D/3D/Cube tex0-tex3;   depending on each stage's mode (DOTPRODUCT has none)
  *   uniform vec4 psC0[8], psC1[8];         per-stage constants (FACTOR0/1)
  *   uniform vec4 psFinalC0, psFinalC1;     final constants (SPECULAR_FOG_FACTOR)
  *   uniform vec4 fogColor;                 fog color (fog.rgb)
