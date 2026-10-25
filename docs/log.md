@@ -785,8 +785,8 @@ Details in [[gpu-nv2a]].
   released. The port could notify a voice twice (it ends, then gets `VOICE_OFF` before delivery: 66,373 notices
   for 65,960 `VOICE_ON` in that session), and the DPC thread ran DPCs before ISRs with game threads free to run in
   between. Details in [[audio-apu]].
-- **Fix:** one pending notice per voice (`vp.c`), and the DPC thread delivers interrupts and then DPCs in one
+- **Fix:** one pending notice per voice until its ISR returns (`vp.c`), and the DPC thread delivers interrupts and then DPCs in one
   `DISPATCH_LEVEL` section (`impl_ke.c`), as on the Xbox.
-- **Tests:** `vp_test` 42 checks (new case for the double notice). The 150 s PAL demo: 8864 frames, 0 pb errors,
-  587 `VOICE_ON` and 577 notices, none lost. The crash itself is not reproducible on demand; the owner's mission
+- **Tests:** `vp_test` 43 checks (new case for the double notice). The 150 s PAL demo: 8973 frames, 0 pb errors,
+  590 `VOICE_ON` and 585 notices, none lost. The crash itself is not reproducible on demand; the owner's mission
   mode play is the real check.

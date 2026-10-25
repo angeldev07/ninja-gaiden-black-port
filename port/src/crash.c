@@ -261,6 +261,8 @@ void ngb_apu_interrupt(void (*isr)(void *ctx), void *ctx) {
         isr(ctx);
         g_apu_ists = 0;
         g_apu_trap = 0;
+        /* Without the lock (TryEnter could fail): a VOICE_OFF during the ISR was not queued. */
+        vp_idle_delivered(&g_vp, handle);
         g_apu_idle_irqs++;
     }
 }

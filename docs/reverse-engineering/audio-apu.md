@@ -34,7 +34,7 @@ The code is in `port/src/apu/vp.c`.
   - it clears `NEW_VOICE`;
   - it advances the CBO at `48000 · 2^(pitch/4096)` samples per second;
   - at EBO, it returns to LBO if the voice has `LOOP`; otherwise it turns it off.
-- Test: `port/tests/vp_test.c`, with 42 checks on a synthetic voice table.
+- Test: `port/tests/vp_test.c`, with 43 checks on a synthetic voice table.
 
 ## Result (`VERIFIED`)
 
@@ -123,7 +123,7 @@ ends the game carries on by itself. The leader reviewed the captures `vp2-pgraph
     that frees its voice, and a game thread could run between an ISR and the DPC it queued. On the Xbox,
     pending DPCs run as soon as the ISRs return, before any thread.
 - **Fix:**
-  - `vp.c` keeps one pending notice per voice (`idle_pending`);
+  - `vp.c` keeps one pending notice per voice (`idle_pending`), and the voice stays pending until the ISR returns;
   - `dpc_thread` (`impl_ke.c`) goes to `DISPATCH_LEVEL` when there is work, delivers the interrupts first, then
     runs the DPCs, including the ones the ISRs queued, and only then lowers.
   - It takes the lock only when there is work, so a game thread waiting at `DISPATCH_LEVEL` for the fake DSP

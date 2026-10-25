@@ -581,6 +581,8 @@ static void __stdcall dpc_thread(uint32_t unused) {
             ngb_apu_interrupt(call_isr, g_apu_interrupt);
         EnterCriticalSection(&g_timer_lock);
         nfire = take_dpcs(fire, nfire);
+        if (g_dpc_count) /* left for the next tick: right away */
+            SetEvent(g_dpc_wake);
         LeaveCriticalSection(&g_timer_lock);
         for (i = 0; i < nfire; i++)
             run_dpc(fire[i]);

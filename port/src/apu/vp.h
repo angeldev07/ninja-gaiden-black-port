@@ -88,7 +88,10 @@ double vp_voice_rate(const uint8_t *voice);
  *   vp_voice_move: advances its CBO `step` samples with loop or end; 0 if the voice ended. */
 uint8_t *vp_voice_begin(vp_state_t *s, uint32_t h);
 int vp_voice_move(vp_state_t *s, uint32_t h, uint8_t *v, uint32_t step);
-/* Takes the next free voice pending notification; 0 if there is none. */
+/* Takes the next free voice pending notification; 0 if there is none. The voice stays pending
+ * (a new end or VOICE_OFF is not queued) until vp_idle_delivered, once the ISR has returned.
+ * vp_idle_delivered is a single byte store, so it may be called without the caller's lock. */
 int vp_take_idle(vp_state_t *s, uint32_t *handle);
+void vp_idle_delivered(vp_state_t *s, uint32_t handle);
 
 #endif
