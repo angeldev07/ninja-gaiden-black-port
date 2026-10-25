@@ -1,6 +1,6 @@
 ---
 tags: [ngb, reverse-engineering, gpu, shaders, h7]
-updated: 2026-10-21
+updated: 2026-10-24
 status: current
 ---
 
@@ -28,6 +28,14 @@ copying GPL code and without touching the XDK.
   - `DP4 oPos` with the matrix in c[96-99];
   - epilogue `MUL c[58]` + `RCC R1.x` + `MAD c[59]`.
   - The generated GLSL is in `NGB_DATA\runs\shaders\` (it is derived from the game and does not go in the repo).
+- **c[58] and c[59] are the viewport (`VERIFIED` in a RenderDoc capture, 2026-10-24):**
+  - the constant memory and the fixed-function transform context are the same storage;
+  - `SET_VIEWPORT_SCALE` (`0x0AF0`) lands in c[58] and `SET_VIEWPORT_OFFSET` (`0x0A20`) in c[59], D3D's
+    reserved c[-38] and c[-37];
+  - D3D never loads them with `SET_TRANSFORM_CONSTANT`. Before the fix they stayed at 0, so every program with
+    the epilogue collapsed its vertices to (-w, -w, -w, w) and drew nothing. The water in chapter 12 was one of them
+    (a 26-instruction program).
+  - `port/src/gpu/pgl_track.c` copies both methods into the constants; `port/tests/pgl_track_test.c` checks it.
 
 ## Register combiners (pixel shaders)
 

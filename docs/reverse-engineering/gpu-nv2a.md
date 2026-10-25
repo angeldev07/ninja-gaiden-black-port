@@ -1,6 +1,6 @@
 ---
 tags: [ngb, reverse-engineering, runtime, gpu, h7]
-updated: 2026-10-22
+updated: 2026-10-24
 status: current
 ---
 
@@ -295,6 +295,22 @@ color.
 - Now the stage binds the GL texture of that Z surface (render-to-texture). `psh` compares, like the NV2A,
   `depth · max` with the projected z (`0xFFFFFF` at 24 bits, `0xFFFF` at 16) using the function in
   `0x1E6C`.
+- **These draws only became visible on 2026-10-24**, when vertex programs got the viewport ([[shaders-nv2a]]).
+  Before, they collapsed and drew nothing. Two more bugs then showed up as hard-edged dark wedges on walls and
+  floors (`VERIFIED` with RenderDoc: the owner's chapter 12 capture and the PAL demo at frame 6000):
+  - **The map is linear and addressed in texels.** `0x2E` is `LIN_D24S8`, and the projected coordinates go up to
+    the map's 128 texels. texconv does not describe depth formats, so the scale `1/width` was never applied and the
+    map tiled about 128 times.
+  - **The game puts the map in BORDER** (`SET_TEXTURE_ADDRESS` `0x00010404`) and relies on the border color
+    (`0x1B24`, ARGB) for everything outside the light's frustum. The port never passed that register to GL, whose
+    default border is black, that is depth 0, so all of that geometry failed the compare and went into shadow.
+    With the register applied, the demo frame goes from about 95,000 darkened pixels to 429, which is the
+    characters' real shadow. That points to a white border (`INFERRED`: the value was set outside the frames the
+    PGRAPH log dumps).
+- **The shadow pass (`INFERRED` from the combiner):** the scenery is drawn again with a 19-instruction program,
+  pushed out along the normal and with polygon offset. The blend is `REVERSE_SUBTRACT` with `SRC_COLOR` and
+  `ONE_MINUS_SRC_COLOR`. The combiner gives 1 when lit, which leaves the pixel unchanged, and `c0[3] ≈ 0.95`
+  when in shadow.
 
 **Approximations (superseded 2026-10-22, see below):** fixed specular power (16) instead of `SET_SPECULAR_PARAMS`,
 spotlights without cone and no skinning in fixed mode.

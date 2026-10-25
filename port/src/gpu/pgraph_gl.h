@@ -46,6 +46,10 @@ typedef struct pgl_draw {
     uint32_t n_indices;
 } pgl_draw_t;
 
+/* pgl_track.c: stores one 3D class method in `r` (programs, constants, constant attributes and
+ * the transform constants that alias fixed-function registers, like the viewport). */
+void pgl_regs_track(pgl_regs *r, uint32_t method, uint32_t param);
+
 /* Reset values of the state methods (those of nv2a_state_defaults). */
 void pgl_regs_defaults(pgl_regs *r);
 
