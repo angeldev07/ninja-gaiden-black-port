@@ -1270,7 +1270,7 @@ static int on_bulk(void *user, uint32_t sub, uint32_t method, const uint32_t *wo
     if (!g_frame0_done)
         g_hist_frame0[method / 4] += n;
     g_run.active = 0;
-    if (g_gl && g_r.m[method / 4] != words[n - 1]) { /* same as gl_track with the last one */
+    if (g_gl && g_r.m[method / 4] != words[n - 1]) { /* same as pgl_regs_track with the last one */
         g_r.m[method / 4] = words[n - 1];
         g_r.blk_stamp[method / PGL_BLOCK] = ++g_r.stamp;
     }
