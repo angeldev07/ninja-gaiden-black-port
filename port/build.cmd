@@ -25,7 +25,7 @@ cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\core.pdb" /c ^
   "%SRC%\kernel\impl_mm.c" "%SRC%\kernel\impl_rtl.c" "%SRC%\kernel\impl_ke.c" ^
   "%SRC%\kernel\impl_ps.c" "%SRC%\kernel\impl_io.c" "%SRC%\kernel\impl_misc.c" "%SRC%\kernel\hostpath.c" ^
   "%SRC%\kernel\sha1.c" "%SRC%\kernel\eeprom.c" "%SRC%\apu\vp.c" "%SRC%\apu\mix.c" "%SRC%\apu\audio_out.c" "%SRC%\gpu\nv2a.c" "%SRC%\gpu\pgraph.c" "%SRC%\gpu\rdoc.c" "%SRC%\gpu\pushbuf.c" "%SRC%\gpu\png.c" ^
-  "%SRC%\gpu\nv097_names.c" "%SRC%\gpu\raster.c" "%SRC%\gpu\rcache.c" "%SRC%\gpu\pgraph_gl.c" ^
+  "%SRC%\gpu\nv097_names.c" "%SRC%\gpu\raster.c" "%SRC%\gpu\rcache.c" "%SRC%\gpu\pgraph_gl.c" "%SRC%\gpu\pgl_track.c" ^
   "%SRC%\gl\glbackend.c" "%SRC%\gl\glload.c" "%SRC%\gl\glstate.c" "%SRC%\gl\texconv.c" ^
   "%SRC%\shaders\vsh.c" "%SRC%\shaders\psh.c" "%SRC%\shaders\emit.c" ^
   "%SRC%\input\input.c" "%SRC%\input\xapi_hle.c" ^
@@ -37,7 +37,7 @@ link /nologo /DLL /DEBUG /OUT:"%OUT%\ngb-core.dll" /PDB:"%OUT%\ngb-core.pdb" ^
   "%OUT%\obj\data.obj" "%OUT%\obj\impl_mm.obj" "%OUT%\obj\impl_rtl.obj" "%OUT%\obj\impl_ke.obj" ^
   "%OUT%\obj\impl_ps.obj" "%OUT%\obj\impl_io.obj" "%OUT%\obj\impl_misc.obj" "%OUT%\obj\hostpath.obj" ^
   "%OUT%\obj\sha1.obj" "%OUT%\obj\eeprom.obj" "%OUT%\obj\vp.obj" "%OUT%\obj\mix.obj" "%OUT%\obj\audio_out.obj" "%OUT%\obj\nv2a.obj" "%OUT%\obj\pgraph.obj" "%OUT%\obj\rdoc.obj" "%OUT%\obj\pushbuf.obj" "%OUT%\obj\png.obj" ^
-  "%OUT%\obj\nv097_names.obj" "%OUT%\obj\raster.obj" "%OUT%\obj\rcache.obj" "%OUT%\obj\pgraph_gl.obj" ^
+  "%OUT%\obj\nv097_names.obj" "%OUT%\obj\raster.obj" "%OUT%\obj\rcache.obj" "%OUT%\obj\pgraph_gl.obj" "%OUT%\obj\pgl_track.obj" ^
   "%OUT%\obj\glbackend.obj" "%OUT%\obj\glload.obj" "%OUT%\obj\glstate.obj" "%OUT%\obj\texconv.obj" ^
   "%OUT%\obj\vsh.obj" "%OUT%\obj\psh.obj" "%OUT%\obj\emit.obj" ^
   "%OUT%\obj\input.obj" "%OUT%\obj\xapi_hle.obj" ^
@@ -57,6 +57,9 @@ cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\hostpath_test.pdb" /Fe"%OUT%\hostpath
 rem 3a2) Short log filter and user-name scrub (logfilter.c).
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\logfilter_test.pdb" /Fe"%OUT%\logfilter_test.exe" "%PORT%tests\logfilter_test.c" "%SRC%\logfilter.c" || exit /b 1
 "%OUT%\logfilter_test.exe" || exit /b 1
+rem 3a4) Transform constants from NV097 methods, viewport aliases included (pgl_track.c).
+cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\pgl_track_test.pdb" /Fe"%OUT%\pgl_track_test.exe" "%PORT%tests\pgl_track_test.c" "%SRC%\gpu\pgl_track.c" || exit /b 1
+"%OUT%\pgl_track_test.exe" || exit /b 1
 rem 3a3) Library addresses moved between builds of the game (libaddr.c).
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\libaddr_test.pdb" /Fe"%OUT%\libaddr_test.exe" "%PORT%tests\libaddr_test.c" "%SRC%\libaddr.c" || exit /b 1
 "%OUT%\libaddr_test.exe" || exit /b 1

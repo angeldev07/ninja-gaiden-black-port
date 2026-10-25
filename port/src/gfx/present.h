@@ -67,6 +67,10 @@ int gfx_poll(void);
 /* 1 when the user closed the window: the loader must stop cleanly. */
 int gfx_should_close(void);
 
+/* With the GL render, F12 leaves a capture pending. Takes it: 1 and the path to use
+ * (%NGB_DATA%\runs\shots\shot-<date>.png) if there was one. From the render thread. */
+int gfx_take_shot_request(char *path, size_t len);
+
 /* Saves the last frame as PNG. `path` NULL = %NGB_DATA%\runs\shots\shot-<date>.png.
  * The path used goes to `out_path` if it is not NULL. 0 if it was written. */
 int gfx_screenshot(const char *path, char *out_path, size_t out_len);

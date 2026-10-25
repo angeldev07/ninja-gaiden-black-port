@@ -624,54 +624,6 @@ int pgraph_dma_base(uint32_t method, uint32_t *phys) {
     return 1;
 }
 
-/* State the GL render reads from methods with side effects (program and constant loads,
- * constant attributes). The rest is stored as is in g_r.m. */
-static void gl_track(uint32_t method, uint32_t param) {
-    float f;
-    memcpy(&f, &param, 4);
-    /* D3D resends many registers with the same value (lights, material): only a new value
-     * counts as a change for the uniforms. */
-    if (g_r.m[method / 4] != param) {
-        g_r.m[method / 4] = param;
-        g_r.blk_stamp[method / PGL_BLOCK] = ++g_r.stamp;
-    }
-    if (method >= 0x0B00 && method < 0x0B80) { /* SET_TRANSFORM_PROGRAM */
-        if (g_r.prog_load < PGL_PROGRAM_SLOTS * 4)
-            g_r.program[g_r.prog_load++] = param;
-    } else if (method == 0x1E9C) { /* SET_TRANSFORM_PROGRAM_LOAD */
-        g_r.prog_load = param < PGL_PROGRAM_SLOTS ? param * 4 : PGL_PROGRAM_SLOTS * 4;
-    } else if (method >= 0x0B80 && method < 0x0C00) { /* SET_TRANSFORM_CONSTANT */
-        if (g_r.const_load < PGL_CONSTANTS * 4) {
-            uint32_t old;
-            memcpy(&old, &g_r.constants[g_r.const_load], 4);
-            if (old != param)
-                g_r.const_stamp[g_r.const_load / 4] = ++g_r.stamp;
-            g_r.constants[g_r.const_load++] = f;
-        }
-    } else if (method == 0x1EA4) { /* SET_TRANSFORM_CONSTANT_LOAD */
-        g_r.const_load = param < PGL_CONSTANTS ? param * 4 : PGL_CONSTANTS * 4;
-    } else if (method >= 0x1940 && method < 0x1980) { /* SET_VERTEX_DATA4UB: D3DCOLOR */
-        float *v = g_r.vconst[(method - 0x1940) / 4];
-        v[0] = (float)((param >> 16) & 0xFF) / 255.0f;
-        v[1] = (float)((param >> 8) & 0xFF) / 255.0f;
-        v[2] = (float)(param & 0xFF) / 255.0f;
-        v[3] = (float)(param >> 24) / 255.0f;
-    } else if (method >= 0x1A00 && method < 0x1B00) { /* SET_VERTEX_DATA4F_M */
-        g_r.vconst[(method - 0x1A00) / 16][(method / 4) & 3] = f;
-    } else if (method >= 0x1880 && method < 0x1900) { /* SET_VERTEX_DATA2F_M */
-        float *v = g_r.vconst[(method - 0x1880) / 8];
-        v[(method / 4) & 1] = f;
-        v[2] = 0.0f;
-        v[3] = 1.0f;
-    } else if (method >= 0x1900 && method < 0x1940) { /* SET_VERTEX_DATA2S */
-        float *v = g_r.vconst[(method - 0x1900) / 4];
-        v[0] = (float)(int16_t)(param & 0xFFFF);
-        v[1] = (float)(int16_t)(param >> 16);
-        v[2] = 0.0f;
-        v[3] = 1.0f;
-    }
-}
-
 /* Closes the primitive in progress with OpenGL (on the render thread). */
 static void gl_draw_end(void) {
     pgl_draw_t d;
@@ -850,11 +802,15 @@ static void present_and_pace(void) {
         pace();
     if (g_gl) {
         char path[MAX_PATH + 32];
-        int shot = SHOT_DUE();
+        int shot = SHOT_DUE(), user = 0;
         if (shot)
             snprintf(path, sizeof path, "%s-shot-%05u.png", g_png_base, g_flips);
-        if (!pgl_flip(&g_r, shot ? path : NULL))
+        else
+            user = gfx_take_shot_request(path, sizeof path); /* F12 */
+        if (!pgl_flip(&g_r, shot || user ? path : NULL))
             ngb_log("    · gfx: capture of frame %u -> %s (%.1f fps, GL)", g_flips, path, gfx_fps());
+        else if (user)
+            ngb_log("    · gfx: could not save the screenshot %s", path);
     } else if (g_present_offset && g_ngb_opts.window) {
         fb = nv2a_phys(g_present_offset, g_present_pitch * g_present_h);
         if (fb) {
@@ -1140,7 +1096,7 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
     if (g_class[sub & 7] && g_class[sub & 7] != 0x97)
         return; /* 2D objects (blit, surfaces): only logged */
     if (g_gl)
-        gl_track(method, param);
+        pgl_regs_track(&g_r, method, param);
     switch (method) {
     case 0x0200: g_clip_h = param; break;
     case 0x0204: g_clip_v = param; break;

@@ -50,6 +50,7 @@ static struct {
     size_t frame_cap; /* reserved pixels */
     volatile LONG should_close;
     volatile LONG external; /* 1: another thread draws with OpenGL (H7c); GDI does not paint */
+    volatile LONG shot_pending; /* F12 with the GL render: the render thread saves the next flip */
     int init_ok;
     int fullscreen;              /* 1: borderless over the whole monitor */
     WINDOWPLACEMENT windowed_at; /* where the window was before going fullscreen */
@@ -301,6 +302,12 @@ static int default_shot_path(char *out, size_t len) {
     return 0;
 }
 
+int gfx_take_shot_request(char *path, size_t len) {
+    if (!InterlockedExchange(&g.shot_pending, 0))
+        return 0;
+    return default_shot_path(path, len) == 0;
+}
+
 int gfx_copy_frame(void *dst, size_t dst_pixels, int *width, int *height) {
     int ok = -1;
     if (!g.lock_ready)
@@ -464,7 +471,10 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
         return 0;
     case WM_KEYDOWN:
         if (wparam == VK_F12) {
-            if (!gfx_screenshot(NULL, shot, sizeof shot))
+            /* The GL frame only exists on the render thread: it saves it on the next flip. */
+            if (g.external)
+                InterlockedExchange(&g.shot_pending, 1);
+            else if (!gfx_screenshot(NULL, shot, sizeof shot))
                 fprintf(stderr, "gfx: screenshot at %s\n", shot);
             else
                 fprintf(stderr, "gfx: could not save the screenshot\n");
