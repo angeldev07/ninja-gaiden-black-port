@@ -409,6 +409,54 @@ static void test_psh_two_stages_and_final(void) {
     dump("two_stages.frag", g_glsl);
 }
 
+/*
+ * Dependent 2D lookup through two dot products (texm3x2pad + texm3x2tex), as in the heat haze over
+ * the lava in chapter 12: the normal of t0 against oT1 and oT2 gives the (s, t) of tex2.
+ *   textures: stage 0 PROJECT2D (1), stage 1 DOTPRODUCT (17 << 5), stage 2 DOT_ST (9 << 10)
+ *   dot mapping: stage 1 MINUS1_TO_1_D3D (1), stage 2 MINUS1_TO_1 (3 << 4)       = 0x31
+ */
+static void test_psh_dot_st(void) {
+    psh_registers r;
+    psh_program p;
+    memset(&r, 0, sizeof r);
+    r.combiner_control = 1;
+    r.rgb_inputs[0] = 0x0A000000u; /* A = T2 */
+    r.rgb_outputs[0] = 0xC0;
+    r.texture_modes = (uint32_t)PSH_TEX_PROJECT2D | ((uint32_t)PSH_TEX_DOTPRODUCT << 5) |
+                      ((uint32_t)PSH_TEX_DOT_ST << 10);
+    r.dot_mapping = 0x31u;
+    CHECK(nv2a_psh_decode(&r, &p) == 1);
+    CHECK(!p.unsupported_tex);
+    CHECK(p.dot_map[1] == PSH_DOT_MINUS1_TO_1_D3D && p.dot_map[2] == PSH_DOT_MINUS1_TO_1);
+    CHECK(nv2a_psh_to_glsl(&p, g_glsl, sizeof g_glsl) > 0);
+    CONTAINS(g_glsl, "uniform sampler2D tex2;");
+    CHECK(!strstr(g_glsl, "uniform sampler2D tex1;"));
+    CONTAINS(g_glsl, "vec3 nv_dotmap(vec3 c, int m) {");
+    CONTAINS(g_glsl, "float dot1 = dot(oT1.xyz, nv_dotmap(t0.rgb, 1));");
+    CONTAINS(g_glsl, "vec4 t1 = vec4(0.0);");
+    CONTAINS(g_glsl, "float dot2 = dot(oT2.xyz, nv_dotmap(t0.rgb, 3));");
+    CONTAINS(g_glsl, "vec4 t2 = texture(tex2, vec2(dot1, dot2) * texScale[2]);");
+    CHECK(!strstr(g_glsl, "not emulated"));
+    dump("dot_st.frag", g_glsl);
+    /* the other two mappings, and DOT_ST without a DOTPRODUCT before it */
+    r.dot_mapping = 0x20u;
+    CHECK(nv2a_psh_decode(&r, &p) == 1);
+    CHECK(nv2a_psh_to_glsl(&p, g_glsl, sizeof g_glsl) > 0);
+    CONTAINS(g_glsl, "float dot1 = dot(oT1.xyz, nv_dotmap(t0.rgb, 0));");
+    CONTAINS(g_glsl, "float dot2 = dot(oT2.xyz, nv_dotmap(t0.rgb, 2));");
+    r.dot_mapping = 0x4u; /* HILO: needs 16-bit components */
+    CHECK(nv2a_psh_decode(&r, &p) == 1);
+    CHECK(p.unsupported_tex == ((1u << 1) | (1u << 2)));
+    r.dot_mapping = 0;
+    r.texture_modes = (uint32_t)PSH_TEX_PROJECT2D | ((uint32_t)PSH_TEX_PROJECT2D << 5) |
+                      ((uint32_t)PSH_TEX_DOT_ST << 10);
+    CHECK(nv2a_psh_decode(&r, &p) == 1);
+    CHECK(p.unsupported_tex == (1u << 2));
+    CHECK(nv2a_psh_to_glsl(&p, g_glsl, sizeof g_glsl) > 0);
+    CONTAINS(g_glsl, "vec4 t2 = vec4(0.0); /* mode DOT_ST not emulated */");
+    CHECK(!strstr(g_glsl, "nv_dotmap"));
+}
+
 static void test_psh_errors_and_unsupported(void) {
     psh_registers r;
     psh_program p;
@@ -584,6 +632,7 @@ int main(int argc, char **argv) {
     test_vsh_errors();
     test_psh_modulate();
     test_psh_two_stages_and_final();
+    test_psh_dot_st();
     test_psh_errors_and_unsupported();
     if (g_failures) {
         fprintf(stderr, "shaders_test: %d of %d checks fail\n", g_failures, g_checks);

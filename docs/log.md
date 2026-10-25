@@ -747,3 +747,20 @@ Details in [[gpu-nv2a]].
 - **Fix:** `stage_texture` scales linear depth textures by texel, and `bind_textures` sets `GL_TEXTURE_BORDER_COLOR`
   from `0x1B24` when a stage is in BORDER. The demo frame goes from about 95,000 darkened pixels to 429.
   Details in [[gpu-nv2a]].
+
+## [2026-10-25] fix | Heat haze over the lava: DOTPRODUCT and DOT_ST texture modes
+- **Symptom (owner, chapter 12, the lava caverns):** opaque black patches with irregular edges covered the scene,
+  like black fog.
+- **Evidence:** the two RenderDoc captures of the session (`h6-20261025-111648-rdoc_*.rdc`) show the patches.
+  - A diff of the main render target after each draw points at 5 fixed-pipeline quads (`SrcAlpha / InvSrcAlpha`)
+    that sample a 512x256 render target whose RGB is all 0.
+  - That target is written by one draw: a 12-instruction vertex program and a pixel shader with t0 = a distortion
+    map, t1 = `DOTPRODUCT` and t2 = `DOT_ST` over the color buffer. The generated GLSL had
+    `t1 = t2 = vec4(0.0); /* mode ... not emulated */`, so the target came out black.
+- **Not a regression of the viewport fix:** the program reads only c[0] and c[1], and the quads are fixed-pipeline.
+- **Fix:** `psh.c` emulates `DOTPRODUCT` and `DOT_ST`, with the `SET_DOT_RGBMAPPING` mappings 0-3. Details in
+  [[shaders-nv2a]]. Replacing the shader in the captures brings back the lava cavern (comparison images in
+  `%NGB_DATA%\comparisons\ch12-heat-*.png`). Tests: `shaders_test` 242 checks, `gl_test --stress` 66 of 66,
+  the 150 s PAL demo with 0 pb errors and 0 program errors (the demo has no heat haze).
+- **Still open:** a band about 11 px wide at the right edge stays dark under the heat haze. The heat quad does not
+  cover the last column of its target with GL's pixel centers (half-pixel offset, [[shaders-nv2a]] § Pending).
