@@ -894,21 +894,23 @@ static void bind_textures(const pgl_regs *r, float tex_scale[8]) {
             glTexParameterfv(target, GL_TEXTURE_BORDER_COLOR, c);
         }
         minf = min_filter((filter >> 16) & 0xFF);
-        if (surf && surf->kind == RC_COLOR && minf != GL_NEAREST && minf != GL_NEAREST_MIPMAP_NEAREST) {
+        if (surf && surf->kind == RC_COLOR && minf != GL_NEAREST) {
             /* A rendered color surface read smaller than it was drawn (the bloom of the game
              * shrinks the 720x480 scene to 256x256 with one bilinear tap per pixel): mipmaps,
              * so the sample averages its whole footprint. Without them, thin bright details
              * fell between the taps on some frames and not on others, and the game's sparse
              * blur turned that into shimmering ghosts around the characters; much worse at an
              * internal resolution of 2-4x, where the tap skips 7 texels instead of 3. Read at
-             * its own size the level is 0, the same picture as before. */
+             * its own size the level is 0, the same picture as before. A mipmap filter the game
+             * asked for is kept; the chain is rebuilt for it too, or it would read old levels. */
             if (surf->mips_stale) {
                 glTexParameteri(target, GL_TEXTURE_MAX_LEVEL, 1000);
                 ngl_glGenerateMipmap(target);
                 surf->mips_stale = 0;
                 R.mip_builds++;
             }
-            minf = GL_LINEAR_MIPMAP_LINEAR;
+            if (minf == GL_LINEAR)
+                minf = GL_LINEAR_MIPMAP_LINEAR;
         }
         glTexParameteri(target, GL_TEXTURE_MIN_FILTER, minf);
         glTexParameteri(target, GL_TEXTURE_MAG_FILTER, ((filter >> 24) & 0xF) == 1 ? GL_NEAREST : GL_LINEAR);

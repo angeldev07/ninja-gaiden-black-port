@@ -834,3 +834,10 @@ Details in [[gpu-nv2a]].
   one tap per pixel; at the internal resolution that tap skips about 7 texels and thin bright details flickered
   through the game's sparse blur. Rendered color surfaces read with linear filtering now get mipmaps.
 - Details in [[gpu-nv2a]]. 150 s PAL title demo: 60 fps, 8401 flips, 0 push buffer errors.
+
+## [2026-10-25] fix | Black screen after the "Eternal Legend" cutscene: a missed D3D wake-up
+- **Symptom (owner):** sometimes the screen stays black when the opening cutscene of "Eternal Legend" ends.
+- **Cause (`VERIFIED` with a new render watchdog in the log):** `D3D_BlockOnTime` patched a `NO_OPERATION(5)` wake-up
+  into the ring and slept; the pusher had already passed that spot, so it never ran and the game slept forever.
+- **Fix:** with the queue drained and all of D3D's writes run, the pusher sets the event (`idle_wake`). Six runs:
+  no hang, one rescue. Details in [[gpu-nv2a]].

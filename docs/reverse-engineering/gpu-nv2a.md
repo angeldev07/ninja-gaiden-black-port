@@ -592,7 +592,7 @@ spotlights without cone and no skinning in fixed mode.
 - **Pacing:** the render thread now presents at most once per synthetic vblank (`pgraph.c`, `pace`), like
   `FLIP_STALL` on the console, instead of keeping its own 1/60 s schedule next to the vblank's. With a visible window
   both behave the same (measured: 0 frames over 25 ms); the vblank is the one clock the game runs on, so two 60 Hz
-  clocks with an arbitrary phase can no longer beat. Without vblanks (early boot) it waits at most 20 ms.
+  clocks with an arbitrary phase can no longer beat. Without vblanks for 100 ms (early boot) it falls back to 1/60 s of wall clock.
 - **Checks:** 150 s PAL title demo, 8401 flips (8403 before), the intro video at 30 fps, 0 push buffer errors.
 
 ## Bloom shimmer around the characters (`VERIFIED` with RenderDoc)
@@ -610,6 +610,25 @@ spotlights without cone and no skinning in fixed mode.
   again only when it was drawn into since (`mips_stale`, set by draws and color clears), and is sampled with
   `GL_LINEAR_MIPMAP_LINEAR`. A shrinking read averages its footprint; a read at its own size uses level 0, the same
   picture as before. About 3 mipmap builds per frame in that scene. The title demo looks the same.
+
+## Black screen at the end of the "Eternal Legend" cutscene: a missed D3D wake-up (`VERIFIED`)
+
+- **Symptom (owner):** sometimes, when the opening cutscene of "Eternal Legend" ends on its own, the screen stays
+  black and nothing more happens. Here it happened in about one run in three.
+- **Render watchdog** (`pgraph.c`, `watchdog_dump`): with no `FLIP_STALL` for 3 s while vblanks run, the log gets,
+  once, the pusher queue (GET, PUT, busy), the last 16 kicks and jumps, the D3D device (put, time, fence, pending
+  fixups, last record, the `BlockOnTime` KEVENT), the `NO_OPERATION(5)` patches found in the ring and the last 8 the
+  pusher ran. These lines also go to the short log.
+- **What it showed:** the main thread slept in `D3D_BlockOnTime` (PAL `0x3CD0D0`, the `KeWaitForSingleObject` on the
+  device KEVENT at `+0x773` words); the queue was empty (GET == PUT == D3D's put), the fence was current, and the ring
+  held a `WAIT_FOR_IDLE` + `NO_OPERATION(5)` patch inside the last span the pusher had run, never executed.
+- **Cause:** `BlockOnTime` (decompiled with its helpers `0x3CCEE0`, `0x3CD060`, `0x3CCEB0`, `0x3CD540`) clears the
+  event, patches the wait into the fence padding of a ring record at least 9 KB ahead of GET, reads GET again and
+  sleeps if the GPU is still 8 KB behind. The emulated pusher, on another core, could pass that spot before the patch
+  landed, so nothing woke the game.
+- **Fix:** when the queue drains (`idle_wake`) and D3D's put equals our PUT, everything D3D wrote has run and any
+  spot it patched is behind the GPU, so the event is set if it is clear. The summary counts these
+  ("waits woken with the GPU idle"). Six runs of the cutscene: no hang, one rescue (the run that would have hung).
 
 ## Next
 
