@@ -66,6 +66,8 @@ typedef struct rc_texkey {
 
 typedef struct rc_texture {
     int used;
+    int16_t next;    /* next entry of the same bucket, as index + 1 (0 = none) */
+    uint16_t bucket; /* bucket of the key in rc_textures.head */
     rc_texkey key;
     uint64_t hash;          /* of the content (and the palette) at the last upload */
     uint32_t checked_frame; /* frame in which the hash was last checked */
@@ -73,8 +75,13 @@ typedef struct rc_texture {
     uint32_t last_use;
 } rc_texture;
 
+/* The entries are found through a hash of the key (buckets of entries chained by `next`):
+ * a linear search of the 512 entries cost about 1.5 us per texture bind once the cache was
+ * full, a millisecond or more per frame after an hour of play. */
+#define RC_TEX_BUCKETS 1024
 typedef struct rc_textures {
     rc_texture t[RC_MAX_TEXTURES];
+    int16_t head[RC_TEX_BUCKETS]; /* first entry of each bucket, as index + 1 (0 = empty) */
     uint32_t clock;
     uint32_t hits, uploads, checks; /* statistics */
 } rc_textures;

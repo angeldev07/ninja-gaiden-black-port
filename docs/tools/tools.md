@@ -1,6 +1,6 @@
 ---
 tags: [ngb, tools]
-updated: 2026-10-20
+updated: 2026-10-25
 status: draft
 ---
 
@@ -146,6 +146,9 @@ python tools\gen_kernel_stubs.py [--check]                           :: regenera
 - Default log at `NGB_DATA\runs\h6-<date>.log`; virtual hard disk at `NGB_DATA\runs\hdd\`.
 - Exit codes: 0 OK, 2 unimplemented call, 3 crash or MMIO, 4 `--max-calls`, 5 timeout or inactivity,
   6 the game asked to shut down.
+- Performance: every 300 frames the log gets a `perf:` line (fps, time per phase, push buffer words) and a `perf gl`
+  line (time per draw phase). `--profile` samples the render and audio threads and writes `<log>-profile.txt`;
+  it over-represents system and driver calls, so confirm with the `perf` lines ([[gpu-nv2a]]).
 - Design: [[adr-05-native-runtime]]. What the game does at boot: [[native-boot]].
 
 ### `ngb_tools.stage`

@@ -110,11 +110,36 @@ typedef ptrdiff_t GLsizeiptr;
     typedef ret(APIENTRY *ngl_pfn_##name) args;                                           \
     extern ngl_pfn_##name ngl_##name;
 NGL_FUNCTIONS(NGL_DECLARE)
+
+/* GL 4.4 buffer storage and sync objects: loaded when the driver has them, but not required
+ * (pgraph_gl.c falls back to glBufferData without them). */
+typedef ptrdiff_t GLintptr;
+typedef struct __GLsync *GLsync;
+typedef unsigned __int64 GLuint64;
+#define GL_MAP_WRITE_BIT 0x0002
+#define GL_MAP_PERSISTENT_BIT 0x0040
+#define GL_MAP_COHERENT_BIT 0x0080
+#define GL_SYNC_GPU_COMMANDS_COMPLETE 0x9117
+#define GL_SYNC_FLUSH_COMMANDS_BIT 0x00000001
+#define GL_TIMEOUT_EXPIRED 0x911B
+#define GL_WAIT_FAILED 0x911D
+#define GL_COPY_READ_BUFFER 0x8F36
+#define GL_COPY_WRITE_BUFFER 0x8F37
+
+#define NGL_OPTIONAL_FUNCTIONS(X)                                                          \
+    X(void, glBufferStorage, (GLenum, GLsizeiptr, const void *, GLbitfield))              \
+    X(void *, glMapBufferRange, (GLenum, GLintptr, GLsizeiptr, GLbitfield))               \
+    X(GLsync, glFenceSync, (GLenum, GLbitfield))                                          \
+    X(GLenum, glClientWaitSync, (GLsync, GLbitfield, GLuint64))                           \
+    X(void, glDeleteSync, (GLsync))                                                       \
+    X(void, glCopyBufferSubData, (GLenum, GLenum, GLintptr, GLintptr, GLsizeiptr))
+NGL_OPTIONAL_FUNCTIONS(NGL_DECLARE)
 #undef NGL_DECLARE
 
 /*
  * Loads `wglCreateContextAttribsARB` (phase 0, with the temporary 1.1 context) or all the
- * others (phase 1, with the 4.x context current). Returns how many are missing (0 = all good) and
+ * others (phase 1, with the 4.x context current; the optional ones are left NULL if the driver
+ * does not have them). Returns how many required ones are missing (0 = all good) and
  * leaves in `missing` the name of the first missing one, if passed.
  */
 int ngl_load(int phase, const char **missing);

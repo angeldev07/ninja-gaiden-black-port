@@ -261,6 +261,11 @@ static contig_block_t *find_block(const void *p) {
     return NULL;
 }
 
+static volatile LONG g_access_gen;
+
+void ngb_mem_access_changed(void) { InterlockedIncrement(&g_access_gen); }
+long ngb_mem_access_gen(void) { return g_access_gen; }
+
 int ngb_contig_free(void *p) {
     contig_block_t *b;
     EnterCriticalSection(&g_contig_lock);

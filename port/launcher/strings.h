@@ -189,8 +189,8 @@
     X(UPD_RESTART, L"Close and open the launcher to finish.", L"Cierra y abre el launcher para terminar.") \
     X(ADV_DEBUG, L"Debugging", L"Depuración")                                                    \
     X(ADV_RDOC, L"RenderDoc capture (F11)", L"Captura con RenderDoc (F11)")                      \
-    X(ADV_RDOC_DESC, L"Loads RenderDoc at start and F11 captures the next frame. Needs RenderDoc installed and the OpenGL renderer.", \
-      L"Carga RenderDoc al arrancar y F11 captura el frame siguiente. Necesita RenderDoc instalado y el render OpenGL.") \
+    X(ADV_RDOC_DESC, L"Loads RenderDoc at start and F11 captures the next frame. It roughly doubles the drawing time: leave it off to play. Needs RenderDoc installed and the OpenGL renderer.", \
+      L"Carga RenderDoc al arrancar y F11 captura el frame siguiente. Duplica más o menos el tiempo de dibujo: déjalo desactivado para jugar. Necesita RenderDoc instalado y el render OpenGL.") \
     X(ADV_LENIENT, L"Tolerate unimplemented calls", L"Tolerar llamadas sin implementar")         \
     X(ADV_LENIENT_DESC, L"An unimplemented kernel call returns STATUS_SUCCESS and the game goes on (it can hide failures).", \
       L"Una llamada del kernel sin implementar devuelve STATUS_SUCCESS y el juego sigue (puede ocultar fallos).") \

@@ -66,6 +66,7 @@ typedef struct ngb_options {
     int fullscreen;           /* --fullscreen: borderless over the whole monitor (Alt+Enter toggles) */
     int widescreen;           /* --widescreen: the console reports a 16:9 TV, the game renders anamorphic 16:9 */
     const char *dump_ram;    /* --dump-ram FRAMES: guest RAM snapshots at those frames (F10 too) */
+    int profile;              /* --profile: sampling profiler, report in <log>-profile.txt (prof.c) */
 } ngb_options_t;
 
 /* --renderer: AUTO = OpenGL if there is a window and a 4.x context; otherwise the rasterizer. */
@@ -89,6 +90,10 @@ double ngb_elapsed(void);
 /* watch.c: --watch ADDR[:1|2|4],... (changes go to the log from the DPC thread) */
 int ngb_watch_parse(const char *spec);
 void ngb_watch_tick(void);
+/* prof.c: --profile. Threads are registered as they are created; the report is written at the stop. */
+void ngb_prof_start(void);
+void ngb_prof_thread(HANDLE h, const char *name);
+void ngb_prof_report(void);
 
 /* Cheap measurements (H7c): QueryPerformanceCounter ticks spent writing the log and number of
  * kernel calls so far. */
@@ -105,6 +110,11 @@ int ngb_contig_free(void *p);
 uint32_t ngb_contig_size(const void *p);
 int ngb_contig_contains(const void *p);
 size_t ngb_contig_written(uint32_t *phys, size_t cap);
+/* Bumped when the game may have made memory unreadable (MmSetAddressProtect,
+ * NtFreeVirtualMemory, MmDeleteKernelStack): caches of readable pages start over (pgraph.c,
+ * on_readable). */
+void ngb_mem_access_changed(void);
+long ngb_mem_access_gen(void);
 /* Writes every committed, writable private region below 2 GB plus the contiguous RAM to
  * `path` as {u32 va, u32 len, bytes} records. A development tool to diff game state. */
 int ngb_dump_guest_ram(const char *path);

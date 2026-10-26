@@ -511,6 +511,71 @@ spotlights without cone and no skinning in fixed mode.
   before); the game goes back to 60 fps when the movie ends. The title demo: 0 push buffer errors; its intro video
   now also runs at 30 fps, so 150 s give 8403 flips instead of 8973. `--widescreen` still sets its mode.
 
+## Frame time in busy scenes: the render thread (`VERIFIED`)
+
+- **Symptom (owner, mission mode):** in "Giants of the Underworld" and other fights with many effects the game fell
+  to 35-45 fps, and it got worse the longer the session ran.
+- **Where the time went** (the owner's 2 h log, perf windows with more than 50,000 vertices uploaded):
+  - the render thread had no pacing left: `pb_run` was 17-23 ms per frame;
+  - of that, the draws took 7-10 ms. RenderDoc was loaded (`--rdoc-key`), and RenderDoc alone roughly doubles the
+    draw time: 5.3 ms against 9-12 ms in the same fight here;
+  - the rest of `pb_run` (decoding, outside the draws and the present) grew with the session, not with the load:
+    about 1.4 ms per frame in the first half hour and about 10 ms after 105 minutes, with similar scenes.
+- **Cause 1, the readable check of the push buffer** (`pgraph.c`, `on_readable`):
+  - the pusher checks every 4 KB page it enters with `VirtualQuery`, so a jump to unreserved memory cannot fault in
+    the loader. Each call is a WOW64 system call of about 3 us in the loader, slower as a long session fragments
+    the address space, and vertices sent inside the push buffer (`INLINE_ARRAY`) take hundreds of pages per frame;
+  - now the pages seen readable are remembered (a bitmap of the 32-bit space). The contiguous arena is never
+    decommitted and the XBE image is always committed; `MmSetAddressProtect` with no access, `NtFreeVirtualMemory`
+    and `MmDeleteKernelStack` empty the cache (`ngb_mem_access_changed`);
+  - D3D calls `MmSetAddressProtect` about 4 times per frame to make buffers write-combined (`0x404`). That keeps
+    them readable, so it no longer empties the cache: a first version that did measured no gain.
+  - In the scripted fight: 1.23 ms per frame before, 0.01 ms after (about 360 pages per frame).
+- **Cause 2, the vertex upload** (`pgraph_gl.c`, `upload_vertices`), split into a CPU part (`gather` in the `perf gl`
+  line) and a GL part (`vertices`):
+  - every vertex of every attribute was a small `memcpy` of its own into a staging buffer, about 25 ns per vertex:
+    4.3 ms per frame with 175,000 vertices. Then two `glBufferData` per draw (vertices and indices): 2 ms more;
+  - now the attributes of one interleaved game array (same stride, overlapping ranges) are copied as one block with
+    one `memcpy`, and GL reads them with the game's stride. Only CMP normals (expanded to 3 floats) and sparse
+    index ranges are still packed vertex by vertex. Each block keeps its address modulo 16, so attribute alignment
+    is unchanged;
+  - the copy goes straight into a 64 MB ring buffer created with `glBufferStorage` and mapped once (persistent and
+    coherent, GL 4.4), for the indices too. It has 8 segments; the writer sets a fence on a segment after the next
+    draw once it has left it, and waits on that fence before it writes there again. Without GL 4.4 the old
+    `glBufferData` path stays. Vertex arrays the CPU rewrites every frame are streamed through the ring instead of
+    being re-uploaded into their cache buffer.
+- **Two linear searches that grew with the session:**
+  - the distinct texture offsets for the summary (`g_tex`, up to 4096) were searched on every
+    `SET_TEXTURE_OFFSET`, 0.75 us per call once full. Both of the owner's long sessions ended with it full (4096),
+    the short one at 1364. It is now a hash set;
+  - the texture cache (`rcache.c`, 512 entries) was searched linearly on every texture bind. It now has 1024
+    hash buckets (`rcache_test`: a case with 1536 keys and evictions).
+- **Result** (the scripted fight below, 1920x1280, no RenderDoc, windows with more than 50,000 vertices):
+
+| Per frame | Before | After |
+| --- | --- | --- |
+| Draws (`draw`) | 6.80 ms | 1.81 ms |
+| CPU vertex copy (`gather`) | 4.3 ms | 0.3 ms |
+| GL vertex calls (`vertices`) | 2.0 ms | 0.55 ms |
+| Rest of `pb_run` (decoding) | 3.46 ms | 0.82 ms |
+
+  The fight stays at 60 fps with about 5 ms of pacing to spare per frame; the remaining dips are the deaths and
+  reloads. The 150 s PAL title demo is pixel-identical where the frames line up (the video and the camera drift a
+  little between runs), with 0 push buffer errors and 63 programs (0 errors).
+- **How it was measured:**
+  - the `perf:` line now counts the push buffer words per frame and how many went through the bulk path
+    (`words (N in bulk)`): in the fight about 260,000, of which about 45,000 are single methods;
+  - the `perf gl` line has the new `gather` phase;
+  - `--profile` samples the render and audio threads about once per millisecond and writes `<log>-profile.txt`
+    with the hot functions and their first caller in `ngb-core`. It is a hint, not a measure: suspending a WOW64
+    thread waits until it leaves the kernel, so system calls and driver calls are over-represented. Sampling the
+    Xbox threads crashed the game (a jump to `0xFFFFFFFE`), so it does not do that. The numbers above come from
+    `QueryPerformanceCounter` probes.
+- **Test case:** the owner's mission mode progress, then mission mode, the group before "Eternal Legend" and its
+  first mission. The input script (`t=...p`, gamepad reads) goes title, main menu (B twice from Load Game leaves
+  the cursor on a known item), mission mode, eight times down, mission, difficulty, and then 45 rounds of block,
+  attack, charged attack and ninpo. `--input-script` now takes up to 256 presses.
+
 ## Next
 
 1. Go from the title screen to the main menu, and find out what the warnings and the video (audio) wait for.

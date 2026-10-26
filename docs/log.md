@@ -804,3 +804,21 @@ Details in [[gpu-nv2a]].
   console reports PAL60, because without it D3D emulates 60 Hz with a timer the port does not run.
 - **Checks:** the New Game movie at 30.0 fps on PAL and NTSC-U with no repeated subtitle (6 before); 60 fps again
   after it. 150 s PAL title demo: 0 pb errors, 63 programs (0 errors). `--widescreen` boots.
+
+## [2026-10-25] fix | Busy scenes at 60 fps: the push buffer readable check and the vertex upload
+- **Symptom (owner, mission mode):** 35-45 fps in "Giants of the Underworld" and other effect-heavy fights, worse
+  the longer the session.
+- **Cause (`VERIFIED` with the owner's log and `QueryPerformanceCounter` probes):** the render thread had no time
+  left. A `VirtualQuery` per 4 KB page of push buffer (about 3 us each, slower as the session went on) took up to
+  10 ms per frame with vertices sent inside the push buffer; the vertex upload copied every attribute of every vertex
+  on its own (4.3 ms) and called `glBufferData` twice per draw (2 ms); RenderDoc, loaded with `--rdoc-key`, doubled
+  the draw time. Two linear searches (texture offsets, texture cache) also grew with the session. Details in
+  [[gpu-nv2a]].
+- **Fix:** a bitmap of pages known readable (D3D's write-combine `MmSetAddressProtect` calls no longer empty it);
+  vertex arrays copied as interleaved blocks into a persistent mapped GL 4.4 ring, indices too; hash lookups for
+  the texture offsets and the texture cache. The launcher now says RenderDoc slows drawing.
+- **Tools:** `--profile` (sampling profiler of the render and audio threads), word counts in the `perf:` line, the
+  `gather` phase in `perf gl`, and `--input-script` up to 256 presses.
+- **Checks:** the scripted Giants fight at 1920x1280 goes from 6.8 to 1.8 ms of draws and from 3.5 to 0.8 ms of
+  decoding per frame, 60 fps with pacing to spare. 150 s PAL title demo pixel-identical where frames line up, 0 pb
+  errors, 63 programs (0 errors). Native tests (`rcache_test` 61 checks) and 829 Python tests pass.

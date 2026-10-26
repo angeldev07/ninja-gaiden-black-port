@@ -36,7 +36,7 @@ static FILE *g_pg;
 static CRITICAL_SECTION g_pg_lock;
 static char g_png_base[MAX_PATH];
 static pb_state_t g_pb;
-static uint32_t g_frame, g_kicks, g_words;
+static uint32_t g_frame, g_kicks, g_words, g_bulk_words; /* g_bulk_words: delivered by on_bulk */
 static uint32_t g_hist[0x2000 / 4], g_hist_frame0[0x2000 / 4];
 static uint32_t g_class[8];
 static uint32_t g_dma[0x80 / 4]; /* instances of SET_CONTEXT_DMA_* (methods 0x180..0x1FC) */
@@ -47,7 +47,11 @@ static uint32_t g_sem_releases;
 static int g_png_count;
 static int g_frame0_done;
 static uint32_t g_first_draw_frame = 0xFFFFFFFFu, g_tex_sets, g_ntex;
-static uint32_t g_tex[MAX_TEXTURES];
+/* Distinct texture offsets (for the summary): open addressing, offset + 1 (0 = empty). It was
+ * a list searched linearly on every SET_TEXTURE_OFFSET: once it held thousands of offsets,
+ * after an hour of play, that cost several milliseconds per frame. */
+#define TEX_SET_SLOTS (2 * MAX_TEXTURES)
+static uint32_t g_tex_set[TEX_SET_SLOTS];
 /* Per-stage texture state: offset, format, control0, control1 (pitch), rectangle. */
 static uint32_t g_tex_offset[4], g_tex_format[4], g_tex_ctl0[4], g_tex_ctl1[4], g_tex_rect[4];
 #define MAX_TEX_PNG 12
@@ -97,8 +101,8 @@ static struct {
     LONGLONG pb, body; /* inside pb_run and kick_body (on the thread that runs it) */
     LONGLONG lockwait, call; /* waiting for g_pg_lock and inside pgl_call */
     long kcalls0;
-    uint32_t mmio0, flips0, kicks0, tris0;
-    char last[320];
+    uint32_t mmio0, flips0, kicks0, tris0, words0, bulk0;
+    char last[400];
 } g_perf;
 
 static LONGLONG qpc(void) {
@@ -130,13 +134,15 @@ static void perf_report(void) {
         snprintf(g_perf.last, sizeof g_perf.last,
                  "perf: frames %u-%u: %.1f real fps, %.2f ms/frame; per frame: pusher %.2f ms "
                  "(draw %.2f, clear %.2f), present %.2f, pacing %.2f, log %.2f ms; %.0f kernel calls, "
-                 "%.0f MMIO, %.1f kicks, %.0f primitives; pb_run %.2f ms, kick_body %.2f ms, lock %.2f ms, pgl_call %.2f ms",
+                 "%.0f MMIO, %.1f kicks, %.0f primitives, %.0f words (%.0f in bulk); pb_run %.2f ms, "
+                 "kick_body %.2f ms, lock %.2f ms, pgl_call %.2f ms",
                  g_perf.flips0, g_flips, n * 1000.0 / wall, wall / n,
                  ticks_ms(g_perf.kick - g_perf.present) / n,
                  ticks_ms(g_perf.draw) / n, ticks_ms(g_perf.clear) / n, ticks_ms(g_perf.present) / n,
                  ticks_ms(g_perf.pace) / n, ticks_ms(log_now - g_perf.log0) / n,
                  (double)(kc - g_perf.kcalls0) / n, (double)(mmio - g_perf.mmio0) / n,
                  (double)(g_kicks - g_perf.kicks0) / n, (double)(g_begin_end - g_perf.tris0) / n,
+                 (double)(g_words - g_perf.words0) / n, (double)(g_bulk_words - g_perf.bulk0) / n,
                  ticks_ms(g_perf.pb) / n, ticks_ms(g_perf.body) / n, ticks_ms(g_perf.lockwait) / n,
                  ticks_ms(g_perf.call) / n);
         ngb_log("    · %s", g_perf.last);
@@ -153,6 +159,8 @@ static void perf_report(void) {
     g_perf.flips0 = g_flips;
     g_perf.kicks0 = g_kicks;
     g_perf.tris0 = g_begin_end;
+    g_perf.words0 = g_words;
+    g_perf.bulk0 = g_bulk_words;
     g_perf.kick = g_perf.draw = g_perf.clear = g_perf.present = g_perf.pace = 0;
     g_perf.pb = g_perf.body = g_perf.lockwait = g_perf.call = 0;
 }
@@ -1184,13 +1192,15 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
         g_tex_rect[(method - 0x1B00) / 0x40] = param;
         break;
     case 0x1B00: case 0x1B40: case 0x1B80: case 0x1BC0: { /* SET_TEXTURE_OFFSET[stage] */
-        uint32_t k;
+        uint32_t k = (param * 0x9E3779B1u) >> 19; /* 13 bits: TEX_SET_SLOTS */
         g_tex_offset[(method - 0x1B00) / 0x40] = param;
         g_tex_sets++;
-        for (k = 0; k < g_ntex && g_tex[k] != param; k++)
-            ;
-        if (k == g_ntex && g_ntex < MAX_TEXTURES)
-            g_tex[g_ntex++] = param;
+        while (g_tex_set[k] && g_tex_set[k] != param + 1)
+            k = (k + 1) & (TEX_SET_SLOTS - 1);
+        if (!g_tex_set[k] && g_ntex < MAX_TEXTURES) { /* half full at most: the probe ends */
+            g_tex_set[k] = param + 1;
+            g_ntex++;
+        }
         break;
     }
     case 0x1D6C: g_sem_offset = param; break;
@@ -1266,6 +1276,7 @@ static int on_bulk(void *user, uint32_t sub, uint32_t method, const uint32_t *wo
         (g_class[sub & 7] && g_class[sub & 7] != 0x97))
         return 0;
     g_words += n;
+    g_bulk_words += n;
     g_hist[method / 4] += n;
     if (!g_frame0_done)
         g_hist_frame0[method / 4] += n;
@@ -1322,12 +1333,36 @@ static const uint8_t *g_kick_base;
 
 /* A push buffer jump or call can lead to an arena page the game
  * never reserved (on the Xbox it would be RAM with garbage): reading it here would be a page
- * fault in the loader. It is checked on entering each page. */
+ * fault in the loader. It is checked on entering each page.
+ * Pages seen readable once are remembered: the contiguous arena is never decommitted
+ * (ngb_contig_free only marks the block free), the XBE image (static push buffers) is always
+ * committed, and the calls that can free memory or take access away bump ngb_mem_access_gen.
+ * Before, every 4 KB of push buffer cost a VirtualQuery: a WOW64 system call of about 3 us in
+ * the loader, slower as a long session fragments the address space. Vertices sent inside the
+ * push buffer take hundreds of pages per frame, so a busy scene spent up to 10 ms per frame
+ * here after a couple of hours. Only the render thread runs the pusher. */
+static uint32_t g_readable[1u << 15]; /* one bit per 4 KB page of the 32-bit address space */
+static long g_readable_gen = -1;
+
 static int on_readable(void *user, uint32_t offset) {
     MEMORY_BASIC_INFORMATION m;
+    uint32_t a = (uint32_t)(uintptr_t)(g_kick_base + offset), page = a >> 12;
+    long gen = ngb_mem_access_gen();
+    int ok;
     (void)user;
-    return g_kick_base && VirtualQuery(g_kick_base + offset, &m, sizeof m) && m.State == MEM_COMMIT &&
-           !(m.Protect & (PAGE_NOACCESS | PAGE_GUARD));
+    if (!g_kick_base)
+        return 0;
+    if (gen != g_readable_gen) {
+        memset(g_readable, 0, sizeof g_readable);
+        g_readable_gen = gen;
+    }
+    if (g_readable[page >> 5] >> (page & 31) & 1)
+        return 1;
+    ok = VirtualQuery((const void *)(uintptr_t)a, &m, sizeof m) && m.State == MEM_COMMIT &&
+         !(m.Protect & (PAGE_NOACCESS | PAGE_GUARD));
+    if (ok)
+        g_readable[page >> 5] |= 1u << (page & 31);
+    return ok;
 }
 
 static const pb_callbacks_t k_cb = {on_method, on_event, on_readable, on_bulk};

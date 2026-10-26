@@ -315,6 +315,7 @@ void ngb_apu_tick(void) {
             if (g_audio == 1) {
                 HANDLE pump = CreateThread(NULL, 0, audio_pump, NULL, 0, NULL);
                 ngb_pin_hardware_thread(pump);
+                ngb_prof_thread(pump, "audio");
                 if (pump)
                     CloseHandle(pump);
             }

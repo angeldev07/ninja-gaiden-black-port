@@ -75,8 +75,16 @@ static uint64_t MmQueryAddressProtect(uint32_t *args) {
 
 /* 182 VOID MmSetAddressProtect(PVOID BaseAddress, ULONG NumberOfBytes, ULONG NewProtect) */
 static uint64_t MmSetAddressProtect(uint32_t *args) {
-    DWORD old;
-    VirtualProtect(PTR(0), ARG(1), win_protect(ARG(2)), &old);
+    DWORD old, p = win_protect(ARG(2));
+    /* D3D calls this several times per frame to make buffers write-combined (0x404), which
+     * keeps them readable: only a change that takes access away empties the caches. Before
+     * and after, so the render thread cannot cache the page again in between. */
+    int takes_access = (p & (PAGE_NOACCESS | PAGE_GUARD)) != 0;
+    if (takes_access)
+        ngb_mem_access_changed();
+    VirtualProtect(PTR(0), ARG(1), p, &old);
+    if (takes_access)
+        ngb_mem_access_changed();
     return 0;
 }
 
@@ -86,6 +94,9 @@ static uint64_t NtAllocateVirtualMemory(uint32_t *args) {
     uint32_t *base = (uint32_t *)PTR(0), *size = (uint32_t *)PTR(2);
     DWORD type = ARG(3) & ~XBOX_MEM_NOZERO;
     void *p = VirtualAlloc((void *)(uintptr_t)*base, *size, type, win_protect(ARG(4)));
+    /* Committing pages that are already committed applies the new protection. */
+    if ((type & MEM_COMMIT) && (win_protect(ARG(4)) & (PAGE_NOACCESS | PAGE_GUARD)))
+        ngb_mem_access_changed();
     if (!p) {
         ngb_log("    · VirtualAlloc(0x%08X, 0x%X, 0x%X, 0x%X) failed: %lu", *base, *size, type,
                 ARG(4), GetLastError());
@@ -104,9 +115,11 @@ static uint64_t NtAllocateVirtualMemory(uint32_t *args) {
 static uint64_t NtFreeVirtualMemory(uint32_t *args) {
     uint32_t *base = (uint32_t *)PTR(0), *size = (uint32_t *)PTR(1);
     DWORD type = ARG(2);
-    if (!VirtualFree((void *)(uintptr_t)*base, type == MEM_RELEASE ? 0 : *size, type))
-        return RET32(STATUS_INVALID_PARAMETER);
-    return STATUS_SUCCESS;
+    BOOL ok;
+    ngb_mem_access_changed(); /* before and after: see MmSetAddressProtect */
+    ok = VirtualFree((void *)(uintptr_t)*base, type == MEM_RELEASE ? 0 : *size, type);
+    ngb_mem_access_changed();
+    return ok ? STATUS_SUCCESS : RET32(STATUS_INVALID_PARAMETER);
 }
 
 /* 217 NTSTATUS NtQueryVirtualMemory(PVOID BaseAddress, PMEMORY_BASIC_INFORMATION Buffer) */
@@ -143,7 +156,9 @@ static uint64_t MmCreateKernelStack(uint32_t *args) {
 
 /* 170 VOID MmDeleteKernelStack(PVOID StackBase, PVOID StackLimit) */
 static uint64_t MmDeleteKernelStack(uint32_t *args) {
+    ngb_mem_access_changed();
     VirtualFree(PTR(1), 0, MEM_RELEASE);
+    ngb_mem_access_changed();
     return 0;
 }
 

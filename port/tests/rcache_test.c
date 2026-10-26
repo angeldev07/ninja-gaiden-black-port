@@ -134,6 +134,36 @@ static void test_texture_lru(void) {
     CHECK(t != NULL && action == RC_TEX_UPLOAD && dead == 1000);
 }
 
+/* Lookups through the buckets: after many evictions every live key is still found (the same
+ * entry, not a new upload) and the evicted ones are not. */
+static void test_texture_buckets(void) {
+    rc_texkey k = {0, 0x00010629, 0, 0, 0};
+    rc_texture *t;
+    unsigned dead;
+    int action, i, found = 1, gone = 1;
+    memset(&g_t, 0, sizeof g_t);
+    for (i = 0; i < 3 * RC_MAX_TEXTURES; i++) { /* the last RC_MAX_TEXTURES stay */
+        k.addr = 0x40u * (uint32_t)i;
+        k.palette = (uint32_t)i & 7;
+        t = rc_texture_get(&g_t, &k, 1, &action, &dead);
+        t->gl_tex = 1u + (unsigned)i;
+    }
+    for (i = 2 * RC_MAX_TEXTURES; i < 3 * RC_MAX_TEXTURES; i++) {
+        k.addr = 0x40u * (uint32_t)i;
+        k.palette = (uint32_t)i & 7;
+        t = rc_texture_get(&g_t, &k, 1, &action, &dead);
+        if (action == RC_TEX_UPLOAD || t->gl_tex != 1u + (unsigned)i)
+            found = 0;
+    }
+    CHECK(found);
+    k.addr = 0;
+    k.palette = 0;
+    t = rc_texture_get(&g_t, &k, 1, &action, &dead);
+    if (action != RC_TEX_UPLOAD)
+        gone = 0;
+    CHECK(gone);
+}
+
 /* The hash sees one-bit changes at any position, also in the tail. */
 static void test_hash(void) {
     uint8_t d[37];
@@ -235,6 +265,7 @@ int main(void) {
     test_surface_lru();
     test_texture_cache();
     test_texture_lru();
+    test_texture_buckets();
     test_hash();
     test_sparse_and_drop();
     test_attr_layout();
