@@ -841,3 +841,16 @@ Details in [[gpu-nv2a]].
   into the ring and slept; the pusher had already passed that spot, so it never ran and the game slept forever.
 - **Fix:** with the queue drained and all of D3D's writes run, the pusher sets the event (`idle_wake`). Six runs:
   no hang, one rescue. Details in [[gpu-nv2a]].
+
+## [2026-10-26] milestone | Release v0.6.0: the story mode and the mission mode
+- **Played through:** with the build of the black screen fix, the owner finished "Eternal Legend", the last mission,
+  with no hang. With the story mode already played through for v0.5.0, both modes of the game are now validated.
+- **Main changes since v0.5.0:** no crash from a stale free-voice notice in `DSOUND` (the mission mode exception of
+  v0.5.0), movies at 30 fps with no doubled subtitles, busy scenes at 60 fps (push buffer readable check and block
+  vertex upload), no stutter from a missed vblank, no bloom shimmer, and no black screen after the "Eternal Legend"
+  cutscene.
+- **Known gaps, in the README:**
+  - fights with many enemies still drop below 60 fps, most of all in the stage of the last missions (owner);
+  - a dark band at the right edge under the heat haze;
+  - lighting details, floor reflections and the sword glow.
+- `version.h` goes to `0.6.0` and then back to `0.7.0-dev`.
