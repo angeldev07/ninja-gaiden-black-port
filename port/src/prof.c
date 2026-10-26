@@ -99,6 +99,8 @@ static DWORD WINAPI sampler_main(LPVOID unused) {
         for (i = 0; i < n; i++) {
             CONTEXT c;
             uint32_t caller;
+            if (SuspendThread(P.thread[i]) == (DWORD)-1)
+                continue;
             if (!P.stack_base[i]) {
                 LDT_ENTRY e;
                 c.ContextFlags = CONTEXT_SEGMENTS;
@@ -108,8 +110,6 @@ static DWORD WINAPI sampler_main(LPVOID unused) {
                     P.stack_base[i] = ((NT_TIB *)teb)->StackBase ? (uintptr_t)((NT_TIB *)teb)->StackBase : 1;
                 }
             }
-            if (SuspendThread(P.thread[i]) == (DWORD)-1)
-                continue;
             c.ContextFlags = CONTEXT_CONTROL;
             if (GetThreadContext(P.thread[i], &c)) {
                 caller = first_core_caller(c.Esp, P.stack_base[i]);
@@ -276,7 +276,7 @@ void ngb_prof_report(void) {
     for (i = 0; i < n; i = j) {
         uint32_t shown = 0, total = P.samples[rows[i].thread - 1];
         for (j = i; j < n && rows[j].thread == rows[i].thread && rows[j].caller == rows[i].caller; j++)
-            if (shown < 60 && rows[j].count * 1000u >= total) { /* >= 0.1 % */
+            if (shown < 60 && (uint64_t)rows[j].count * 1000u >= total) { /* >= 0.1 % */
                 if (!shown++)
                     fprintf(f, "\n== thread %s, %s (%u samples)\n", P.name[rows[i].thread - 1],
                             rows[i].caller ? "caller" : "leaf", total);

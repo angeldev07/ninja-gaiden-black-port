@@ -1626,10 +1626,13 @@ static size_t ring_alloc(size_t n) {
                 g_ring.left &= ~(1u << s);
             }
             if (g_ring.fence[s]) {
-                if (ngl_glClientWaitSync(g_ring.fence[s], 0, 0) == GL_TIMEOUT_EXPIRED) {
+                GLenum w = ngl_glClientWaitSync(g_ring.fence[s], 0, 0);
+                if (w == GL_TIMEOUT_EXPIRED)
                     g_ring.waits++;
-                    ngl_glClientWaitSync(g_ring.fence[s], GL_SYNC_FLUSH_COMMANDS_BIT, 1000000000u);
-                }
+                while (w == GL_TIMEOUT_EXPIRED) /* until the GPU is done with the segment */
+                    w = ngl_glClientWaitSync(g_ring.fence[s], GL_SYNC_FLUSH_COMMANDS_BIT, 1000000000u);
+                if (w == GL_WAIT_FAILED)
+                    glFinish(); /* an invalid fence: wait for everything instead */
                 ngl_glDeleteSync(g_ring.fence[s]);
                 g_ring.fence[s] = NULL;
             }
