@@ -854,3 +854,18 @@ Details in [[gpu-nv2a]].
   - a dark band at the right edge under the heat haze;
   - lighting details, floor reflections and the sword glow.
 - `version.h` goes to `0.6.0` and then back to `0.7.0-dev`.
+
+## [2026-10-26] fix | Fight drops: the game's own 30 fps hold, and MMIO in one exception
+- **Symptom (owner):** a fight with two enemies at about 40 fps in v0.6.0. In the owner's log the render thread is
+  idle and the kicks jump to about 15 per frame: the frames are late on the game's side, not the GPU's.
+- **Found (`VERIFIED` in the mission testbed with `--watch` and the new `perf game` / `perf wait` lines):** for 180
+  frames after a stage loads, the game itself waits for two vblanks per frame (about 6 s at 30 fps). The testbed's
+  slow windows are all this hold, which the console does too. The owner's windows had no load before them, so their
+  trigger is still open; the next log will tell (about 4 waits per frame on the vblank event means the hold).
+- **Fix:** the VEH emulates the `mov` and `test` forms D3D uses on the NV2A registers in one exception
+  (`mmio_insn.c`, `fast_access`). In busy fights the game thread spent 2.5-2.8 ms per frame in MMIO accesses (about
+  55 per frame from `KickOff`: the write-combine flush and PUT); now 0.13-0.15 ms. Kernel call arguments are
+  formatted only when the line is written.
+- **Tools:** the `perf game` line (CPU time of the Xbox threads, waits per frame on D3D's vblank event, MMIO time)
+  and the `perf wait` line (where the Xbox threads wait inside kernel calls, by thread, ordinal and caller).
+- Details in [[gpu-nv2a]]. 150 s PAL title demo: 8425 flips, 0 push buffer errors.

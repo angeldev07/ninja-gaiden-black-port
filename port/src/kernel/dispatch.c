@@ -22,6 +22,81 @@ volatile DWORD g_ngb_last_call_tick;
 
 long ngb_kernel_calls(void) { return g_seq; }
 
+/* Time spent inside kernel calls of the Xbox threads, by thread, ordinal and caller, for the
+ * perf lines: where the game waits when frames run late. Entries are never removed; once the
+ * table is full, new triples are not counted. */
+#define KTIME_SLOTS 4096
+static struct {
+    volatile LONG key; /* thread << 26 ^ ordinal << 17 ^ caller; 0 = empty */
+    int thread;
+    uint32_t ordinal, caller, calls;
+    LONGLONG ticks;
+} g_ktime[KTIME_SLOTS];
+static SRWLOCK g_ktime_lock = SRWLOCK_INIT;
+
+static void ktime_add(int thread, uint32_t ordinal, uint32_t caller, LONGLONG ticks) {
+    LONG key = (LONG)((uint32_t)thread << 26 ^ ordinal << 17 ^ caller);
+    uint32_t h = ((uint32_t)key * 2654435761u) >> 20, i;
+    AcquireSRWLockExclusive(&g_ktime_lock);
+    for (i = 0; i < KTIME_SLOTS; i++, h = (h + 1) & (KTIME_SLOTS - 1)) {
+        if (g_ktime[h].key == 0) {
+            g_ktime[h].thread = thread;
+            g_ktime[h].ordinal = ordinal;
+            g_ktime[h].caller = caller;
+            g_ktime[h].key = key;
+        }
+        if (g_ktime[h].key == key) {
+            g_ktime[h].calls++;
+            g_ktime[h].ticks += ticks;
+            break;
+        }
+    }
+    ReleaseSRWLockExclusive(&g_ktime_lock);
+}
+
+void ngb_kernel_time_take(char *out, size_t outlen, uint32_t frames) {
+    struct { int thread; uint32_t ordinal, caller, calls; LONGLONG ticks; } top[5] = {{0, 0, 0, 0, 0}};
+    LARGE_INTEGER f;
+    LONGLONG total = 0;
+    size_t len = 0;
+    int i, j;
+    QueryPerformanceFrequency(&f);
+    AcquireSRWLockExclusive(&g_ktime_lock);
+    for (i = 0; i < KTIME_SLOTS; i++) {
+        LONGLONG t = g_ktime[i].ticks;
+        if (!g_ktime[i].key)
+            continue;
+        total += t;
+        for (j = 0; j < 5 && top[j].ticks >= t; j++)
+            ;
+        if (j < 5) {
+            memmove(&top[j + 1], &top[j], (size_t)(4 - j) * sizeof top[0]);
+            top[j].thread = g_ktime[i].thread;
+            top[j].ordinal = g_ktime[i].ordinal;
+            top[j].caller = g_ktime[i].caller;
+            top[j].calls = g_ktime[i].calls;
+            top[j].ticks = t;
+        }
+        g_ktime[i].ticks = 0;
+        g_ktime[i].calls = 0;
+    }
+    ReleaseSRWLockExclusive(&g_ktime_lock);
+    if (!out || !outlen)
+        return;
+    out[0] = 0;
+    if (!frames)
+        return;
+    len = (size_t)snprintf(out, outlen, "Xbox threads inside kernel calls %.2f ms per frame:",
+                           (double)total * 1000.0 / f.QuadPart / frames);
+    for (j = 0; j < 5 && top[j].ticks && len < outlen; j++) {
+        const ngb_kexport_t *e = ngb_kexport(top[j].ordinal);
+        len += (size_t)snprintf(out + len, outlen - len, " T%d %s@%08X %.2f (%.1f calls)",
+                                top[j].thread, e ? e->name : "?", top[j].caller,
+                                (double)top[j].ticks * 1000.0 / f.QuadPart / frames,
+                                (double)top[j].calls / frames);
+    }
+}
+
 const ngb_kexport_t *ngb_kexport(uint32_t ordinal) {
     return ordinal <= NGB_MAX_ORDINAL ? g_exports[ordinal] : NULL;
 }
@@ -93,13 +168,19 @@ static uint64_t kcall(uint32_t ordinal, uint32_t *args, uint32_t caller) {
     ngb_kimpl_fn fn = ordinal <= NGB_MAX_ORDINAL ? g_impls[ordinal] : NULL;
     char argtext[512], sym[96];
     uint64_t ret = STATUS_SUCCESS;
+    LONG count = 0;
 
     g_ngb_last_call_tick = GetTickCount();
     if (ordinal <= NGB_MAX_ORDINAL)
-        InterlockedIncrement(&g_counts[ordinal]);
+        count = InterlockedIncrement(&g_counts[ordinal]);
     if (!e)
         ngb_stop(NGB_EXIT_UNIMPLEMENTED, "unknown ordinal %u (from 0x%08X)", ordinal, caller);
-    format_args(argtext, sizeof argtext, e, args);
+    /* The arguments are formatted before the call (it may overwrite them), and only when the
+     * line will be written: a busy frame makes about 600 kernel calls. */
+    argtext[0] = 0;
+    if (!fn || (!g_ngb_opts.log_minimal &&
+                !(g_ngb_opts.log_cap && (unsigned long)count > g_ngb_opts.log_cap && count % 100000 != 0)))
+        format_args(argtext, sizeof argtext, e, args);
     if (!fn) {
         ngb_log("[%ld] T%d @%08X %u %s(%s) -> NOT IMPLEMENTED", n, t ? t->index : 0, caller,
                 ordinal, e->name, argtext);
@@ -115,7 +196,15 @@ static uint64_t kcall(uint32_t ordinal, uint32_t *args, uint32_t caller) {
         t->inflight_ordinal = ordinal;
         t->inflight_caller = caller;
     }
-    ret = fn(args);
+    if (t && !t->internal) {
+        LARGE_INTEGER t0, t1;
+        QueryPerformanceCounter(&t0);
+        ret = fn(args);
+        QueryPerformanceCounter(&t1);
+        ktime_add(t->index, ordinal, caller, t1.QuadPart - t0.QuadPart);
+    } else {
+        ret = fn(args);
+    }
     if (t) {
         t->inflight_ordinal = prev_ord;
         t->inflight_caller = prev_caller;
@@ -123,9 +212,9 @@ static uint64_t kcall(uint32_t ordinal, uint32_t *args, uint32_t caller) {
     if (g_ngb_opts.log_minimal) {
         /* short log: the call is only counted */
     } else if (g_ngb_opts.log_cap && ordinal <= NGB_MAX_ORDINAL &&
-        (unsigned long)g_counts[ordinal] > g_ngb_opts.log_cap &&
-        g_counts[ordinal] % 100000 != 0) { /* after the cap, one sample every 100000 */
-        if ((unsigned long)g_counts[ordinal] == g_ngb_opts.log_cap + 1)
+        (unsigned long)count > g_ngb_opts.log_cap &&
+        count % 100000 != 0) { /* after the cap, one sample every 100000 */
+        if ((unsigned long)count == g_ngb_opts.log_cap + 1)
             ngb_log("    · %s: more than %lu calls; from here on they are only counted", e->name,
                     g_ngb_opts.log_cap);
     } else if (ret >> 32)

@@ -1,6 +1,6 @@
 ---
 tags: [ngb, reverse-engineering, runtime, gpu, h7]
-updated: 2026-10-25
+updated: 2026-10-26
 status: current
 ---
 
@@ -629,6 +629,47 @@ spotlights without cone and no skinning in fixed mode.
 - **Fix:** when the queue drains (`idle_wake`) and D3D's put equals our PUT, everything D3D wrote has run and any
   spot it patched is behind the GPU, so the event is set if it is clear. The summary counts these
   ("waits woken with the GPU idle"). Six runs of the cutscene: no hang, one rescue (the run that would have hung).
+
+## Fights at 37-43 fps: the game's own 30 fps hold, and MMIO in one exception
+
+- **Symptom (owner, v0.6.0):** a fight with two enemies drops to about 40 fps. The owner's log (`perf:` lines,
+  frames 4800-5700) has the signature that matters: the render thread is idle (4 ms of draws in a 26 ms frame) and
+  the kicks jump from about 0.5 to 15 per frame. With the render thread behind, kicks merge and stay near 0.5; with
+  the render thread waiting for the game, it consumes every small kick as it arrives. So the frames are late on the
+  game's side, not the GPU's. `VERIFIED` in that log.
+- **Reproduced** with the mission perf testbed (Giants fight, `--scale auto`): windows of 37-43 fps that come back
+  every 25-30 s.
+- **Where the game thread goes (new `perf game` and `perf wait` lines):**
+  - its CPU time (`QueryThreadCycleTime`) stays at about 9 ms per frame, and its core is about 50 % busy, so it is
+    neither CPU-bound nor pre-empted;
+  - in those windows it waits in `KeWaitForSingleObject` for about 13 ms per frame, called from a game function that
+    waits twice on D3D's vblank event (dev + 0x1DBC, set by D3D's vblank DPC). That function is at PAL
+    `0x3153E0` (`INFERRED`: same code as in the test build, found with a pattern that masks addresses);
+  - the waits on the vblank event go from 2 per frame (60 fps) to about 4.4 per frame.
+- **The cause is in the game (`VERIFIED` with `--watch` in the testbed):** a counter (PAL `0x43F770`, `INFERRED` by
+  the same pattern) goes from -1 to 0 when a stage starts (PAL `0x2E2820`, called from the scene state machine). While
+  it counts up to 180 (`0xB4`), the game waits for two vblanks per frame, so 180 frames at 30 fps take about 6 s.
+  Then it goes back to -1 and to 60 fps. Every slow window of the testbed lines up with one of these counts after a
+  reload. Nothing here measures performance, so the console does the same.
+- **Not explained yet:** the owner's slow windows have no file opens before them, so they are not a stage load. They
+  have the same signature, and the new lines will show in the next log whether it is this hold (about 4 vblank waits
+  per frame) or something else.
+- **MMIO in one exception (`nv2a.c`, `fast_access`; decoder in `mmio_insn.c`):**
+  - in busy fights D3D's `KickOff` runs about 14 times per frame. Each run flushes the write-combine buffer
+    (`PFB_WBC`: read, OR, write, then a TEST loop) and writes PUT. That is about 55 trapped accesses per frame from
+    the game thread, out of about 170 in total.
+  - The single-step path costs two exceptions, a `VirtualQuery` and two `VirtualProtect` per access. The VEH now
+    decodes `mov r32,[m]`, `mov [m],r32`, `mov [m],imm32`, `test [m],imm32` and the `A1`/`A3` forms, and emulates
+    them in place.
+  - Anything else (prefixes, byte accesses, unaligned) still single-steps. `NGB_MMIO_SLOW=1` forces the old path,
+    for comparisons.
+  - A/B in the testbed: 2.5-2.8 ms per frame inside MMIO accesses before, 0.13-0.15 ms after. The game thread's CPU
+    time in busy windows drops from about 9.5 to 7.8 ms per frame. That is margin before a frame misses its vblank.
+    It does not change the 30 fps hold, which the game does on purpose.
+- **Also:** the kernel thunk no longer formats the arguments of the about 600 kernel calls per frame when the line
+  will not be written (after `--log-cap`, or with `--log-detail minimal`).
+- **Checks:** 150 s PAL title demo, 8425 flips, 0 push buffer errors, 73 programs (0 errors). `mmio_insn_test`
+  (71 checks) and the other native tests pass, and so do the 829 Python tests.
 
 ## Next
 

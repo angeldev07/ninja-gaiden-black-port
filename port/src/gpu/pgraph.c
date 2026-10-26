@@ -136,6 +136,34 @@ static double ticks_ms(LONGLONG t) {
     return (double)t * 1000.0 / (double)f.QuadPart;
 }
 
+static uint32_t d3d_g_pdevice_va(void);
+static void *game_mem(uint32_t va, uint32_t len);
+
+/* The game's side of a window, for frames that come late with the render thread idle: the CPU
+ * time of the Xbox threads, the waits on D3D's vblank event (dev + 0x1DBC: 2 per frame at
+ * 60 fps; about 4 when the game holds itself at 30 fps, as it does for 180 frames after a
+ * stage loads), the time in MMIO accesses, and where the Xbox threads wait inside kernel
+ * calls. n = 0 starts a window. */
+static void perf_game_take(uint32_t n) {
+    static LONGLONG mmio0;
+    static LONG fast0;
+    uint32_t *dev = (uint32_t *)game_mem(d3d_g_pdevice_va(), 4);
+    char cpu[160], kt[600];
+    long waits = ngb_ke_waits_take(dev && *dev ? *dev + 0x1DBCu : 0);
+    LONGLONG mmio = nv2a_mmio_ticks();
+    LONG fast = nv2a_mmio_fast();
+    ngb_thread_cpu_take(cpu, sizeof cpu, n);
+    ngb_kernel_time_take(kt, sizeof kt, n);
+    if (n) {
+        ngb_log("    · perf game: %s; %.2f waits per frame on the vblank event; MMIO %.2f ms per frame "
+                "(%.0f of the accesses in one exception)",
+                cpu, (double)waits / n, ticks_ms(mmio - mmio0) / n, (double)(fast - fast0) / n);
+        ngb_log("    · perf wait: %s", kt);
+    }
+    mmio0 = mmio;
+    fast0 = fast;
+}
+
 /* Closes a measurement window: per-frame average of each phase and real fps. */
 static void perf_report(void) {
     LONGLONG now = qpc(), log_now = ngb_log_ticks();
@@ -144,6 +172,7 @@ static void perf_report(void) {
     double wall;
     if (!g_perf.t0 || !n) {
         g_perf.t0 = now;
+        perf_game_take(0); /* the first window starts here */
         if (g_gl) {
             char gl[700];
             pgl_perf_take(gl, sizeof gl, 1); /* discards what was accumulated before the first window */
@@ -167,6 +196,7 @@ static void perf_report(void) {
                  ticks_ms(g_perf.call) / n, ticks_ms(g_fr.worst), ticks_ms(g_fr.worst_work), g_fr.slow,
                  ticks_ms(InterlockedCompareExchange64(&g_fr.vb_worst, 0, 0)), g_fr.vb_late);
         ngb_log("    · %s", g_perf.last);
+        perf_game_take(n);
         if (g_gl) {
             char gl[700];
             pgl_perf_take(gl, sizeof gl, n);
