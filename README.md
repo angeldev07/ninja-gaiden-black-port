@@ -61,18 +61,17 @@ Code-signing the releases, which removes most of these warnings, is planned.
 
 ## Status
 
-v0.5.0 has been played through the whole story mode, from the title screen to the ending. It plays well overall,
-with an occasional glitch. Known gaps:
+v0.6.0 has been played through the whole game: the story mode, from the title screen to the ending, and the mission
+mode, up to and including the last mission, "Eternal Legend". It plays well overall, with an occasional glitch.
+Known gaps:
 
 - Some lighting details still differ from the console.
 - Floor reflections and the sword glow are missing.
-- Some in-game cutscenes and fights with many enemies drop below 60 fps.
+- Fights with many enemies on screen can still drop below 60 fps, most of all in the stage of the last missions.
 - Under the heat haze over the lava, a thin dark band can show at the right edge of the screen.
-- In the mission mode the game closed once with an exception, after almost three hours of play. It is under
-  investigation.
 
 The [roadmap](docs/target/roadmap.md) lists what is next, and the [development log](docs/log.md) records every step.
-Compatibility reports for the mission mode, for both releases and for the Japanese one are very welcome.
+Compatibility reports for both releases and for the Japanese one are very welcome.
 
 ## Building from source
 
