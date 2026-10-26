@@ -576,6 +576,60 @@ spotlights without cone and no skinning in fixed mode.
   the cursor on a known item), mission mode, eight times down, mission, difficulty, and then 45 rounds of block,
   attack, charged attack and ninpo. `--input-script` now takes up to 256 presses.
 
+## Stutter at 60 fps: the synthetic vblank and the timer resolution (`VERIFIED`)
+
+- **Symptom (owner, "Eternal Legend"):** frequent, short drops even when the 300-frame average said 60 fps.
+- **Measurement:** the `perf:` line now has the worst frame of the window, how much of it was draws, the frames over
+  25 ms, and the same for the gaps between synthetic vblanks. With the test window hidden, 20 to 70 frames of every
+  300 took about 33 ms, even in the menus, with 1-2 ms of draws; the vblank itself had about 20 gaps of 32 ms per
+  300 frames, each followed by a catch-up vblank.
+- **Cause:** Windows 11 stops honoring `timeBeginPeriod(1)` for a process whose window is not visible (hidden,
+  minimized or covered), and may run it as a background process (EcoQoS). The DPC thread then woke in 15.6 ms steps:
+  about one vblank in 15 came 32 ms late, the game missed it, and the next one came right away.
+- **Fix:** `main.c` opts out with `SetProcessInformation(ProcessPowerThrottling)`
+  (`IGNORE_TIMER_RESOLUTION` and `EXECUTION_SPEED`), looked up at run time. Same test: 0 frames over 25 ms, worst
+  vblank gap 19-20 ms, 60.0 fps.
+- **Pacing:** the render thread now presents at most once per synthetic vblank (`pgraph.c`, `pace`), like
+  `FLIP_STALL` on the console, instead of keeping its own 1/60 s schedule next to the vblank's. With a visible window
+  both behave the same (measured: 0 frames over 25 ms); the vblank is the one clock the game runs on, so two 60 Hz
+  clocks with an arbitrary phase can no longer beat. Without vblanks for 100 ms (early boot) it falls back to 1/60 s of wall clock.
+- **Checks:** 150 s PAL title demo, 8401 flips (8403 before), the intro video at 30 fps, 0 push buffer errors.
+
+## Bloom shimmer around the characters (`VERIFIED` with RenderDoc)
+
+- **Symptom (owner):** "noise" and light streaks around Ryu, worst on bright costumes.
+- **The game's glow** (frame of a RenderDoc capture, draws after the scene): the 720x480 scene is drawn into a
+  256x256 swizzled surface with one bilinear tap per pixel; then a vertical pass into 256x128 and a horizontal one into
+  128x128, each with 4 taps at +-2 and +-6 texels and 0.25 weight (from `NGB_GL_TRACE`); then it is added onto the
+  scene. The sparse taps leave visible copies by design: a Python model of the vertical pass matches the port's
+  output (mean error 0.6 levels with GL pixel centers).
+- **The port's part:** the first pass reads the scene at the internal resolution. At 1920x1280 one tap per output
+  pixel skips about 7 texels instead of 3, so thin bright details fell between the taps on some frames and not on
+  others; the sparse blur turned that into flickering streaks.
+- **Fix (`pgraph_gl.c`, `bind_textures`):** a rendered color surface read with linear filtering gets mipmaps, built
+  again only when it was drawn into since (`mips_stale`, set by draws and color clears), and is sampled with
+  `GL_LINEAR_MIPMAP_LINEAR`. A shrinking read averages its footprint; a read at its own size uses level 0, the same
+  picture as before. About 3 mipmap builds per frame in that scene. The title demo looks the same.
+
+## Black screen at the end of the "Eternal Legend" cutscene: a missed D3D wake-up (`VERIFIED`)
+
+- **Symptom (owner):** sometimes, when the opening cutscene of "Eternal Legend" ends on its own, the screen stays
+  black and nothing more happens. Here it happened in about one run in three.
+- **Render watchdog** (`pgraph.c`, `watchdog_dump`): with no `FLIP_STALL` for 3 s while vblanks run, the log gets,
+  once, the pusher queue (GET, PUT, busy), the last 16 kicks and jumps, the D3D device (put, time, fence, pending
+  fixups, last record, the `BlockOnTime` KEVENT), the `NO_OPERATION(5)` patches found in the ring and the last 8 the
+  pusher ran. These lines also go to the short log.
+- **What it showed:** the main thread slept in `D3D_BlockOnTime` (PAL `0x3CD0D0`, the `KeWaitForSingleObject` on the
+  device KEVENT at `+0x773` words); the queue was empty (GET == PUT == D3D's put), the fence was current, and the ring
+  held a `WAIT_FOR_IDLE` + `NO_OPERATION(5)` patch inside the last span the pusher had run, never executed.
+- **Cause:** `BlockOnTime` (decompiled with its helpers `0x3CCEE0`, `0x3CD060`, `0x3CCEB0`, `0x3CD540`) clears the
+  event, patches the wait into the fence padding of a ring record at least 9 KB ahead of GET, reads GET again and
+  sleeps if the GPU is still 8 KB behind. The emulated pusher, on another core, could pass that spot before the patch
+  landed, so nothing woke the game.
+- **Fix:** when the queue drains (`idle_wake`) and D3D's put equals our PUT, everything D3D wrote has run and any
+  spot it patched is behind the GPU, so the event is set if it is clear. The summary counts these
+  ("waits woken with the GPU idle"). Six runs of the cutscene: no hang, one rescue (the run that would have hung).
+
 ## Next
 
 1. Go from the title screen to the main menu, and find out what the warnings and the video (audio) wait for.

@@ -822,3 +822,22 @@ Details in [[gpu-nv2a]].
 - **Checks:** the scripted Giants fight at 1920x1280 goes from 6.8 to 1.8 ms of draws and from 3.5 to 0.8 ms of
   decoding per frame, 60 fps with pacing to spare. 150 s PAL title demo pixel-identical where frames line up, 0 pb
   errors, 63 programs (0 errors). Native tests (`rcache_test` 61 checks) and 829 Python tests pass.
+
+## [2026-10-25] fix | Stutter at 60 fps and bloom shimmer
+- **Symptoms (owner, "Eternal Legend"):** frequent short drops at a 60 fps average, and flickering light streaks
+  around the characters.
+- **Stutter (`VERIFIED`):** the new hitch fields of the `perf:` line showed the synthetic vblank missing about one
+  tick in 15 (32 ms gaps) when Windows 11 ignored the 1 ms timer resolution of a process without a visible window.
+  The loader now opts out of power throttling (`SetProcessInformation`), and the render thread presents at most
+  once per vblank instead of keeping its own clock. 0 frames over 25 ms in the same test.
+- **Bloom (`VERIFIED` with RenderDoc and a Python model of the passes):** the game shrinks the scene to 256x256 with
+  one tap per pixel; at the internal resolution that tap skips about 7 texels and thin bright details flickered
+  through the game's sparse blur. Rendered color surfaces read with linear filtering now get mipmaps.
+- Details in [[gpu-nv2a]]. 150 s PAL title demo: 60 fps, 8401 flips, 0 push buffer errors.
+
+## [2026-10-25] fix | Black screen after the "Eternal Legend" cutscene: a missed D3D wake-up
+- **Symptom (owner):** sometimes the screen stays black when the opening cutscene of "Eternal Legend" ends.
+- **Cause (`VERIFIED` with a new render watchdog in the log):** `D3D_BlockOnTime` patched a `NO_OPERATION(5)` wake-up
+  into the ring and slept; the pusher had already passed that spot, so it never ran and the game slept forever.
+- **Fix:** with the queue drained and all of D3D's writes run, the pusher sets the event (`idle_wake`). Six runs:
+  no hang, one rescue. Details in [[gpu-nv2a]].

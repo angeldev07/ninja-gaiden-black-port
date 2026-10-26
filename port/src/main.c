@@ -82,6 +82,24 @@ static void set_dpi_aware(void) {
         SetProcessDPIAware();
 }
 
+/* Windows 11 stops honoring timeBeginPeriod for a process whose window is not visible (hidden,
+ * minimized or covered) and may slow it down as a background process (EcoQoS). The synthetic
+ * vblank of the DPC thread then came in 15.6 ms steps: one vblank in about 15 was 32 ms late and
+ * the next one came right after, so the game stuttered at a steady average of 60 fps. Opting out
+ * keeps 1 ms waits and full speed. Looked up at run time: it needs Windows 8 for the call and
+ * Windows 11 for the timer flag; older systems ignore it. */
+static void keep_timer_resolution(void) {
+    typedef BOOL(WINAPI * set_info_fn)(HANDLE, int, LPVOID, DWORD);
+    struct {
+        ULONG version, control_mask, state_mask;
+    } state = {1 /* PROCESS_POWER_THROTTLING_CURRENT_VERSION */,
+               0x1 | 0x4 /* EXECUTION_SPEED | IGNORE_TIMER_RESOLUTION */, 0};
+    HMODULE k32 = GetModuleHandleA("kernel32.dll");
+    set_info_fn set_info = k32 ? (set_info_fn)(void *)GetProcAddress(k32, "SetProcessInformation") : NULL;
+    if (set_info && !set_info(GetCurrentProcess(), 4 /* ProcessPowerThrottling */, &state, sizeof state))
+        ngb_log("timer: could not opt out of power throttling (%lu)", GetLastError());
+}
+
 /* 1 if `path` (or any folder containing it) is inside a git repo: some ancestor has a
    `.git` (folder, or file in a worktree). */
 static int inside_git_repo(const char *path) {
@@ -342,6 +360,7 @@ __declspec(dllexport) int __cdecl ngb_main(void) {
      * load hit its 10 s timeout over and over (the warning loop). It is restored on its own
      * when the process exits. */
     timeBeginPeriod(1);
+    keep_timer_resolution();
     if (xbe_load_file(g_ngb_opts.xbe_path, &g_ngb_xbe, err, sizeof err))
         ngb_stop(NGB_EXIT_USAGE, "invalid XBE: %s", err);
     log_header(&g_ngb_xbe);

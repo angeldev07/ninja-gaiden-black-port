@@ -71,7 +71,13 @@ static uint32_t g_blend_enable, g_sfactor = 1, g_dfactor, g_alpha_test, g_alpha_
 static uint32_t g_alpha_ref, g_exec_mode;
 static uint32_t g_drawn_tris, g_drawn_pixels, g_skipped_draws, g_skip_pos, g_skip_target, g_skip_prim;
 static uint32_t g_present_offset, g_present_pitch, g_present_w, g_present_h;
-static LARGE_INTEGER g_pace_next, g_pace_freq;
+static uint32_t g_pace_vblank;  /* vblank count at the last present */
+static HANDLE g_vblank_evt;     /* set on every vblank (pgraph_vblank) */
+/* The last NO_OPERATION(5) the pusher ran (the wake-up of D3D_BlockOnTime): where, and the vblank. */
+static struct {
+    uint32_t at, vblank;
+} g_nop5_hist[8];
+static volatile LONG g_nop5_n;
 static volatile LONG g_pace_pending; /* FLIP_STALL done; pacing runs on leaving the locks */
 
 /* Asynchronous pusher (with GL): the queue is a single span [g_q_get, g_q_put) of the current
@@ -79,6 +85,7 @@ static volatile LONG g_pace_pending; /* FLIP_STALL done; pacing runs on leaving 
 static CRITICAL_SECTION g_q_lock;
 static volatile LONG g_patt_color0; /* PGRAPH_PATT_COLOR0, written by the pusher */
 static uint32_t g_block_wakes;       /* D3D_BlockOnTime NO_OPERATION(5) served */
+static uint32_t g_idle_wakes;        /* its KEVENT set with the GPU idle (idle_wake) */
 static uint32_t g_q_inst, g_q_get, g_q_put;
 static int g_q_busy, g_q_started;
 static volatile int g_q_running; /* the render thread is inside pb_run for the queue */
@@ -102,8 +109,20 @@ static struct {
     LONGLONG lockwait, call; /* waiting for g_pg_lock and inside pgl_call */
     long kcalls0;
     uint32_t mmio0, flips0, kicks0, tris0, words0, bulk0;
-    char last[400];
+    char last[480];
 } g_perf;
+
+/* Hitches, which the averages of a window hide: the longest time between two FLIP_STALL, how
+ * much of it was spent drawing and clearing (render thread), and the frames over 25 ms. A long
+ * frame with little drawing time was waiting on the game (loading, its CPU threads). */
+static struct {
+    LONGLONG last_flip, work0, worst, worst_work;
+    uint32_t slow;
+    /* The same for the synthetic vblank (DPC thread): the longest gap and the gaps over 20 ms. */
+    LONGLONG last_vb;
+    volatile LONGLONG vb_worst; /* 64-bit: interlocked on the 32-bit build */
+    volatile LONG vb_late;
+} g_fr;
 
 static LONGLONG qpc(void) {
     LARGE_INTEGER t;
@@ -135,7 +154,8 @@ static void perf_report(void) {
                  "perf: frames %u-%u: %.1f real fps, %.2f ms/frame; per frame: pusher %.2f ms "
                  "(draw %.2f, clear %.2f), present %.2f, pacing %.2f, log %.2f ms; %.0f kernel calls, "
                  "%.0f MMIO, %.1f kicks, %.0f primitives, %.0f words (%.0f in bulk); pb_run %.2f ms, "
-                 "kick_body %.2f ms, lock %.2f ms, pgl_call %.2f ms",
+                 "kick_body %.2f ms, lock %.2f ms, pgl_call %.2f ms; worst frame %.1f ms (draws %.1f ms), "
+                 "%u over 25 ms; worst vblank gap %.1f ms, %ld over 20 ms",
                  g_perf.flips0, g_flips, n * 1000.0 / wall, wall / n,
                  ticks_ms(g_perf.kick - g_perf.present) / n,
                  ticks_ms(g_perf.draw) / n, ticks_ms(g_perf.clear) / n, ticks_ms(g_perf.present) / n,
@@ -144,7 +164,8 @@ static void perf_report(void) {
                  (double)(g_kicks - g_perf.kicks0) / n, (double)(g_begin_end - g_perf.tris0) / n,
                  (double)(g_words - g_perf.words0) / n, (double)(g_bulk_words - g_perf.bulk0) / n,
                  ticks_ms(g_perf.pb) / n, ticks_ms(g_perf.body) / n, ticks_ms(g_perf.lockwait) / n,
-                 ticks_ms(g_perf.call) / n);
+                 ticks_ms(g_perf.call) / n, ticks_ms(g_fr.worst), ticks_ms(g_fr.worst_work), g_fr.slow,
+                 ticks_ms(InterlockedCompareExchange64(&g_fr.vb_worst, 0, 0)), g_fr.vb_late);
         ngb_log("    · %s", g_perf.last);
         if (g_gl) {
             char gl[700];
@@ -163,6 +184,10 @@ static void perf_report(void) {
     g_perf.bulk0 = g_bulk_words;
     g_perf.kick = g_perf.draw = g_perf.clear = g_perf.present = g_perf.pace = 0;
     g_perf.pb = g_perf.body = g_perf.lockwait = g_perf.call = 0;
+    g_fr.worst = g_fr.worst_work = g_fr.work0 = 0; /* draw and clear start again from 0 */
+    g_fr.slow = 0;
+    InterlockedExchange64(&g_fr.vb_worst, 0);
+    InterlockedExchange(&g_fr.vb_late, 0);
 }
 
 /* Run of words of the same method (to avoid writing 10000 lines of INLINE_ARRAY). */
@@ -765,27 +790,44 @@ static void inline_push(uint32_t w) {
     g_inline[g_inline_n++] = w;
 }
 
-/* Waits for the next "vblank" (1/60 s of wall clock) to run at ~60 fps like the console. */
+/* At most one present per vblank, like FLIP_STALL on the console, which waits for the vblank
+ * after the previous flip. The vblank is the port's synthetic one (the DPC thread), the clock the
+ * game itself runs on. Before, the pacing kept its own 1/60 s schedule: two 60 Hz clocks with
+ * an arbitrary phase, so a frame that came a millisecond late for its slot waited a whole
+ * frame. 20 to 70 frames of every 300 took 33 ms followed by an instant one, even in the menus:
+ * a steady 60 fps average with a visible stutter. Without vblanks for 100 ms (early boot, or
+ * the game masking the interrupt) it falls back to 1/60 s of wall clock. */
 static void pace(void) {
-    LARGE_INTEGER now;
-    LONGLONG t1 = qpc();
+    static uint32_t seen;       /* last vblank count seen, and when */
+    static LONGLONG seen_t, next; /* next: the timed schedule, used only without vblanks */
+    LONGLONG t1 = qpc(), now = t1;
+    LARGE_INTEGER f;
+    uint32_t vb = nv2a_vblank_count();
     if (g_ngb_opts.no_pacing)
         return;
-    if (!g_pace_freq.QuadPart) {
-        QueryPerformanceFrequency(&g_pace_freq);
-        QueryPerformanceCounter(&g_pace_next);
+    QueryPerformanceFrequency(&f);
+    if (vb != seen || !seen_t) {
+        seen = vb;
+        seen_t = t1;
     }
-    g_pace_next.QuadPart += g_pace_freq.QuadPart / 60;
-    QueryPerformanceCounter(&now);
-    if (now.QuadPart > g_pace_next.QuadPart + g_pace_freq.QuadPart / 10) {
-        g_pace_next = now; /* far behind: do not try to catch up */
-        return;
+    if (t1 - seen_t < f.QuadPart / 10) {
+        /* Vblanks are running: wait for the next one. The 50 ms cap is far above their jitter;
+         * a shorter one let a late vblank through twice and the game ran fast. */
+        LONGLONG limit = t1 + f.QuadPart / 20;
+        while (nv2a_vblank_count() == g_pace_vblank && (now = qpc()) < limit)
+            WaitForSingleObject(g_vblank_evt, 2);
+        next = 0;
+    } else {
+        /* No vblank for 100 ms (early boot, or the interrupt masked): 1/60 s of wall clock. */
+        if (!next || t1 > next + f.QuadPart / 10)
+            next = t1;
+        next += f.QuadPart / 60;
+        while ((now = qpc()) < next) {
+            LONGLONG ms = (next - now) * 1000 / f.QuadPart;
+            Sleep(ms > 1 ? (DWORD)(ms - 1) : 0);
+        }
     }
-    while (now.QuadPart < g_pace_next.QuadPart) {
-        LONGLONG ms = (g_pace_next.QuadPart - now.QuadPart) * 1000 / g_pace_freq.QuadPart;
-        Sleep(ms > 1 ? (DWORD)(ms - 1) : 0);
-        QueryPerformanceCounter(&now);
-    }
+    g_pace_vblank = nv2a_vblank_count();
     InterlockedExchangeAdd64(&g_perf.pace, qpc() - t1);
 }
 
@@ -1074,6 +1116,9 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
         /* D3D_BlockOnTime, with the GPU far behind, puts in NO_OPERATION(5) and waits for the device
          * KEVENT (+0x773 words) that its ISR signals when the GPU gets there. */
         uint32_t *dev = (uint32_t *)game_mem(d3d_g_pdevice_va(), 4);
+        LONG h = InterlockedIncrement(&g_nop5_n) - 1;
+        g_nop5_hist[h & 7].at = g_pb.cur;
+        g_nop5_hist[h & 7].vblank = nv2a_vblank_count();
         if (dev && *dev)
             ngb_ke_set_event(*dev + 0x773u * 4u);
         g_block_wakes++;
@@ -1223,6 +1268,26 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
         g_flips++;
         maybe_dump_ram();
         present_and_pace();
+        {
+            static LONGLONG over; /* 25 ms in QPC ticks */
+            LONGLONG now = qpc(), work = g_perf.draw + g_perf.clear;
+            if (!over) {
+                LARGE_INTEGER f;
+                QueryPerformanceFrequency(&f);
+                over = f.QuadPart / 40;
+            }
+            if (g_fr.last_flip) {
+                LONGLONG dt = now - g_fr.last_flip;
+                if (dt > g_fr.worst) {
+                    g_fr.worst = dt;
+                    g_fr.worst_work = work - g_fr.work0;
+                }
+                if (dt > over)
+                    g_fr.slow++;
+            }
+            g_fr.last_flip = now;
+            g_fr.work0 = work;
+        }
         if (g_flips % PERF_EVERY == 0)
             perf_report();
         if (!g_gl && (g_flips <= PNG_FIRST_FLIPS || g_flips % 100 == 0)) {
@@ -1247,6 +1312,11 @@ static struct {
     uint32_t at, word, target;
 } g_kick_ev[6];
 static int g_kick_nev;
+/* The last kicks run by the pusher (watchdog_dump): GET, PUT and where pb_run ended. */
+static struct {
+    uint32_t get, put, end, words;
+} g_kick_hist[16];
+static volatile LONG g_kick_hist_n;
 
 static void on_event(void *user, int kind, uint32_t at, uint32_t word, uint32_t target) {
     static const char *names[] = {"?", "JMP", "old JMP", "CALL", "RETURN", "ERROR"};
@@ -1412,6 +1482,13 @@ static void kick_body(void *arg) {
             ngb_log("    · PGRAPH: huge kick %u: %u words, GET 0x%08X -> PUT 0x%08X, ends at 0x%08X",
                     g_kicks, g_words - words0, get, put, end);
     }
+    {
+        LONG h = InterlockedIncrement(&g_kick_hist_n) - 1;
+        g_kick_hist[h & 15].get = get;
+        g_kick_hist[h & 15].put = put;
+        g_kick_hist[h & 15].end = end;
+        g_kick_hist[h & 15].words = g_pb.words;
+    }
     flush_run();
     if (end != put) {
         int e;
@@ -1427,6 +1504,23 @@ static void kick_body(void *arg) {
 }
 
 /* Render thread: consumes the queue until it is empty. The pacing runs outside g_pg_lock. */
+/* The queue is empty: the GPU is idle at `put`. D3D_BlockOnTime, when the GPU is far behind,
+ * clears its KEVENT, patches WAIT_FOR_IDLE + NO_OPERATION(5) into the ring ahead of GET, reads
+ * GET again and sleeps until that NO_OPERATION wakes it. If the pusher passed that spot before
+ * the patch landed, nothing woke it: about one time in three the game froze on a black screen at
+ * the end of the "Eternal Legend" opening cutscene, with GET == PUT and the patch, never run,
+ * behind it. When everything D3D has written was run (its put is our PUT), any spot it patched is
+ * behind the GPU, as on the console, so the event is set. */
+static void idle_wake(uint32_t put) {
+    uint32_t *dev = (uint32_t *)game_mem(d3d_g_pdevice_va(), 4), *dv;
+    if (!dev || !*dev || (dv = (uint32_t *)game_mem(*dev, 0x775u * 4u)) == NULL)
+        return;
+    if (dv[0x774] == 0 && dv[0] - NGB_CONTIG_BASE == put) {
+        ngb_ke_set_event(*dev + 0x773u * 4u);
+        g_idle_wakes++;
+    }
+}
+
 static void kick_worker(void *unused) {
     (void)unused;
     for (;;) {
@@ -1434,8 +1528,10 @@ static void kick_worker(void *unused) {
         LONGLONG t0 = qpc();
         EnterCriticalSection(&g_q_lock);
         if (g_q_get == g_q_put) {
+            uint32_t put = g_q_put;
             g_q_busy = 0;
             LeaveCriticalSection(&g_q_lock);
+            idle_wake(put);
             return;
         }
         k.dma_instance = g_q_inst;
@@ -1524,9 +1620,102 @@ uint32_t pgraph_kick(uint32_t dma_instance, uint32_t get, uint32_t put) {
     return put; /* D3D waits for GET == PUT: everything sent counts as consumed */
 }
 
+/* Render watchdog: no FLIP_STALL for 3 s while the vblanks run. The state of the pusher and of
+ * D3D goes to the log once (it also survives the short log), to find out who waits for whom
+ * in a hang. Read without locks from the DPC thread: a racy snapshot is good enough. */
+static void watchdog_dump(uint32_t vblanks) { /* vblanks: the current count */
+    uint32_t *dev = (uint32_t *)game_mem(d3d_g_pdevice_va(), 4), d = dev ? *dev : 0, *dv, i;
+    LONG n = g_kick_hist_n;
+    ngb_log("pgraph: watchdog: no FLIP_STALL for 3 s (frame %u, %u kicks)", g_flips, g_kicks);
+    ngb_log("pgraph: watchdog: queue GET 0x%08X PUT 0x%08X busy %d running %d; pusher at 0x%08X, method 0x%04X "
+            "count %u, subroutine %d (return 0x%08X), %u words",
+            g_q_get, g_q_put, g_q_busy, g_q_running, g_pb.cur, g_pb.method, g_pb.count, g_pb.in_subroutine,
+            g_pb.return_get, g_pb.words);
+    for (i = n > 16 ? (uint32_t)n - 16 : 0; i < (uint32_t)n; i++)
+        ngb_log("pgraph: watchdog: kick -%u: GET 0x%08X -> PUT 0x%08X, ended at 0x%08X (words %u)",
+                (uint32_t)n - i, g_kick_hist[i & 15].get, g_kick_hist[i & 15].put, g_kick_hist[i & 15].end,
+                g_kick_hist[i & 15].words);
+    for (i = 0; i < (uint32_t)g_kick_nev; i++)
+        ngb_log("pgraph: watchdog: last kick event %d at 0x%08X (word 0x%08X) -> 0x%08X", g_kick_ev[i].kind,
+                g_kick_ev[i].at, g_kick_ev[i].word, g_kick_ev[i].target);
+    if (d && (dv = (uint32_t *)game_mem(d, 0x774 * 4 + 8)) != NULL) {
+        uint32_t *fence = (uint32_t *)game_mem(dv[0xC], 4), *rec = (uint32_t *)game_mem(dv[0x58 / 4], 20);
+        ngb_log("pgraph: watchdog: D3D device 0x%08X: put 0x%08X, time 0x%08X, fence 0x%08X, ring size 0x%X, "
+                "pending fixups %d, last record 0x%08X, KEVENT signal %d, BlockOnTime target 0x%08X",
+                d, dv[0], dv[0xB], fence ? *fence : 0xFFFFFFFFu, dv[0x11], (int)dv[0x50 / 4], dv[0x58 / 4],
+                (int)dv[0x773 + 1], dv[0x680]);
+        if (rec)
+            ngb_log("pgraph: watchdog: last record: return 0x%08X next 0x%08X end 0x%08X fixups 0x%08X base 0x%08X",
+                    rec[0], rec[1], rec[2], rec[3], rec[4]);
+        {
+            /* The wait D3D_BlockOnTime patches into the ring: WAIT_FOR_IDLE, then NO_OPERATION(5). */
+            uint32_t lo = dv[9], hi = dv[10], a, found = 0;
+            uint32_t *ring = lo < hi ? (uint32_t *)game_mem(lo, hi - lo) : NULL;
+            ngb_log("pgraph: watchdog: ring [0x%08X, 0x%08X); vblank now %u", lo, hi, vblanks);
+            for (a = 0; ring && a + 4 <= (hi - lo) / 4 && found < 8; a++)
+                if (ring[a + 2] == 0x00040100u && ring[a + 3] == 5u &&
+                    (ring[a] == 0x00040110u || ring[a] == 0x00040100u)) {
+                    ngb_log("pgraph: watchdog: NO_OPERATION(5) patch at 0x%08X", lo + a * 4 + 8);
+                    found++;
+                }
+        }
+    }
+    {
+        LONG n5 = g_nop5_n, k;
+        for (k = n5 > 8 ? n5 - 8 : 0; k < n5; k++)
+            ngb_log("pgraph: watchdog: NO_OPERATION(5) run at 0x%08X, vblank %u", g_nop5_hist[k & 7].at,
+                    g_nop5_hist[k & 7].vblank);
+    }
+    {
+        uint32_t *w = (uint32_t *)game_mem(NGB_CONTIG_BASE + (g_pb.cur & ~3u), 32);
+        if (w)
+            ngb_log("pgraph: watchdog: words at the pusher: %08X %08X %08X %08X %08X %08X %08X %08X", w[0], w[1],
+                    w[2], w[3], w[4], w[5], w[6], w[7]);
+        w = g_q_put >= 32 ? (uint32_t *)game_mem(NGB_CONTIG_BASE + ((g_q_put - 32) & ~3u), 32) : NULL;
+        if (w)
+            ngb_log("pgraph: watchdog: words before PUT: %08X %08X %08X %08X %08X %08X %08X %08X", w[0], w[1],
+                    w[2], w[3], w[4], w[5], w[6], w[7]);
+    }
+    ngb_log_flush();
+}
+
 void pgraph_vblank(uint32_t count) {
-    if (count <= 3 || count % 60 == 0) {
-        EnterCriticalSection(&g_pg_lock);
+    LONGLONG now = qpc();
+    {
+        static uint32_t flips_seen, since, dumped;
+        if (g_flips != flips_seen || !since) {
+            flips_seen = g_flips;
+            since = count;
+            dumped = 0;
+        } else if (!dumped && g_flips && count - since >= 180) {
+            dumped = 1;
+            watchdog_dump(count);
+        }
+    }
+    if (g_fr.last_vb) {
+        LONGLONG dt = now - g_fr.last_vb;
+        static LONGLONG over; /* 20 ms in QPC ticks */
+        if (!over) {
+            LARGE_INTEGER f;
+            QueryPerformanceFrequency(&f);
+            over = f.QuadPart / 50;
+        }
+        LONGLONG worst = InterlockedCompareExchange64(&g_fr.vb_worst, 0, 0);
+        while (dt > worst) {
+            LONGLONG seen = InterlockedCompareExchange64(&g_fr.vb_worst, dt, worst);
+            if (seen == worst)
+                break;
+            worst = seen;
+        }
+        if (dt > over)
+            InterlockedIncrement(&g_fr.vb_late);
+    }
+    g_fr.last_vb = now;
+    if (g_vblank_evt)
+        SetEvent(g_vblank_evt);
+    /* Never wait for the lock here: the pusher can hold it while it paces, and a vblank that
+     * waited would come late. A busy lock only drops this log line. */
+    if ((count <= 3 || count % 60 == 0) && TryEnterCriticalSection(&g_pg_lock)) {
         pg_printf("~~ vblank %u (frame %u)\n", count, g_frame);
         LeaveCriticalSection(&g_pg_lock);
     }
@@ -1536,6 +1725,7 @@ int pgraph_init(const char *log_path) {
     char *dot;
     InitializeCriticalSection(&g_pg_lock);
     InitializeCriticalSection(&g_q_lock);
+    g_vblank_evt = CreateEventA(NULL, FALSE, FALSE, NULL);
     if (fopen_s(&g_pg, log_path, "wb") || !g_pg) {
         ngb_log("nv2a: cannot create the PGRAPH log %s", log_path);
         g_pg = NULL;
@@ -1602,6 +1792,8 @@ void pgraph_summary(void) {
             "%u push buffer fixups (%u chained late), %u D3D_BlockOnTime waits woken up",
             g_kicks, g_words, g_flips, g_begin_end, g_draw_arrays, g_clears, g_color_clears,
             g_sem_releases, g_pb.errors, g_pb_fixups, g_pb_fixups_late, g_block_wakes);
+    ngb_log("pgraph: %u D3D_BlockOnTime waits woken with the GPU idle (patch passed before it landed)",
+            g_idle_wakes);
     ngb_log("pgraph: rasterizer: %u triangles, %u pixels written; %u primitives not drawn "
             "(%u with non-XYZRHW position, %u without surface, %u points/lines); %u DRAW_ARRAYS and "
             "ARRAY_ELEMENT not drawn",

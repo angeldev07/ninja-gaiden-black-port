@@ -99,6 +99,7 @@ typedef ptrdiff_t GLsizeiptr;
     X(void, glFramebufferRenderbuffer, (GLenum, GLenum, GLenum, GLuint))                  \
     X(GLenum, glCheckFramebufferStatus, (GLenum))                                         \
     X(void, glDeleteFramebuffers, (GLsizei, const GLuint *))                              \
+    X(void, glGenerateMipmap, (GLenum))                                                   \
     X(void, glGenRenderbuffers, (GLsizei, GLuint *))                                      \
     X(void, glBindRenderbuffer, (GLenum, GLuint))                                         \
     X(void, glRenderbufferStorage, (GLenum, GLenum, GLsizei, GLsizei))                    \
