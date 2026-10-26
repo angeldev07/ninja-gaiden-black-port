@@ -869,3 +869,12 @@ Details in [[gpu-nv2a]].
 - **Tools:** the `perf game` line (CPU time of the Xbox threads, waits per frame on D3D's vblank event, MMIO time)
   and the `perf wait` line (where the Xbox threads wait inside kernel calls, by thread, ordinal and caller).
 - Details in [[gpu-nv2a]]. 150 s PAL title demo: 8425 flips, 0 push buffer errors.
+
+## [2026-10-26] fix | Freeze after 45 minutes of story mode: the stall rescue
+- **Symptom (owner):** a freeze in Tairon after about 45 minutes; the progress since the last save was lost.
+- **Cause (`VERIFIED` with the render watchdog):** the main thread slept in `D3D_BlockOnTime` with the GPU idle and
+  no wake-up left in the ring. D3D's own put was 30 KB ahead of our PUT, so `idle_wake` (which needs them equal)
+  did not fire.
+- **Fix:** `stall_rescue` on every vblank. After 100 ms of that sleep with the GPU idle, it kicks D3D's put, or sets
+  the KEVENT when nothing is left to run. A temporary hack that lost 1 wake-up in 100 reproduced the owner's state 3
+  times in 120 s, and the rescue recovered all of them. Normal runs log 0 rescues. Details in [[gpu-nv2a]].

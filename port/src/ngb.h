@@ -104,6 +104,9 @@ long ngb_kernel_calls(void);
 void ngb_kernel_time_take(char *out, size_t outlen, uint32_t frames);
 /* Waits on the KEVENT at `event` since the previous call with the same event. */
 long ngb_ke_waits_take(uint32_t event);
+/* Threads blocked right now in KeWaitForSingleObject on the KEVENT given to ngb_ke_watch_waiters. */
+void ngb_ke_watch_waiters(uint32_t event);
+long ngb_ke_waiters(void);
 
 /* memory.c */
 int ngb_memory_init(void);

@@ -671,6 +671,30 @@ spotlights without cone and no skinning in fixed mode.
 - **Checks:** 150 s PAL title demo, 8425 flips, 0 push buffer errors, 73 programs (0 errors). `mmio_insn_test`
   (71 checks) and the other native tests pass, and so do the 829 Python tests.
 
+## Freeze after 45 minutes of story mode: the stall rescue (`VERIFIED`)
+
+- **Symptom (owner):** the game froze in Tairon after about 45 minutes, so the progress since the last save was lost.
+  The window kept presenting the last frame.
+- **What the render watchdog showed:** the main thread asleep in `D3D_BlockOnTime` (the `KeWaitForSingleObject` on
+  the device KEVENT at dev + 0x1DCC). The queue was drained (GET == PUT == `0x02848DAC`), and fence `0x48CD4B`, the
+  last one D3D had inserted, was complete. No `NO_OPERATION(5)` patch was left in the ring, and D3D's own put
+  (`0x028505B4`) was 30 KB ahead of our PUT: commands written and not kicked yet, since D3D kicks in steps of up to
+  32 KB.
+- **Cause:** a wake-up lost the same way as in the "Eternal Legend" freeze (the pusher passes the spot before the
+  patch lands, or the patch goes where it does not run). The `idle_wake` rule only fires when D3D's put is our PUT.
+  Here it was not, so nothing woke the game.
+- **Fix (`pgraph.c`, `stall_rescue`, on every vblank):** if a thread has slept in that KEVENT for 6 vblanks
+  (100 ms) with the GPU idle:
+  - if D3D's put is ahead of our PUT (and inside its ring), the emulator writes it as PUT (`nv2a_rescue_put`), as
+    D3D's own `KickOff` would. Once that has run, `idle_wake` applies;
+  - if D3D's put is already our PUT, the KEVENT is set. Every spot D3D could have patched is behind the GPU, which
+    is `idle_wake`'s rule.
+- **Test (temporary hack, not committed):** the pusher dropped one `NO_OPERATION(5)` wake-up in 100 from vblank 2400
+  on. In 120 s of the PAL demo, 17 were lost: `idle_wake` recovered 14, and the stall rescue recovered the other 3,
+  each with D3D's put ahead of PUT, which is the owner's state. The demo kept running at 60 fps. Without the hack,
+  the demo and the testbed fight log 0 rescues.
+- The summary line counts both ("stall rescue: N kicks of D3D's put, N waits woken").
+
 ## Next
 
 1. Go from the title screen to the main menu, and find out what the warnings and the video (audio) wait for.

@@ -40,6 +40,7 @@ uint32_t nv2a_reg_read(uint32_t off);
 uint32_t nv2a_mmio_count(void);
 LONGLONG nv2a_mmio_ticks(void); /* QPC ticks inside MMIO accesses since boot */
 LONG nv2a_mmio_fast(void);       /* accesses emulated in one exception (fast_access) */
+void nv2a_rescue_put(uint32_t put); /* PUT written by the stall rescue, as if by D3D */
 
 /* Xbox physical memory (0..64 MB) to process pointer, or NULL. */
 uint8_t *nv2a_phys(uint32_t phys, uint32_t len);

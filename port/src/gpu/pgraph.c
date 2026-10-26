@@ -86,6 +86,7 @@ static CRITICAL_SECTION g_q_lock;
 static volatile LONG g_patt_color0; /* PGRAPH_PATT_COLOR0, written by the pusher */
 static uint32_t g_block_wakes;       /* D3D_BlockOnTime NO_OPERATION(5) served */
 static uint32_t g_idle_wakes;        /* its KEVENT set with the GPU idle (idle_wake) */
+static uint32_t g_rescue_kicks, g_rescue_wakes; /* stall_rescue: D3D's put kicked, KEVENT set */
 static uint32_t g_q_inst, g_q_get, g_q_put;
 static int g_q_busy, g_q_started;
 static volatile int g_q_running; /* the render thread is inside pb_run for the queue */
@@ -1709,8 +1710,55 @@ static void watchdog_dump(uint32_t vblanks) { /* vblanks: the current count */
     ngb_log_flush();
 }
 
+/* Stall rescue, on every vblank (DPC thread). A thread asleep in D3D_BlockOnTime for 100 ms
+ * while the GPU is idle will not be woken by the GPU any more: the NO_OPERATION(5) it waits for
+ * is behind GET or was never kicked. Seen after 45 minutes of story mode (2026-10-26): GET ==
+ * PUT, D3D's put 30 KB ahead of our PUT and no patch in the ring, so idle_wake (which needs
+ * D3D's put == PUT) did not fire, and the main thread slept forever. The rescue first kicks
+ * what D3D has written, as its own KickOff would; once that has run and D3D's put is our PUT,
+ * every spot it could have patched is behind the GPU, and the KEVENT is set (idle_wake's rule). */
+static void stall_rescue(uint32_t vblanks) {
+    static uint32_t since; /* vblank when a sleeper with the GPU idle was first seen; 0 = none */
+    uint32_t *dev = (uint32_t *)game_mem(d3d_g_pdevice_va(), 4), *dv, put, event, d3d_put;
+    int idle;
+    if (!g_gl || !dev || !*dev || (dv = (uint32_t *)game_mem(*dev, 0x775u * 4u)) == NULL)
+        return;
+    event = *dev + 0x773u * 4u;
+    ngb_ke_watch_waiters(event);
+    EnterCriticalSection(&g_q_lock);
+    idle = g_q_started && !g_q_busy && g_q_get == g_q_put;
+    put = g_q_put;
+    LeaveCriticalSection(&g_q_lock);
+    if (!idle || ngb_ke_waiters() == 0 || dv[0x774] != 0) {
+        since = 0;
+        return;
+    }
+    if (!since) {
+        since = vblanks ? vblanks : 1;
+        return;
+    }
+    if (vblanks - since < 6)
+        return;
+    since = 0;
+    d3d_put = dv[0] - NGB_CONTIG_BASE;
+    if (d3d_put != put) {
+        if (dv[0] < dv[9] || dv[0] >= dv[10]) /* not in D3D's ring: leave it to the watchdog */
+            return;
+        if (++g_rescue_kicks <= 20)
+            ngb_log("pgraph: stall rescue: D3D_BlockOnTime asleep with the GPU idle at 0x%08X; kicking "
+                    "D3D's put 0x%08X", put, d3d_put);
+        nv2a_rescue_put(d3d_put);
+    } else {
+        if (++g_rescue_wakes <= 20)
+            ngb_log("pgraph: stall rescue: D3D_BlockOnTime asleep with the GPU idle at D3D's put 0x%08X; "
+                    "waking it", put);
+        ngb_ke_set_event(event);
+    }
+}
+
 void pgraph_vblank(uint32_t count) {
     LONGLONG now = qpc();
+    stall_rescue(count);
     {
         static uint32_t flips_seen, since, dumped;
         if (g_flips != flips_seen || !since) {
@@ -1822,8 +1870,9 @@ void pgraph_summary(void) {
             "%u push buffer fixups (%u chained late), %u D3D_BlockOnTime waits woken up",
             g_kicks, g_words, g_flips, g_begin_end, g_draw_arrays, g_clears, g_color_clears,
             g_sem_releases, g_pb.errors, g_pb_fixups, g_pb_fixups_late, g_block_wakes);
-    ngb_log("pgraph: %u D3D_BlockOnTime waits woken with the GPU idle (patch passed before it landed)",
-            g_idle_wakes);
+    ngb_log("pgraph: %u D3D_BlockOnTime waits woken with the GPU idle (patch passed before it landed); "
+            "stall rescue: %u kicks of D3D's put, %u waits woken",
+            g_idle_wakes, g_rescue_kicks, g_rescue_wakes);
     ngb_log("pgraph: rasterizer: %u triangles, %u pixels written; %u primitives not drawn "
             "(%u with non-XYZRHW position, %u without surface, %u points/lines); %u DRAW_ARRAYS and "
             "ARRAY_ELEMENT not drawn",

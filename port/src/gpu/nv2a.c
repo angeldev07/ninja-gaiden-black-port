@@ -389,6 +389,17 @@ uint32_t nv2a_mmio_count(void) {
     return n;
 }
 
+/* PUT written by the emulator instead of D3D (stall rescue in pgraph.c), with the same effect as
+ * D3D's own write. */
+void nv2a_rescue_put(uint32_t put) {
+    EnterCriticalSection(&g_lock);
+    if (!g_fifo_off && put != g_put) {
+        g_put = put;
+        g_get = pgraph_kick(g_regs[PFIFO_CACHE1_DMA_INSTANCE / 4] & 0xFFFFu, g_get, g_put);
+    }
+    LeaveCriticalSection(&g_lock);
+}
+
 LONG nv2a_mmio_fast(void) { return g_mmio_fast; }
 
 LONGLONG nv2a_mmio_ticks(void) { return InterlockedCompareExchange64(&g_mmio_ticks, 0, 0); }
