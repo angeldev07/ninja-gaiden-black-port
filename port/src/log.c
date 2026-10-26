@@ -135,6 +135,7 @@ __declspec(noreturn) void ngb_stop(int code, const char *fmt, ...) {
     va_end(ap);
     ngb_log("");
     ngb_log("==== STOP %s (%d) at %.3f s: %s", exit_name(code), code, ngb_elapsed(), reason);
+    ngb_prof_report(); /* first: it stops the sampler, which suspends threads */
     /* The NV2A summary takes its lock: it goes BEFORE suspending the threads for the dump. */
     nv2a_summary();
     ngb_thread_dump_all();

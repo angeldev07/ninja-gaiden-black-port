@@ -142,12 +142,14 @@ static struct {
     rc_dirty dirty;
 } R;
 
+static int ring_init(void); /* vertex streaming ring, see upload_vertices */
+
 /* A native size or coordinate in the scaled surfaces. A span [a, b) maps to [px(a), px(b)), so
  * neighbouring scissors and viewports still meet exactly at fractional scales. */
 static GLint px(uint32_t v) { return (GLint)((float)v * R.scale + 0.5f); }
 
 /* Breakdown of the draw with QPC (pgl_perf_take): where the time of each draw goes. */
-enum { PF_TARGET, PF_INDEX, PF_PROG, PF_STATE, PF_TEX, PF_UNIF, PF_VERT, PF_DRAW, PF_FLIP, PF_WATCH, PF_N };
+enum { PF_TARGET, PF_INDEX, PF_PROG, PF_STATE, PF_TEX, PF_UNIF, PF_GATHER, PF_VERT, PF_DRAW, PF_FLIP, PF_WATCH, PF_N };
 static struct {
     LONGLONG t[PF_N];
     uint32_t draws, surf_new, tex_up, tex_hash, verts, state_sets, unif_sets, unif_vec4, vc_hits;
@@ -168,7 +170,7 @@ static void pf_lap(int k, LONGLONG *t0) {
 
 void pgl_perf_take(char *out, size_t outlen, uint32_t frames) {
     static const char *names[PF_N] = {"target", "indices", "program", "state", "textures",
-                                      "uniforms", "vertices", "draw", "flip", "write-watch"};
+                                      "uniforms", "gather", "vertices", "draw", "flip", "write-watch"};
     LARGE_INTEGER f;
     size_t n;
     int k;
@@ -244,6 +246,8 @@ static int setup_objects(void) {
     ngl_glGenVertexArrays(1, &R.vao);
     ngl_glGenBuffers(1, &R.vbo);
     ngl_glGenBuffers(1, &R.ebo);
+    ngb_log("pgraph gl: vertex streaming %s", ring_init() ? "through a persistent mapped ring (GL 4.4)"
+                                                          : "with glBufferData (no GL 4.4 buffer storage)");
     glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS_);
     glPointSize(R.scale); /* points cover the same area of the picture at any scale */
     /* 16x anisotropic filtering (core in GL 4.6; without it the query fails and it stays off). */
@@ -329,6 +333,7 @@ int pgl_start(HWND hwnd, char *why, size_t whylen) {
         return GLB_ERR_ARGS;
     }
     ngb_pin_hardware_thread(R.thread);
+    ngb_prof_thread(R.thread, "render");
     WaitForSingleObject(R.done, INFINITE);
     if (R.init_err) {
         snprintf(why, whylen, "%s", glb_error_text(R.init_err));
@@ -1551,17 +1556,115 @@ static vc_entry *vcache_slot(uint64_t key) {
     return e->last_use <= alt->last_use ? e : alt;
 }
 
-/* Each active attribute goes to its own VBO region, packed (CMP already expanded to
- * floats). The vertices are [vmin, vmin + nv) or, with `gather`, the nv indices of that list
- * relative to vmin (when the range is much larger than the vertices used: issue #43);
- * `span` is the memory span they cover. The R.idx indices are already rebased. */
+/* Streaming ring for the vertices and indices of each draw (GL 4.4 buffer storage, mapped once,
+ * persistent and coherent): the data is written once, straight where the GPU reads it. Before,
+ * every draw went through a staging copy and two glBufferData calls, and the driver allocated
+ * and copied again. The ring has RING_SEGS segments. When the writer leaves a segment, a fence
+ * is set after the next draw (ring_fence_left: the draw that reads what was just written may
+ * still come), and the writer waits on it before it enters that segment again, so nothing the
+ * GPU may still read is overwritten. Without GL 4.4 (ring_init leaves map NULL) the
+ * glBufferData path stays. */
+#define RING_SIZE (64u << 20)
+#define RING_SEGS 8u
+#define RING_SEG (RING_SIZE / RING_SEGS)
+#define RING_NONE ((size_t)-1)
+static struct {
+    GLuint buf;
+    uint8_t *map;
+    size_t head;
+    unsigned cur;
+    GLsync fence[RING_SEGS];
+    unsigned left; /* segments left behind whose fence is not set yet (bit mask) */
+    uint32_t waits; /* the writer caught up with the GPU and had to wait */
+} g_ring;
+
+/* After a draw: fences for the segments the writer has left. */
+static void ring_fence_left(void) {
+    unsigned s;
+    for (s = 0; g_ring.left && s < RING_SEGS; s++)
+        if (g_ring.left & (1u << s)) {
+            g_ring.fence[s] = ngl_glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+            g_ring.left &= ~(1u << s);
+        }
+}
+
+static int ring_init(void) {
+    const GLbitfield flags = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
+    if (!ngl_glBufferStorage || !ngl_glMapBufferRange || !ngl_glFenceSync || !ngl_glClientWaitSync ||
+        !ngl_glDeleteSync || !ngl_glCopyBufferSubData)
+        return 0;
+    ngl_glGenBuffers(1, &g_ring.buf);
+    ngl_glBindBuffer(GL_ARRAY_BUFFER, g_ring.buf);
+    ngl_glBufferStorage(GL_ARRAY_BUFFER, RING_SIZE, NULL, flags);
+    g_ring.map = (uint8_t *)ngl_glMapBufferRange(GL_ARRAY_BUFFER, 0, RING_SIZE, flags);
+    ngl_glBindBuffer(GL_ARRAY_BUFFER, 0);
+    if (!g_ring.map) {
+        ngl_glDeleteBuffers(1, &g_ring.buf);
+        g_ring.buf = 0;
+        while (glGetError() != GL_NO_ERROR) {
+        }
+    }
+    return g_ring.map != NULL;
+}
+
+/* `n` bytes of the ring, aligned to 64: their offset, or RING_NONE (no ring, or more than a
+ * segment: the caller uses glBufferData). */
+static size_t ring_alloc(size_t n) {
+    size_t start;
+    unsigned s, last;
+    if (!g_ring.map || !n || n > RING_SEG)
+        return RING_NONE;
+    start = (g_ring.head + 63) & ~(size_t)63;
+    if (start + n > RING_SIZE)
+        start = 0;
+    last = (unsigned)((start + n - 1) / RING_SEG);
+    for (s = (unsigned)(start / RING_SEG);; s = (s + 1) % RING_SEGS) {
+        if (s != g_ring.cur) {
+            g_ring.left |= 1u << g_ring.cur;
+            if (g_ring.left & (1u << s)) { /* no draw since it was left: fenced now */
+                g_ring.fence[s] = ngl_glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+                g_ring.left &= ~(1u << s);
+            }
+            if (g_ring.fence[s]) {
+                if (ngl_glClientWaitSync(g_ring.fence[s], 0, 0) == GL_TIMEOUT_EXPIRED) {
+                    g_ring.waits++;
+                    ngl_glClientWaitSync(g_ring.fence[s], GL_SYNC_FLUSH_COMMANDS_BIT, 1000000000u);
+                }
+                ngl_glDeleteSync(g_ring.fence[s]);
+                g_ring.fence[s] = NULL;
+            }
+            g_ring.cur = s;
+        }
+        if (s == last)
+            break;
+    }
+    g_ring.head = start + n;
+    return start;
+}
+
+/* Vertex data goes to the GL buffer in blocks: the attributes of one interleaved game array
+ * (same stride, overlapping ranges) are copied as one block of memory with one memcpy, and GL
+ * reads them with the game's stride. Before, every vertex of every attribute was a small
+ * memcpy of its own, which was most of the drawing time in a busy scene (about 25 ns per
+ * vertex). Each block starts at the same address modulo 16 as in the game, so the alignment of
+ * every attribute is kept. Only CMP (expanded to 3 floats) and sparse ranges (`gather`) are
+ * still packed vertex by vertex, each attribute in its own region. The vertices are
+ * [vmin, vmin + nv) or, with `gather`, the nv indices of that list relative to vmin (when the
+ * range is much larger than the vertices used: issue #43); `span` is the memory span they
+ * cover. The R.idx indices are already rebased. */
 static int upload_vertices(const pgl_regs *r, const pgl_draw_t *d, uint32_t vmin, uint32_t nv,
                            const uint32_t *gather, uint32_t span) {
     rc_attr a[16];
     uint32_t word_off[16], per = 0, slot, v, ok_mask = 0, key_words[2 * 16 + 3];
     uint32_t src_phys[16], src_len[16];
     const uint8_t *src[16];
-    size_t off[16], sstride[16], total = 0;
+    size_t off[16], sstride[16], gl_stride[16], total = 0, ring_off = RING_NONE, base = 0;
+    int blk_of[16], nblk = 0, b;
+    struct {
+        uint32_t lo, hi; /* physical range of an array block */
+        size_t stride, off, size;
+        const uint8_t *p;
+    } blk[16];
     uint64_t key = 0;
     vc_entry *e = NULL;
     int dirty = 0;
@@ -1570,12 +1673,10 @@ static int upload_vertices(const pgl_regs *r, const pgl_draw_t *d, uint32_t vmin
             a[slot].enabled = 0;
         word_off[slot] = per;
         per += a[slot].enabled ? (uint32_t)a[slot].inline_words : 0;
-        off[slot] = total;
         src[slot] = NULL;
         src_phys[slot] = src_len[slot] = 0;
         sstride[slot] = 0;
-        if (a[slot].enabled)
-            total += ((size_t)a[slot].dst_bytes * nv + 3) & ~(size_t)3;
+        blk_of[slot] = -1;
     }
     for (slot = 0; slot < 16; slot++) {
         const rc_attr *at = &a[slot];
@@ -1585,22 +1686,79 @@ static int upload_vertices(const pgl_regs *r, const pgl_draw_t *d, uint32_t vmin
             src[slot] = (const uint8_t *)(d->inline_words + (size_t)vmin * per + word_off[slot]);
             sstride[slot] = (size_t)per * 4;
         } else {
-            uint32_t o = M(r, 0x1720 + 4 * slot), base;
+            uint32_t o = M(r, 0x1720 + 4 * slot), dma;
             /* Stride, vmin and the span come from the game: the offset and the length are
              * computed in 64 bits and rejected if they do not fit in the Xbox RAM. */
             uint64_t start, len;
             sstride[slot] = at->stride ? at->stride : (uint32_t)at->src_bytes;
             start = (uint64_t)vmin * sstride[slot];
             len = (uint64_t)sstride[slot] * (span - 1) + (uint64_t)at->src_bytes;
-            if (!pgraph_dma_base(o & 0x80000000u ? 0x1A0 : 0x19C, &base) || start >= NGB_CONTIG_SIZE ||
+            if (!pgraph_dma_base(o & 0x80000000u ? 0x1A0 : 0x19C, &dma) || start >= NGB_CONTIG_SIZE ||
                 len > NGB_CONTIG_SIZE)
                 continue;
-            src_phys[slot] = base + (o & 0x7FFFFFFFu) + (uint32_t)start;
+            src_phys[slot] = dma + (o & 0x7FFFFFFFu) + (uint32_t)start;
             src_len[slot] = (uint32_t)len;
             src[slot] = nv2a_phys(src_phys[slot], src_len[slot]);
         }
         if (src[slot])
             ok_mask |= 1u << slot;
+    }
+    /* Blocks: every attribute that is read as it is in memory. */
+    for (slot = 0; slot < 16; slot++) {
+        if (!(ok_mask & (1u << slot)) || a[slot].type == 6 || gather)
+            continue;
+        if (d->inline_words) {
+            if (!nblk) {
+                blk[0].p = (const uint8_t *)(d->inline_words + (size_t)vmin * per);
+                blk[0].size = (size_t)nv * per * 4;
+                blk[0].stride = (size_t)per * 4;
+                nblk = 1;
+            }
+            blk_of[slot] = 0;
+            continue;
+        }
+        for (b = 0; b < nblk; b++)
+            if (blk[b].stride == sstride[slot] && src_phys[slot] <= blk[b].hi &&
+                src_phys[slot] + src_len[slot] >= blk[b].lo)
+                break;
+        if (b == nblk) {
+            blk[b].lo = src_phys[slot];
+            blk[b].hi = src_phys[slot] + src_len[slot];
+            blk[b].stride = sstride[slot];
+            nblk++;
+        } else {
+            if (src_phys[slot] < blk[b].lo)
+                blk[b].lo = src_phys[slot];
+            if (src_phys[slot] + src_len[slot] > blk[b].hi)
+                blk[b].hi = src_phys[slot] + src_len[slot];
+        }
+        blk_of[slot] = b;
+    }
+    for (b = 0; b < nblk; b++) {
+        if (!d->inline_words) { /* the union of ranges checked one by one: checked again whole */
+            blk[b].size = blk[b].hi - blk[b].lo;
+            blk[b].p = nv2a_phys(blk[b].lo, (uint32_t)blk[b].size);
+        }
+        if (blk[b].p) {
+            blk[b].off = ((total + 15) & ~(size_t)15) + ((uintptr_t)blk[b].p & 15);
+            total = blk[b].off + blk[b].size;
+        }
+    }
+    for (slot = 0; slot < 16; slot++) {
+        const rc_attr *at = &a[slot];
+        if (!(ok_mask & (1u << slot)))
+            continue;
+        b = blk_of[slot];
+        if (b >= 0 && !blk[b].p)
+            blk_of[slot] = b = -1; /* not a valid block: packed */
+        if (b >= 0) {
+            off[slot] = blk[b].off + (size_t)(src[slot] - blk[b].p);
+            gl_stride[slot] = blk[b].stride;
+        } else {
+            off[slot] = (total + 3) & ~(size_t)3;
+            gl_stride[slot] = (size_t)at->dst_bytes;
+            total = off[slot] + (size_t)at->dst_bytes * nv;
+        }
     }
     if (!d->inline_words && R.ww_ok) {
         for (slot = 0; slot < 16; slot++) {
@@ -1626,20 +1784,29 @@ static int upload_vertices(const pgl_regs *r, const pgl_draw_t *d, uint32_t vmin
         e->last_use = ++g_vc_clock;
         P.vc_hits++;
     } else {
-        R.stage = (uint8_t *)grow(R.stage, &R.stage_cap, total ? total : 4);
-        if (!R.stage)
-            return 0;
+        LONGLONG tg = pf_now();
+        uint8_t *dst_base;
+        if (e && e->key == key && e->volatile_)
+            e = NULL; /* rewritten by the CPU every frame: streamed, not cached */
+        ring_off = ring_alloc(total ? total : 4);
+        if (ring_off != RING_NONE) {
+            dst_base = g_ring.map + ring_off;
+        } else {
+            R.stage = (uint8_t *)grow(R.stage, &R.stage_cap, total ? total : 4);
+            if (!R.stage)
+                return 0;
+            dst_base = R.stage;
+        }
+        for (b = 0; b < nblk; b++)
+            if (blk[b].p)
+                memcpy(dst_base + blk[b].off, blk[b].p, blk[b].size);
         for (slot = 0; slot < 16; slot++) {
             const rc_attr *at = &a[slot];
             const uint8_t *sp = src[slot];
             size_t st = sstride[slot];
-            uint8_t *dst = R.stage + off[slot];
-            if (!sp)
+            uint8_t *dst = dst_base + off[slot];
+            if (!sp || blk_of[slot] >= 0)
                 continue;
-            if (!gather && at->type != 6 && st == (size_t)at->src_bytes) {
-                memcpy(dst, sp, (size_t)at->src_bytes * nv);
-                continue;
-            }
             for (v = 0; v < nv; v++) {
                 const uint8_t *vp = sp + st * (gather ? gather[v] : v);
                 if (at->type == 6) {
@@ -1653,6 +1820,9 @@ static int upload_vertices(const pgl_regs *r, const pgl_draw_t *d, uint32_t vmin
                 }
             }
         }
+        tg = pf_now() - tg; /* "gather": the CPU side; "vertices" keeps the GL side */
+        P.t[PF_GATHER] += tg;
+        P.t[PF_VERT] -= tg;
         if (e) {
             if (!e->buf)
                 ngl_glGenBuffers(1, &e->buf);
@@ -1664,7 +1834,17 @@ static int upload_vertices(const pgl_regs *r, const pgl_draw_t *d, uint32_t vmin
             e->total = total;
             e->ok_mask = ok_mask;
             ngl_glBindBuffer(GL_ARRAY_BUFFER, e->buf);
-            ngl_glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(total ? total : 4), R.stage, GL_STATIC_DRAW_);
+            if (ring_off != RING_NONE) { /* a copy on the GPU, from the ring */
+                ngl_glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(total ? total : 4), NULL, GL_STATIC_DRAW_);
+                ngl_glBindBuffer(GL_COPY_READ_BUFFER, g_ring.buf);
+                ngl_glCopyBufferSubData(GL_COPY_READ_BUFFER, GL_ARRAY_BUFFER, (GLintptr)ring_off, 0,
+                                        (GLsizeiptr)(total ? total : 4));
+            } else {
+                ngl_glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(total ? total : 4), R.stage, GL_STATIC_DRAW_);
+            }
+        } else if (ring_off != RING_NONE) {
+            ngl_glBindBuffer(GL_ARRAY_BUFFER, g_ring.buf);
+            base = ring_off;
         } else {
             ngl_glBindBuffer(GL_ARRAY_BUFFER, R.vbo);
             ngl_glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(total ? total : 4), R.stage, GL_STREAM_DRAW);
@@ -1673,29 +1853,30 @@ static int upload_vertices(const pgl_regs *r, const pgl_draw_t *d, uint32_t vmin
     }
     for (slot = 0; slot < 16; slot++) {
         const rc_attr *at = &a[slot];
+        const void *at_off;
+        GLsizei stride;
         if (!(ok_mask & (1u << slot))) {
             ngl_glDisableVertexAttribArray(slot);
             ngl_glVertexAttrib4f(slot, r->vconst[slot][0], r->vconst[slot][1], r->vconst[slot][2],
                                  r->vconst[slot][3]);
             continue;
         }
+        at_off = (const void *)(base + off[slot]);
+        stride = (GLsizei)gl_stride[slot];
         ngl_glEnableVertexAttribArray(slot);
         switch (at->type) {
         case 0: /* D3DCOLOR: B G R A in memory */
             ngl_glVertexAttribPointer(slot, at->comps == 4 ? GL_BGRA : at->comps, GL_UNSIGNED_BYTE,
-                                      GL_TRUE, 4, (const void *)off[slot]);
+                                      GL_TRUE, stride, at_off);
             break;
         case 4:
-            ngl_glVertexAttribPointer(slot, at->comps, GL_UNSIGNED_BYTE, GL_TRUE, 4,
-                                      (const void *)off[slot]);
+            ngl_glVertexAttribPointer(slot, at->comps, GL_UNSIGNED_BYTE, GL_TRUE, stride, at_off);
             break;
         case 1: case 5:
-            ngl_glVertexAttribPointer(slot, at->comps, GL_SHORT, at->type == 1, at->dst_bytes,
-                                      (const void *)off[slot]);
+            ngl_glVertexAttribPointer(slot, at->comps, GL_SHORT, at->type == 1, stride, at_off);
             break;
         default: /* F and expanded CMP */
-            ngl_glVertexAttribPointer(slot, at->comps, GL_FLOAT, GL_FALSE, at->dst_bytes,
-                                      (const void *)off[slot]);
+            ngl_glVertexAttribPointer(slot, at->comps, GL_FLOAT, GL_FALSE, stride, at_off);
             break;
         }
     }
@@ -1841,9 +2022,19 @@ void pgl_draw(const pgl_regs *r, const pgl_draw_t *d) {
     if (!upload_vertices(r, d, vmin, gather ? nverts : span, gather, span))
         goto skip;
     pf_lap(PF_VERT, &t0);
-    ngl_glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, R.ebo);
-    ngl_glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(n * sizeof(uint32_t)), idx, GL_STREAM_DRAW);
-    glDrawElements(modes[d->prim], (GLsizei)n, GL_UNSIGNED_INT, NULL);
+    {
+        size_t io = ring_alloc((size_t)n * sizeof(uint32_t));
+        if (io != RING_NONE) {
+            memcpy(g_ring.map + io, idx, (size_t)n * sizeof(uint32_t));
+            ngl_glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g_ring.buf);
+            glDrawElements(modes[d->prim], (GLsizei)n, GL_UNSIGNED_INT, (const void *)io);
+        } else {
+            ngl_glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, R.ebo);
+            ngl_glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(n * sizeof(uint32_t)), idx, GL_STREAM_DRAW);
+            glDrawElements(modes[d->prim], (GLsizei)n, GL_UNSIGNED_INT, NULL);
+        }
+        ring_fence_left();
+    }
     ngl_glBindVertexArray(0);
     pf_lap(PF_DRAW, &t0);
     R.draws++;
@@ -2067,6 +2258,8 @@ void pgl_summary(void) {
             R.draws, R.ff_draws, R.skipped, R.clears, R.flips, R.surf_created, R.surf_dropped, R.rtt_binds,
             R.feedback_copies, R.tex_uploads, R.tex.checks, R.tex.hits, R.nprogs, R.prog_errors,
             R.tex_errors, R.state_errors, R.present_other);
+    if (g_ring.map)
+        ngb_log("pgraph gl: vertex ring: %u waits for the GPU", g_ring.waits);
     if (R.first_error[0])
         ngb_log("pgraph gl: first error: %s", R.first_error);
 }

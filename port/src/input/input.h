@@ -108,7 +108,7 @@ int xpad_equal(const xbox_gamepad_t *a, const xbox_gamepad_t *b);
  * long I/O or rendering take (with milliseconds, a slower load made the press
  * land on another screen). An entry uses the same unit for the instant and the duration
  * (default hold: 12 reads). */
-#define INPUT_SCRIPT_MAX 64
+#define INPUT_SCRIPT_MAX 256
 #define INPUT_SCRIPT_HOLD_MS 200u
 #define INPUT_SCRIPT_HOLD_POLLS 12u
 

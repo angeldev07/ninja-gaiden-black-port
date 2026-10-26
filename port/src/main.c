@@ -67,7 +67,8 @@ static void usage(void) {
             "changes\n"
             "  --input-script  gamepad presses, e.g. \"t=3s:START,t=5s:A@500ms\"\n"
             "                  (\"t=2400p:A@10p\": in gamepad reads, not in ms)\n"
-            "  --no-host-input neither PC gamepad nor keyboard: only the script\n");
+            "  --no-host-input neither PC gamepad nor keyboard: only the script\n"
+            "  --profile    sample the render and audio threads; hot functions in <log>-profile.txt\n");
 }
 
 /* Per-monitor DPI awareness before the window exists. Without it, at 125 % or 150 % Windows
@@ -163,7 +164,7 @@ static void default_log_path(char *out, size_t outlen) {
 static int parse_args(void) {
     int argc = 0, i, explicit_limits = 0; /* bits: 1 max-calls, 2 timeout, 4 idle */
     LPWSTR *wargv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    static char argbuf[32][2048]; /* a long --input-script does not fit in MAX_PATH */
+    static char argbuf[32][8192]; /* a long --input-script does not fit in MAX_PATH */
     char *argv[32];
     if (!wargv || argc < 2 || argc > 32)
         return -1;
@@ -235,6 +236,8 @@ static int parse_args(void) {
             g_ngb_opts.audio_wav = 1;
         else if (!strcmp(a, "--rdoc-frame") && more)
             g_ngb_opts.rdoc_frame = (unsigned)strtoul(argv[++i], NULL, 0);
+        else if (!strcmp(a, "--profile"))
+            g_ngb_opts.profile = 1;
         else if (!strcmp(a, "--rdoc-key"))
             g_ngb_opts.rdoc_key = 1;
         else if (!strcmp(a, "--debug-shots") && more)
@@ -353,6 +356,7 @@ __declspec(dllexport) int __cdecl ngb_main(void) {
     }
     if (g_ngb_opts.symbols && ngb_symbols_load(g_ngb_opts.symbols))
         ngb_log("symbols: could not read %s", g_ngb_opts.symbols);
+    ngb_prof_start();
 
     /* Presenter window (H7). The hook is in gpu/pgraph.c: on every FLIP_STALL the 720-wide
      * color buffer that the game cleared or drew is presented (software-rasterized in

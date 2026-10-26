@@ -103,16 +103,35 @@ static int same_key(const rc_texkey *a, const rc_texkey *b) {
            a->rect == b->rect && a->palette == b->palette;
 }
 
+static unsigned key_bucket(const rc_texkey *k) {
+    uint32_t h = k->addr * 0x9E3779B1u ^ k->format * 0x85EBCA77u ^ k->control1 * 0xC2B2AE3Du ^
+                 k->rect * 0x27D4EB2Fu ^ k->palette * 0x165667B1u;
+    h ^= h >> 15;
+    h *= 0x2C1B3C6Du;
+    h ^= h >> 12;
+    return h & (RC_TEX_BUCKETS - 1);
+}
+
+static void bucket_unlink(rc_textures *c, rc_texture *t) {
+    int16_t *link = &c->head[t->bucket], self = (int16_t)(t - c->t + 1);
+    while (*link && *link != self)
+        link = &c->t[*link - 1].next;
+    if (*link)
+        *link = t->next;
+}
+
 rc_texture *rc_texture_get(rc_textures *c, const rc_texkey *key, uint32_t frame, int *action,
                            unsigned *dead) {
     rc_texture *slot = NULL;
+    unsigned b;
     int i;
     if (dead)
         *dead = 0;
     if (!c || !key || !action)
         return NULL;
-    for (i = 0; i < RC_MAX_TEXTURES; i++) {
-        rc_texture *t = &c->t[i];
+    b = key_bucket(key);
+    for (i = c->head[b]; i; i = c->t[i - 1].next) {
+        rc_texture *t = &c->t[i - 1];
         if (t->used && same_key(&t->key, key)) {
             t->last_use = ++c->clock;
             if (t->checked_frame == frame && t->gl_tex) {
@@ -133,12 +152,18 @@ rc_texture *rc_texture_get(rc_textures *c, const rc_texkey *key, uint32_t frame,
         if (!slot || t->last_use < slot->last_use)
             slot = t;
     }
-    if (slot->used && dead)
-        *dead = slot->gl_tex;
+    if (slot->used) {
+        if (dead)
+            *dead = slot->gl_tex;
+        bucket_unlink(c, slot);
+    }
     memset(slot, 0, sizeof *slot);
     slot->used = 1;
     slot->key = *key;
     slot->last_use = ++c->clock;
+    slot->bucket = (uint16_t)b;
+    slot->next = c->head[b];
+    c->head[b] = (int16_t)(slot - c->t + 1);
     *action = RC_TEX_UPLOAD;
     return slot;
 }
