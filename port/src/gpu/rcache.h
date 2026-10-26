@@ -33,6 +33,7 @@ typedef struct rc_surface {
     uint64_t mem_sig;       /* rc_sparse_hash of the RAM when it was used as a target: if the
                              * CPU writes something else there (a new texture), it stops matching */
     uint32_t drawn_frame;   /* last frame in which it was a target (for the write watch) */
+    int mips_stale;         /* drawn into since its mipmaps were last built (pgraph_gl.c) */
 } rc_surface;
 
 typedef struct rc_surfaces {

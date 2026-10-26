@@ -111,6 +111,7 @@ static struct {
     rc_surfaces surf;
     rc_textures tex;
     uint32_t color_addr, zeta_addr; /* current target (0 = none) */
+    rc_surface *color_surf;         /* its cache entry (checked against color_addr before use) */
     uint32_t target_w, target_h;
     int has_color, has_zeta;
     uint32_t present_addr;
@@ -127,7 +128,7 @@ static struct {
     /* statistics */
     uint32_t draws, clears, flips, skipped, prog_errors, tex_errors, state_errors;
     uint32_t surf_created, surf_dropped, tex_uploads, rtt_binds, feedback_copies, ff_draws;
-    uint32_t present_other, tex_hash_skipped, trace_n;
+    uint32_t present_other, tex_hash_skipped, trace_n, mip_builds;
     uint32_t epoch; /* increases every frame (scan_written_pages) */
     /* Incremental state: the last thing applied to GL. */
     int state_valid, target_valid;
@@ -143,6 +144,12 @@ static struct {
 } R;
 
 static int ring_init(void); /* vertex streaming ring, see upload_vertices */
+
+/* The current color target was drawn into: its mipmaps (bind_textures) must be rebuilt. */
+static void color_drawn(void) {
+    if (R.color_surf && R.has_color && R.color_surf->used && R.color_surf->addr == R.color_addr)
+        R.color_surf->mips_stale = 1;
+}
 
 /* A native size or coordinate in the scaled surfaces. A span [a, b) maps to [px(a), px(b)), so
  * neighbouring scissors and viewports still meet exactly at fractional scales. */
@@ -571,6 +578,7 @@ static void create_surface_texture(rc_surface *s, uint32_t pitch, int swizzled) 
     }
     s->gl_tex = t;
     s->mem_sig = surface_sig(s);
+    s->mips_stale = 1;
     R.surf_created++;
     P.surf_new++;
 }
@@ -650,6 +658,7 @@ static int bind_target(const pgl_regs *r, int need_color, int need_zeta) {
                                z ? z->gl_tex : 0, 0);
     glDrawBuffer(c ? GL_COLOR_ATTACHMENT0 : GL_NONE);
     R.color_addr = c ? caddr : 0;
+    R.color_surf = c;
     R.zeta_addr = z ? zaddr : 0;
     R.has_color = c != NULL;
     R.has_zeta = z != NULL;
@@ -731,7 +740,7 @@ static GLuint feedback_copy(rc_surface *s) {
 }
 
 /* Texture of stage `i`: a surface (render-to-texture) or the texture cache. */
-static GLuint stage_texture(const pgl_regs *r, int i, GLenum *target, float scale[2]) {
+static GLuint stage_texture(const pgl_regs *r, int i, GLenum *target, float scale[2], rc_surface **surf) {
     uint32_t mb = 0x1B00u + 0x40u * (uint32_t)i, fmt = M(r, mb + 4), base, phys, pal = M(r, mb + 0x20);
     uint32_t pal_phys = 0;
     texconv_desc d;
@@ -745,6 +754,7 @@ static GLuint stage_texture(const pgl_regs *r, int i, GLenum *target, float scal
     uint64_t hash;
     *target = GL_TEXTURE_2D;
     scale[0] = scale[1] = 1.0f;
+    *surf = NULL;
     if (!pgraph_dma_base((fmt & 3) == 2 ? 0x188 : 0x184, &base))
         return 0;
     phys = base + M(r, mb);
@@ -776,6 +786,7 @@ static GLuint stage_texture(const pgl_regs *r, int i, GLenum *target, float scal
         }
         if (R.has_color && phys == R.color_addr)
             return feedback_copy(s);
+        *surf = s;
         return s->gl_tex;
     }
     if (derr) {
@@ -857,13 +868,15 @@ static void bind_textures(const pgl_regs *r, float tex_scale[8]) {
         uint32_t addr = M(r, mb + 0x08), filter = M(r, mb + 0x14);
         GLenum target;
         GLuint t = 0;
+        GLint minf;
+        rc_surface *surf;
         tex_scale[2 * i] = tex_scale[2 * i + 1] = 1.0f;
         ngl_glActiveTexture(GL_TEXTURE0 + (GLenum)i);
         if (!(M(r, mb + 0x0C) & 0x40000000u) || mode == 0 || mode == 4 || mode == 5) {
             glBindTexture(GL_TEXTURE_2D, 0);
             continue;
         }
-        t = stage_texture(r, i, &target, &tex_scale[2 * i]);
+        t = stage_texture(r, i, &target, &tex_scale[2 * i], &surf);
         glBindTexture(target, t);
         if (!t)
             continue;
@@ -880,7 +893,24 @@ static void bind_textures(const pgl_regs *r, float tex_scale[8]) {
             c[3] = (float)(bc >> 24) / 255.0f;
             glTexParameterfv(target, GL_TEXTURE_BORDER_COLOR, c);
         }
-        glTexParameteri(target, GL_TEXTURE_MIN_FILTER, min_filter((filter >> 16) & 0xFF));
+        minf = min_filter((filter >> 16) & 0xFF);
+        if (surf && surf->kind == RC_COLOR && minf != GL_NEAREST && minf != GL_NEAREST_MIPMAP_NEAREST) {
+            /* A rendered color surface read smaller than it was drawn (the bloom of the game
+             * shrinks the 720x480 scene to 256x256 with one bilinear tap per pixel): mipmaps,
+             * so the sample averages its whole footprint. Without them, thin bright details
+             * fell between the taps on some frames and not on others, and the game's sparse
+             * blur turned that into shimmering ghosts around the characters; much worse at an
+             * internal resolution of 2-4x, where the tap skips 7 texels instead of 3. Read at
+             * its own size the level is 0, the same picture as before. */
+            if (surf->mips_stale) {
+                glTexParameteri(target, GL_TEXTURE_MAX_LEVEL, 1000);
+                ngl_glGenerateMipmap(target);
+                surf->mips_stale = 0;
+                R.mip_builds++;
+            }
+            minf = GL_LINEAR_MIPMAP_LINEAR;
+        }
+        glTexParameteri(target, GL_TEXTURE_MIN_FILTER, minf);
         glTexParameteri(target, GL_TEXTURE_MAG_FILTER, ((filter >> 24) & 0xF) == 1 ? GL_NEAREST : GL_LINEAR);
     }
     ngl_glActiveTexture(GL_TEXTURE0);
@@ -2038,6 +2068,7 @@ void pgl_draw(const pgl_regs *r, const pgl_draw_t *d) {
         }
         ring_fence_left();
     }
+    color_drawn();
     ngl_glBindVertexArray(0);
     pf_lap(PF_DRAW, &t0);
     R.draws++;
@@ -2085,6 +2116,8 @@ void pgl_clear(const pgl_regs *r, uint32_t flags) {
     }
     if (bits)
         glClear(bits);
+    if (bits & GL_COLOR_BUFFER_BIT)
+        color_drawn();
 }
 
 /* Window rectangle with the TV's aspect, as large as the window allows (like present.c): a
@@ -2263,6 +2296,7 @@ void pgl_summary(void) {
             R.tex_errors, R.state_errors, R.present_other);
     if (g_ring.map)
         ngb_log("pgraph gl: vertex ring: %u waits for the GPU", g_ring.waits);
+    ngb_log("pgraph gl: %u mipmap builds of rendered surfaces read as textures", R.mip_builds);
     if (R.first_error[0])
         ngb_log("pgraph gl: first error: %s", R.first_error);
 }

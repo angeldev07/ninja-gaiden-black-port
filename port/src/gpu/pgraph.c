@@ -71,7 +71,8 @@ static uint32_t g_blend_enable, g_sfactor = 1, g_dfactor, g_alpha_test, g_alpha_
 static uint32_t g_alpha_ref, g_exec_mode;
 static uint32_t g_drawn_tris, g_drawn_pixels, g_skipped_draws, g_skip_pos, g_skip_target, g_skip_prim;
 static uint32_t g_present_offset, g_present_pitch, g_present_w, g_present_h;
-static LARGE_INTEGER g_pace_next, g_pace_freq;
+static uint32_t g_pace_vblank;  /* vblank count at the last present */
+static HANDLE g_vblank_evt;     /* set on every vblank (pgraph_vblank) */
 static volatile LONG g_pace_pending; /* FLIP_STALL done; pacing runs on leaving the locks */
 
 /* Asynchronous pusher (with GL): the queue is a single span [g_q_get, g_q_put) of the current
@@ -102,8 +103,19 @@ static struct {
     LONGLONG lockwait, call; /* waiting for g_pg_lock and inside pgl_call */
     long kcalls0;
     uint32_t mmio0, flips0, kicks0, tris0, words0, bulk0;
-    char last[400];
+    char last[480];
 } g_perf;
+
+/* Hitches, which the averages of a window hide: the longest time between two FLIP_STALL, how
+ * much of it was spent drawing and clearing (render thread), and the frames over 25 ms. A long
+ * frame with little drawing time was waiting on the game (loading, its CPU threads). */
+static struct {
+    LONGLONG last_flip, work0, worst, worst_work;
+    uint32_t slow;
+    /* The same for the synthetic vblank (DPC thread): the longest gap and the gaps over 20 ms. */
+    LONGLONG last_vb, vb_worst;
+    volatile LONG vb_late;
+} g_fr;
 
 static LONGLONG qpc(void) {
     LARGE_INTEGER t;
@@ -135,7 +147,8 @@ static void perf_report(void) {
                  "perf: frames %u-%u: %.1f real fps, %.2f ms/frame; per frame: pusher %.2f ms "
                  "(draw %.2f, clear %.2f), present %.2f, pacing %.2f, log %.2f ms; %.0f kernel calls, "
                  "%.0f MMIO, %.1f kicks, %.0f primitives, %.0f words (%.0f in bulk); pb_run %.2f ms, "
-                 "kick_body %.2f ms, lock %.2f ms, pgl_call %.2f ms",
+                 "kick_body %.2f ms, lock %.2f ms, pgl_call %.2f ms; worst frame %.1f ms (draws %.1f ms), "
+                 "%u over 25 ms; worst vblank gap %.1f ms, %ld over 20 ms",
                  g_perf.flips0, g_flips, n * 1000.0 / wall, wall / n,
                  ticks_ms(g_perf.kick - g_perf.present) / n,
                  ticks_ms(g_perf.draw) / n, ticks_ms(g_perf.clear) / n, ticks_ms(g_perf.present) / n,
@@ -144,7 +157,8 @@ static void perf_report(void) {
                  (double)(g_kicks - g_perf.kicks0) / n, (double)(g_begin_end - g_perf.tris0) / n,
                  (double)(g_words - g_perf.words0) / n, (double)(g_bulk_words - g_perf.bulk0) / n,
                  ticks_ms(g_perf.pb) / n, ticks_ms(g_perf.body) / n, ticks_ms(g_perf.lockwait) / n,
-                 ticks_ms(g_perf.call) / n);
+                 ticks_ms(g_perf.call) / n, ticks_ms(g_fr.worst), ticks_ms(g_fr.worst_work), g_fr.slow,
+                 ticks_ms(g_fr.vb_worst), g_fr.vb_late);
         ngb_log("    · %s", g_perf.last);
         if (g_gl) {
             char gl[700];
@@ -163,6 +177,10 @@ static void perf_report(void) {
     g_perf.bulk0 = g_bulk_words;
     g_perf.kick = g_perf.draw = g_perf.clear = g_perf.present = g_perf.pace = 0;
     g_perf.pb = g_perf.body = g_perf.lockwait = g_perf.call = 0;
+    g_fr.worst = g_fr.worst_work = g_fr.work0 = 0; /* draw and clear start again from 0 */
+    g_fr.slow = 0;
+    g_fr.vb_worst = 0;
+    InterlockedExchange(&g_fr.vb_late, 0);
 }
 
 /* Run of words of the same method (to avoid writing 10000 lines of INLINE_ARRAY). */
@@ -765,27 +783,23 @@ static void inline_push(uint32_t w) {
     g_inline[g_inline_n++] = w;
 }
 
-/* Waits for the next "vblank" (1/60 s of wall clock) to run at ~60 fps like the console. */
+/* At most one present per vblank, like FLIP_STALL on the console, which waits for the vblank
+ * after the previous flip. The vblank is the port's synthetic one (the DPC thread), the clock the
+ * game itself runs on. Before, the pacing kept its own 1/60 s schedule: two 60 Hz clocks with
+ * an arbitrary phase, so a frame that came a millisecond late for its slot waited a whole
+ * frame. 20 to 70 frames of every 300 took 33 ms followed by an instant one, even in the menus:
+ * a steady 60 fps average with a visible stutter. Without vblanks (early boot) it waits at most
+ * 20 ms. */
 static void pace(void) {
-    LARGE_INTEGER now;
-    LONGLONG t1 = qpc();
+    LONGLONG t1 = qpc(), limit;
+    LARGE_INTEGER f;
     if (g_ngb_opts.no_pacing)
         return;
-    if (!g_pace_freq.QuadPart) {
-        QueryPerformanceFrequency(&g_pace_freq);
-        QueryPerformanceCounter(&g_pace_next);
-    }
-    g_pace_next.QuadPart += g_pace_freq.QuadPart / 60;
-    QueryPerformanceCounter(&now);
-    if (now.QuadPart > g_pace_next.QuadPart + g_pace_freq.QuadPart / 10) {
-        g_pace_next = now; /* far behind: do not try to catch up */
-        return;
-    }
-    while (now.QuadPart < g_pace_next.QuadPart) {
-        LONGLONG ms = (g_pace_next.QuadPart - now.QuadPart) * 1000 / g_pace_freq.QuadPart;
-        Sleep(ms > 1 ? (DWORD)(ms - 1) : 0);
-        QueryPerformanceCounter(&now);
-    }
+    QueryPerformanceFrequency(&f);
+    limit = t1 + f.QuadPart / 50;
+    while (nv2a_vblank_count() == g_pace_vblank && qpc() < limit)
+        WaitForSingleObject(g_vblank_evt, 2);
+    g_pace_vblank = nv2a_vblank_count();
     InterlockedExchangeAdd64(&g_perf.pace, qpc() - t1);
 }
 
@@ -1223,6 +1237,26 @@ static void on_method(void *user, uint32_t sub, uint32_t method, uint32_t param,
         g_flips++;
         maybe_dump_ram();
         present_and_pace();
+        {
+            static LONGLONG over; /* 25 ms in QPC ticks */
+            LONGLONG now = qpc(), work = g_perf.draw + g_perf.clear;
+            if (!over) {
+                LARGE_INTEGER f;
+                QueryPerformanceFrequency(&f);
+                over = f.QuadPart / 40;
+            }
+            if (g_fr.last_flip) {
+                LONGLONG dt = now - g_fr.last_flip;
+                if (dt > g_fr.worst) {
+                    g_fr.worst = dt;
+                    g_fr.worst_work = work - g_fr.work0;
+                }
+                if (dt > over)
+                    g_fr.slow++;
+            }
+            g_fr.last_flip = now;
+            g_fr.work0 = work;
+        }
         if (g_flips % PERF_EVERY == 0)
             perf_report();
         if (!g_gl && (g_flips <= PNG_FIRST_FLIPS || g_flips % 100 == 0)) {
@@ -1525,6 +1559,23 @@ uint32_t pgraph_kick(uint32_t dma_instance, uint32_t get, uint32_t put) {
 }
 
 void pgraph_vblank(uint32_t count) {
+    LONGLONG now = qpc();
+    if (g_fr.last_vb) {
+        LONGLONG dt = now - g_fr.last_vb;
+        static LONGLONG over; /* 20 ms in QPC ticks */
+        if (!over) {
+            LARGE_INTEGER f;
+            QueryPerformanceFrequency(&f);
+            over = f.QuadPart / 50;
+        }
+        if (dt > g_fr.vb_worst)
+            g_fr.vb_worst = dt;
+        if (dt > over)
+            InterlockedIncrement(&g_fr.vb_late);
+    }
+    g_fr.last_vb = now;
+    if (g_vblank_evt)
+        SetEvent(g_vblank_evt);
     if (count <= 3 || count % 60 == 0) {
         EnterCriticalSection(&g_pg_lock);
         pg_printf("~~ vblank %u (frame %u)\n", count, g_frame);
@@ -1536,6 +1587,7 @@ int pgraph_init(const char *log_path) {
     char *dot;
     InitializeCriticalSection(&g_pg_lock);
     InitializeCriticalSection(&g_q_lock);
+    g_vblank_evt = CreateEventA(NULL, FALSE, FALSE, NULL);
     if (fopen_s(&g_pg, log_path, "wb") || !g_pg) {
         ngb_log("nv2a: cannot create the PGRAPH log %s", log_path);
         g_pg = NULL;
