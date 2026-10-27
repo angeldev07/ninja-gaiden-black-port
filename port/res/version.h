@@ -2,5 +2,5 @@
  * Between releases it carries the next one with -dev; a release sets it to the tag. */
 #pragma once
 
-#define NGB_VERSION_STR "0.7.0-dev"
+#define NGB_VERSION_STR "0.7.0"
 #define NGB_VERSION_NUM 0, 7, 0, 0

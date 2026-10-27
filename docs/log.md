@@ -886,3 +886,15 @@ Details in [[gpu-nv2a]].
   `game_mem` only checked the 64 MB range.
 - **Fix:** `game_mem` accepts arena addresses only below the committed top (`ngb_contig_committed`). Testbed fight
   200 s: 60 fps, 0 invalid records, 0 push buffer errors. Details in [[gpu-nv2a]].
+
+## [2026-10-26] milestone | Release v0.7.0: stability in long sessions
+- **Played:** the owner played the story mode with the build of PR #20 and reported that it ran well.
+- **Main changes since v0.6.0:**
+  - no freeze when D3D's wake-up is lost while its put is ahead of ours (the stall rescue);
+  - no render-thread crash from a stale record pointer into unallocated RAM;
+  - the NV2A register accesses of `KickOff` cost one exception (2.5-2.8 ms to about 0.1 ms per frame in fights);
+  - new `perf game` and `perf wait` log lines for frames that are late on the game's side.
+- **Known gaps, in the README:** fights with many enemies can still drop below 60 fps (the owner's 40 fps windows
+  without a load before them are still open); the game's own 30 fps hold after loads; the heat haze band; lighting
+  details, floor reflections and the sword glow.
+- `version.h` goes to `0.7.0` and then back to `0.8.0-dev`.

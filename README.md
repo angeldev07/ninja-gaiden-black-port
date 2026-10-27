@@ -61,13 +61,14 @@ Code-signing the releases, which removes most of these warnings, is planned.
 
 ## Status
 
-v0.6.0 has been played through the whole game: the story mode, from the title screen to the ending, and the mission
-mode, up to and including the last mission, "Eternal Legend". It plays well overall, with an occasional glitch.
-Known gaps:
+The whole game has been played through: the story mode, from the title screen to the ending, and the mission mode,
+up to and including the last mission, "Eternal Legend". It plays well overall, with an occasional glitch. v0.7.0
+fixes a freeze and a crash seen in long story mode sessions, and makes fights lighter on the CPU. Known gaps:
 
 - Some lighting details still differ from the console.
 - Floor reflections and the sword glow are missing.
-- Fights with many enemies on screen can still drop below 60 fps, most of all in the stage of the last missions.
+- Fights with many enemies on screen can still drop below 60 fps. For a few seconds after each stage loads, the game
+  itself holds 30 fps, as it does on the console.
 - Under the heat haze over the lava, a thin dark band can show at the right edge of the screen.
 
 The [roadmap](docs/target/roadmap.md) lists what is next, and the [development log](docs/log.md) records every step.
