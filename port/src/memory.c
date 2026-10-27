@@ -313,6 +313,12 @@ int ngb_contig_contains(const void *p) {
     return g_contig && (const uint8_t *)p >= g_contig && (const uint8_t *)p < g_contig + NGB_CONTIG_SIZE;
 }
 
+/* The arena is committed bottom-up and never decommitted, so [0, top) is committed. Any
+ * thread may read it: top only grows, and a stale value is smaller, never wrong. */
+uint32_t ngb_contig_committed(void) {
+    return *(volatile uint32_t *)&g_contig_top;
+}
+
 static int dumpable(const MEMORY_BASIC_INFORMATION *m) {
     uintptr_t at = (uintptr_t)m->BaseAddress;
     if (m->State != MEM_COMMIT || (m->Protect & (PAGE_GUARD | PAGE_NOACCESS)))

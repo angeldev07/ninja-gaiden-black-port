@@ -989,10 +989,12 @@ static uint32_t d3d_g_pdevice_va(void) {
 }
 static uint32_t g_pb_fixups;
 
-/* Accessible game memory: contiguous RAM or the XBE image. */
+/* Accessible game memory: the committed part of the contiguous RAM, or the XBE image. The
+ * pointers come from the game and can be stale (a record in the ring that the game already
+ * rewrote): one into an arena page the game never allocated crashed the render thread. */
 static void *game_mem(uint32_t va, uint32_t len) {
-    if (va >= NGB_CONTIG_BASE && va - NGB_CONTIG_BASE <= NGB_CONTIG_SIZE &&
-        len <= NGB_CONTIG_SIZE - (va - NGB_CONTIG_BASE))
+    uint32_t top = ngb_contig_committed();
+    if (va >= NGB_CONTIG_BASE && va - NGB_CONTIG_BASE < top && len <= top - (va - NGB_CONTIG_BASE))
         return (void *)(uintptr_t)va;
     if (va >= NGB_RESERVE_BASE && va < NGB_RESERVE_END && len <= NGB_RESERVE_END - va)
         return (void *)(uintptr_t)va;

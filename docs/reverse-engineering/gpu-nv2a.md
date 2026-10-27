@@ -695,6 +695,20 @@ spotlights without cone and no skinning in fixed mode.
   the demo and the testbed fight log 0 rescues.
 - The summary line counts both ("stall rescue: N kicks of D3D's put, N waits woken").
 
+## Crash after 10 minutes: a stale record pointer into unallocated RAM (`VERIFIED`)
+
+- **Symptom (owner):** the game closed after 593 s with `ACCESS_VIOLATION at 0x70276FB5: read of 0x83C310C8`
+  in `ngb-core.dll` (log `h6-20261026-195435.log`).
+- **Where:** the bytes at EIP are the loop in `d3d_fixup_late` that follows the `next` links of a record chained late
+  (`mov ecx,[ecx+4]`, at most 64 steps, compared with D3D's last record in EBX). The walk exists because a stale
+  record in the ring holds garbage. This time one of those garbage links was `0x83C310C4`: inside the 64 MB of the
+  contiguous arena, so `game_mem` accepted it, but in pages the game never allocated. The arena is only reserved
+  and is committed on each `MmAllocateContiguousMemory`, so the read faulted on the render thread.
+- **Fix (`pgraph.c`, `game_mem`):** an arena address is accepted only below the committed top
+  (`ngb_contig_committed` in `memory.c`). The arena is committed bottom-up and never decommitted, so that check is
+  exact and lock-free. Every `game_mem` reader of game pointers (fixup records, the device, the ring) gets it.
+- **Check:** the testbed fight for 200 s at 60 fps, with 10429 fixups, 0 invalid records and 0 push buffer errors.
+
 ## Next
 
 1. Go from the title screen to the main menu, and find out what the warnings and the video (audio) wait for.

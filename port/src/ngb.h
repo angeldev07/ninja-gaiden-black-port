@@ -117,6 +117,8 @@ void *ngb_contig_alloc(uint32_t size, uint32_t align, uint32_t lowest, uint32_t 
 int ngb_contig_free(void *p);
 uint32_t ngb_contig_size(const void *p);
 int ngb_contig_contains(const void *p);
+/* End of the committed part of the arena, as an offset from its base. */
+uint32_t ngb_contig_committed(void);
 size_t ngb_contig_written(uint32_t *phys, size_t cap);
 /* Bumped when the game may have made memory unreadable (MmSetAddressProtect,
  * NtFreeVirtualMemory, MmDeleteKernelStack): caches of readable pages start over (pgraph.c,

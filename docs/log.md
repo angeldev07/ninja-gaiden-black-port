@@ -878,3 +878,11 @@ Details in [[gpu-nv2a]].
 - **Fix:** `stall_rescue` on every vblank. After 100 ms of that sleep with the GPU idle, it kicks D3D's put, or sets
   the KEVENT when nothing is left to run. A temporary hack that lost 1 wake-up in 100 reproduced the owner's state 3
   times in 120 s, and the rescue recovered all of them. Normal runs log 0 rescues. Details in [[gpu-nv2a]].
+
+## [2026-10-26] fix | Crash after 10 minutes: a stale record pointer into unallocated RAM
+- **Symptom (owner):** `ACCESS_VIOLATION` in `ngb-core.dll` at 593 s, reading `0x83C310C8`.
+- **Cause (`VERIFIED` from the bytes at EIP):** `d3d_fixup_late` followed a garbage `next` link of a stale record.
+  The address was inside the contiguous arena but in pages never allocated (the arena is committed on demand), and
+  `game_mem` only checked the 64 MB range.
+- **Fix:** `game_mem` accepts arena addresses only below the committed top (`ngb_contig_committed`). Testbed fight
+  200 s: 60 fps, 0 invalid records, 0 push buffer errors. Details in [[gpu-nv2a]].
