@@ -24,7 +24,7 @@ cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\core.pdb" /c ^
   "%SRC%\kernel\stubs.c" "%SRC%\kernel\dispatch.c" "%SRC%\kernel\data.c" ^
   "%SRC%\kernel\impl_mm.c" "%SRC%\kernel\impl_rtl.c" "%SRC%\kernel\impl_ke.c" ^
   "%SRC%\kernel\impl_ps.c" "%SRC%\kernel\impl_io.c" "%SRC%\kernel\impl_misc.c" "%SRC%\kernel\hostpath.c" ^
-  "%SRC%\kernel\sha1.c" "%SRC%\kernel\eeprom.c" "%SRC%\apu\vp.c" "%SRC%\apu\mix.c" "%SRC%\apu\audio_out.c" "%SRC%\gpu\nv2a.c" "%SRC%\gpu\pgraph.c" "%SRC%\gpu\rdoc.c" "%SRC%\gpu\pushbuf.c" "%SRC%\gpu\png.c" ^
+  "%SRC%\kernel\sha1.c" "%SRC%\kernel\eeprom.c" "%SRC%\apu\vp.c" "%SRC%\apu\mix.c" "%SRC%\apu\audio_out.c" "%SRC%\gpu\nv2a.c" "%SRC%\gpu\pgraph.c" "%SRC%\gpu\rdoc.c" "%SRC%\gpu\pushbuf.c" "%SRC%\gpu\mmio_insn.c" "%SRC%\gpu\png.c" ^
   "%SRC%\gpu\nv097_names.c" "%SRC%\gpu\raster.c" "%SRC%\gpu\rcache.c" "%SRC%\gpu\pgraph_gl.c" "%SRC%\gpu\pgl_track.c" ^
   "%SRC%\gl\glbackend.c" "%SRC%\gl\glload.c" "%SRC%\gl\glstate.c" "%SRC%\gl\texconv.c" ^
   "%SRC%\shaders\vsh.c" "%SRC%\shaders\psh.c" "%SRC%\shaders\emit.c" ^
@@ -36,7 +36,7 @@ link /nologo /DLL /DEBUG /OUT:"%OUT%\ngb-core.dll" /PDB:"%OUT%\ngb-core.pdb" ^
   "%OUT%\obj\thread.obj" "%OUT%\obj\crash.obj" "%OUT%\obj\stubs.obj" "%OUT%\obj\dispatch.obj" ^
   "%OUT%\obj\data.obj" "%OUT%\obj\impl_mm.obj" "%OUT%\obj\impl_rtl.obj" "%OUT%\obj\impl_ke.obj" ^
   "%OUT%\obj\impl_ps.obj" "%OUT%\obj\impl_io.obj" "%OUT%\obj\impl_misc.obj" "%OUT%\obj\hostpath.obj" ^
-  "%OUT%\obj\sha1.obj" "%OUT%\obj\eeprom.obj" "%OUT%\obj\vp.obj" "%OUT%\obj\mix.obj" "%OUT%\obj\audio_out.obj" "%OUT%\obj\nv2a.obj" "%OUT%\obj\pgraph.obj" "%OUT%\obj\rdoc.obj" "%OUT%\obj\pushbuf.obj" "%OUT%\obj\png.obj" ^
+  "%OUT%\obj\sha1.obj" "%OUT%\obj\eeprom.obj" "%OUT%\obj\vp.obj" "%OUT%\obj\mix.obj" "%OUT%\obj\audio_out.obj" "%OUT%\obj\nv2a.obj" "%OUT%\obj\pgraph.obj" "%OUT%\obj\rdoc.obj" "%OUT%\obj\pushbuf.obj" "%OUT%\obj\mmio_insn.obj" "%OUT%\obj\png.obj" ^
   "%OUT%\obj\nv097_names.obj" "%OUT%\obj\raster.obj" "%OUT%\obj\rcache.obj" "%OUT%\obj\pgraph_gl.obj" "%OUT%\obj\pgl_track.obj" ^
   "%OUT%\obj\glbackend.obj" "%OUT%\obj\glload.obj" "%OUT%\obj\glstate.obj" "%OUT%\obj\texconv.obj" ^
   "%OUT%\obj\vsh.obj" "%OUT%\obj\psh.obj" "%OUT%\obj\emit.obj" ^
@@ -66,6 +66,9 @@ cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\libaddr_test.pdb" /Fe"%OUT%\libaddr_t
 rem 3b) Push buffer decoder test (hand-made buffers).
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\pushbuf_test.pdb" /Fe"%OUT%\pushbuf_test.exe" "%PORT%tests\pushbuf_test.c" "%SRC%\gpu\pushbuf.c" || exit /b 1
 "%OUT%\pushbuf_test.exe" || exit /b 1
+rem 3b2) Decoder of the instructions D3D uses on the NV2A registers (mmio_insn.c).
+cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\mmio_insn_test.pdb" /Fe"%OUT%\mmio_insn_test.exe" "%PORT%tests\mmio_insn_test.c" "%SRC%\gpu\mmio_insn.c" || exit /b 1
+"%OUT%\mmio_insn_test.exe" || exit /b 1
 rem 3c) Input mapping test (PC gamepad and keyboard -> XINPUT_STATE, script).
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\input_test.pdb" /Fe"%OUT%\input_test.exe" "%PORT%tests\input_test.c" "%SRC%\input\input.c" || exit /b 1
 "%OUT%\input_test.exe" || exit /b 1

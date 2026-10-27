@@ -854,3 +854,35 @@ Details in [[gpu-nv2a]].
   - a dark band at the right edge under the heat haze;
   - lighting details, floor reflections and the sword glow.
 - `version.h` goes to `0.6.0` and then back to `0.7.0-dev`.
+
+## [2026-10-26] fix | Fight drops: the game's own 30 fps hold, and MMIO in one exception
+- **Symptom (owner):** a fight with two enemies at about 40 fps in v0.6.0. In the owner's log the render thread is
+  idle and the kicks jump to about 15 per frame: the frames are late on the game's side, not the GPU's.
+- **Found (`VERIFIED` in the mission testbed with `--watch` and the new `perf game` / `perf wait` lines):** for 180
+  frames after a stage loads, the game itself waits for two vblanks per frame (about 6 s at 30 fps). The testbed's
+  slow windows are all this hold, which the console does too. The owner's windows had no load before them, so their
+  trigger is still open; the next log will tell (about 4 waits per frame on the vblank event means the hold).
+- **Fix:** the VEH emulates the `mov` and `test` forms D3D uses on the NV2A registers in one exception
+  (`mmio_insn.c`, `fast_access`). In busy fights the game thread spent 2.5-2.8 ms per frame in MMIO accesses (about
+  55 per frame from `KickOff`: the write-combine flush and PUT); now 0.13-0.15 ms. Kernel call arguments are
+  formatted only when the line is written.
+- **Tools:** the `perf game` line (CPU time of the Xbox threads, waits per frame on D3D's vblank event, MMIO time)
+  and the `perf wait` line (where the Xbox threads wait inside kernel calls, by thread, ordinal and caller).
+- Details in [[gpu-nv2a]]. 150 s PAL title demo: 8425 flips, 0 push buffer errors.
+
+## [2026-10-26] fix | Freeze after 45 minutes of story mode: the stall rescue
+- **Symptom (owner):** a freeze in Tairon after about 45 minutes; the progress since the last save was lost.
+- **Cause (`VERIFIED` with the render watchdog):** the main thread slept in `D3D_BlockOnTime` with the GPU idle and
+  no wake-up left in the ring. D3D's own put was 30 KB ahead of our PUT, so `idle_wake` (which needs them equal)
+  did not fire.
+- **Fix:** `stall_rescue` on every vblank. After 100 ms of that sleep with the GPU idle, it kicks D3D's put, or sets
+  the KEVENT when nothing is left to run. A temporary hack that lost 1 wake-up in 100 reproduced the owner's state 3
+  times in 120 s, and the rescue recovered all of them. Normal runs log 0 rescues. Details in [[gpu-nv2a]].
+
+## [2026-10-26] fix | Crash after 10 minutes: a stale record pointer into unallocated RAM
+- **Symptom (owner):** `ACCESS_VIOLATION` in `ngb-core.dll` at 593 s, reading `0x83C310C8`.
+- **Cause (`VERIFIED` from the bytes at EIP):** `d3d_fixup_late` followed a garbage `next` link of a stale record.
+  The address was inside the contiguous arena but in pages never allocated (the arena is committed on demand), and
+  `game_mem` only checked the 64 MB range.
+- **Fix:** `game_mem` accepts arena addresses only below the committed top (`ngb_contig_committed`). Testbed fight
+  200 s: 60 fps, 0 invalid records, 0 push buffer errors. Details in [[gpu-nv2a]].

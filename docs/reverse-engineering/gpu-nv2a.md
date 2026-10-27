@@ -1,6 +1,6 @@
 ---
 tags: [ngb, reverse-engineering, runtime, gpu, h7]
-updated: 2026-10-25
+updated: 2026-10-26
 status: current
 ---
 
@@ -629,6 +629,85 @@ spotlights without cone and no skinning in fixed mode.
 - **Fix:** when the queue drains (`idle_wake`) and D3D's put equals our PUT, everything D3D wrote has run and any
   spot it patched is behind the GPU, so the event is set if it is clear. The summary counts these
   ("waits woken with the GPU idle"). Six runs of the cutscene: no hang, one rescue (the run that would have hung).
+
+## Fights at 37-43 fps: the game's own 30 fps hold, and MMIO in one exception
+
+- **Symptom (owner, v0.6.0):** a fight with two enemies drops to about 40 fps. The owner's log (`perf:` lines,
+  frames 4800-5700) has the signature that matters: the render thread is idle (4 ms of draws in a 26 ms frame) and
+  the kicks jump from about 0.5 to 15 per frame. With the render thread behind, kicks merge and stay near 0.5; with
+  the render thread waiting for the game, it consumes every small kick as it arrives. So the frames are late on the
+  game's side, not the GPU's. `VERIFIED` in that log.
+- **Reproduced** with the mission perf testbed (Giants fight, `--scale auto`): windows of 37-43 fps that come back
+  every 25-30 s.
+- **Where the game thread goes (new `perf game` and `perf wait` lines):**
+  - its CPU time (`QueryThreadCycleTime`) stays at about 9 ms per frame, and its core is about 50 % busy, so it is
+    neither CPU-bound nor pre-empted;
+  - in those windows it waits in `KeWaitForSingleObject` for about 13 ms per frame, called from a game function that
+    waits twice on D3D's vblank event (dev + 0x1DBC, set by D3D's vblank DPC). That function is at PAL
+    `0x3153E0` (`INFERRED`: same code as in the test build, found with a pattern that masks addresses);
+  - the waits on the vblank event go from 2 per frame (60 fps) to about 4.4 per frame.
+- **The cause is in the game (`VERIFIED` with `--watch` in the testbed):** a counter (PAL `0x43F770`, `INFERRED` by
+  the same pattern) goes from -1 to 0 when a stage starts (PAL `0x2E2820`, called from the scene state machine). While
+  it counts up to 180 (`0xB4`), the game waits for two vblanks per frame, so 180 frames at 30 fps take about 6 s.
+  Then it goes back to -1 and to 60 fps. Every slow window of the testbed lines up with one of these counts after a
+  reload. Nothing here measures performance, so the console does the same.
+- **Not explained yet:** the owner's slow windows have no file opens before them, so they are not a stage load. They
+  have the same signature, and the new lines will show in the next log whether it is this hold (about 4 vblank waits
+  per frame) or something else.
+- **MMIO in one exception (`nv2a.c`, `fast_access`; decoder in `mmio_insn.c`):**
+  - in busy fights D3D's `KickOff` runs about 14 times per frame. Each run flushes the write-combine buffer
+    (`PFB_WBC`: read, OR, write, then a TEST loop) and writes PUT. That is about 55 trapped accesses per frame from
+    the game thread, out of about 170 in total.
+  - The single-step path costs two exceptions, a `VirtualQuery` and two `VirtualProtect` per access. The VEH now
+    decodes `mov r32,[m]`, `mov [m],r32`, `mov [m],imm32`, `test [m],imm32` and the `A1`/`A3` forms, and emulates
+    them in place.
+  - Anything else (prefixes, byte accesses, unaligned) still single-steps. `NGB_MMIO_SLOW=1` forces the old path,
+    for comparisons.
+  - A/B in the testbed: 2.5-2.8 ms per frame inside MMIO accesses before, 0.13-0.15 ms after. The game thread's CPU
+    time in busy windows drops from about 9.5 to 7.8 ms per frame. That is margin before a frame misses its vblank.
+    It does not change the 30 fps hold, which the game does on purpose.
+- **Also:** the kernel thunk no longer formats the arguments of the about 600 kernel calls per frame when the line
+  will not be written (after `--log-cap`, or with `--log-detail minimal`).
+- **Checks:** 150 s PAL title demo, 8425 flips, 0 push buffer errors, 73 programs (0 errors). `mmio_insn_test`
+  (71 checks) and the other native tests pass, and so do the 829 Python tests.
+
+## Freeze after 45 minutes of story mode: the stall rescue (`VERIFIED`)
+
+- **Symptom (owner):** the game froze in Tairon after about 45 minutes, so the progress since the last save was lost.
+  The window kept presenting the last frame.
+- **What the render watchdog showed:** the main thread asleep in `D3D_BlockOnTime` (the `KeWaitForSingleObject` on
+  the device KEVENT at dev + 0x1DCC). The queue was drained (GET == PUT == `0x02848DAC`), and fence `0x48CD4B`, the
+  last one D3D had inserted, was complete. No `NO_OPERATION(5)` patch was left in the ring, and D3D's own put
+  (`0x028505B4`) was 30 KB ahead of our PUT: commands written and not kicked yet, since D3D kicks in steps of up to
+  32 KB.
+- **Cause:** a wake-up lost the same way as in the "Eternal Legend" freeze (the pusher passes the spot before the
+  patch lands, or the patch goes where it does not run). The `idle_wake` rule only fires when D3D's put is our PUT.
+  Here it was not, so nothing woke the game.
+- **Fix (`pgraph.c`, `stall_rescue`, on every vblank):** if a thread has slept in that KEVENT for 6 vblanks
+  (100 ms) with the GPU idle:
+  - if D3D's put is ahead of our PUT (and inside its ring), the emulator writes it as PUT (`nv2a_rescue_put`), as
+    D3D's own `KickOff` would. Once that has run, `idle_wake` applies;
+  - if D3D's put is already our PUT, the KEVENT is set. Every spot D3D could have patched is behind the GPU, which
+    is `idle_wake`'s rule.
+- **Test (temporary hack, not committed):** the pusher dropped one `NO_OPERATION(5)` wake-up in 100 from vblank 2400
+  on. In 120 s of the PAL demo, 17 were lost: `idle_wake` recovered 14, and the stall rescue recovered the other 3,
+  each with D3D's put ahead of PUT, which is the owner's state. The demo kept running at 60 fps. Without the hack,
+  the demo and the testbed fight log 0 rescues.
+- The summary line counts both ("stall rescue: N kicks of D3D's put, N waits woken").
+
+## Crash after 10 minutes: a stale record pointer into unallocated RAM (`VERIFIED`)
+
+- **Symptom (owner):** the game closed after 593 s with `ACCESS_VIOLATION at 0x70276FB5: read of 0x83C310C8`
+  in `ngb-core.dll` (log `h6-20261026-195435.log`).
+- **Where:** the bytes at EIP are the loop in `d3d_fixup_late` that follows the `next` links of a record chained late
+  (`mov ecx,[ecx+4]`, at most 64 steps, compared with D3D's last record in EBX). The walk exists because a stale
+  record in the ring holds garbage. This time one of those garbage links was `0x83C310C4`: inside the 64 MB of the
+  contiguous arena, so `game_mem` accepted it, but in pages the game never allocated. The arena is only reserved
+  and is committed on each `MmAllocateContiguousMemory`, so the read faulted on the render thread.
+- **Fix (`pgraph.c`, `game_mem`):** an arena address is accepted only below the committed top
+  (`ngb_contig_committed` in `memory.c`). The arena is committed bottom-up and never decommitted, so that check is
+  exact and lock-free. Every `game_mem` reader of game pointers (fixup records, the device, the ring) gets it.
+- **Check:** the testbed fight for 200 s at 60 fps, with 10429 fixups, 0 invalid records and 0 push buffer errors.
 
 ## Next
 

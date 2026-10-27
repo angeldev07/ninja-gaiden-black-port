@@ -21,8 +21,10 @@
  * pmc.c, pbus.c, pfb.c, ptimer.c, pcrtc.c, pramdac.c, pfifo.c and user.c from xemu.
  */
 #include "nv2a.h"
+#include "mmio_insn.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "../kernel/kernel.h"
@@ -101,6 +103,12 @@ static volatile LONG g_vblanks;
 
 /* Access in progress for the thread (between the fault and the single step). */
 static __declspec(thread) uint32_t t_off, t_page, t_is_write, t_pending;
+static __declspec(thread) LONGLONG t_fault_qpc; /* when the fault of the pending access began */
+/* QPC ticks inside MMIO accesses (from the fault to the end of the access, without the
+ * exception dispatch itself) and the accesses served by fast_access, for the perf lines. */
+static volatile LONGLONG g_mmio_ticks;
+static volatile LONG g_mmio_fast;
+static int g_slow_only; /* NGB_MMIO_SLOW=1: every access single-steps (to compare) */
 
 static int block_index(uint32_t off) {
     int i;
@@ -242,6 +250,58 @@ static int commit_page(uint32_t page) {
     return VirtualAlloc((void *)(uintptr_t)page, 0x1000, MEM_COMMIT, PAGE_NOACCESS) != NULL;
 }
 
+/* Fast path: the instructions D3D uses on the registers every frame (mmio_insn.h) are
+ * emulated right here, with one exception and no system call. The single-step path opens the
+ * page, runs the instruction and closes it again: two exceptions, a VirtualQuery and two
+ * VirtualProtect. D3D's KickOff flushes the write-combine buffer (PFB_WBC: read, write, poll)
+ * and writes PUT about 14 times per frame in busy fights, and at about 60 us per access that
+ * took 2-5 ms of the game thread's frame. Anything else takes the single-step path. */
+static uint32_t *ctx_reg(CONTEXT *ctx, int r) {
+    switch (r & 7) {
+    case 0: return (uint32_t *)&ctx->Eax;
+    case 1: return (uint32_t *)&ctx->Ecx;
+    case 2: return (uint32_t *)&ctx->Edx;
+    case 3: return (uint32_t *)&ctx->Ebx;
+    case 4: return (uint32_t *)&ctx->Esp;
+    case 5: return (uint32_t *)&ctx->Ebp;
+    case 6: return (uint32_t *)&ctx->Esi;
+    default: return (uint32_t *)&ctx->Edi;
+    }
+}
+
+static LONG fast_access(uint32_t off, CONTEXT *ctx) {
+    mmio_insn_t in;
+    uint32_t len, value, b;
+    int write;
+    if ((off & 3) || (len = mmio_insn_decode((const uint8_t *)(uintptr_t)ctx->Eip, &in)) == 0)
+        return EXCEPTION_CONTINUE_SEARCH;
+    write = in.op == MMIO_STORE_REG || in.op == MMIO_STORE_IMM;
+    ngb_kernel_enter(ngb_thread_current());
+    EnterCriticalSection(&g_lock);
+    b = (uint32_t)block_index(off);
+    if (write) {
+        value = in.op == MMIO_STORE_REG ? *ctx_reg(ctx, in.reg) : in.imm;
+        g_writes[b < NBLOCKS ? b : NBLOCKS]++;
+        note_first_access(off, 1, value, ctx->Eip);
+        g_regs[off / 4] = nv2a_write(off, value);
+    } else {
+        value = nv2a_value(off);
+        g_reads[b < NBLOCKS ? b : NBLOCKS]++;
+        note_first_access(off, 0, value, ctx->Eip);
+        g_regs[off / 4] = value;
+        if (in.op == MMIO_LOAD)
+            *ctx_reg(ctx, in.reg) = value;
+        else
+            ctx->EFlags = mmio_insn_test_flags(ctx->EFlags, value & in.imm);
+    }
+    ctx->Eip += len;
+    LeaveCriticalSection(&g_lock);
+    ngb_kernel_leave(ngb_thread_current());
+    if (write) /* PUT or pusher re-enable: a FLIP may be pending */
+        pgraph_pace();
+    return EXCEPTION_CONTINUE_EXECUTION;
+}
+
 LONG nv2a_mmio_fault(EXCEPTION_RECORD *rec, CONTEXT *ctx) {
     uint32_t addr = (uint32_t)rec->ExceptionInformation[1], off = addr - NV2A_MMIO_BASE;
     uint32_t page = addr & ~0xFFFu, aligned = off & ~3u, value;
@@ -251,7 +311,24 @@ LONG nv2a_mmio_fault(EXCEPTION_RECORD *rec, CONTEXT *ctx) {
         return EXCEPTION_CONTINUE_SEARCH;
     if (g_pramin_mapped && off >= NV2A_PRAMIN && off - NV2A_PRAMIN < NV2A_PRAMIN_SIZE)
         return EXCEPTION_CONTINUE_SEARCH; /* PRAMIN is RAM: a fault there is a real bug */
+    if (!g_slow_only) {
+        LARGE_INTEGER a, z;
+        LONG r;
+        QueryPerformanceCounter(&a);
+        r = fast_access(off, ctx);
+        if (r == EXCEPTION_CONTINUE_EXECUTION) {
+            QueryPerformanceCounter(&z);
+            InterlockedExchangeAdd64(&g_mmio_ticks, z.QuadPart - a.QuadPart);
+            InterlockedIncrement(&g_mmio_fast);
+            return r;
+        }
+    }
     ngb_kernel_enter(ngb_thread_current()); /* until the single step: lock held */
+    {
+        LARGE_INTEGER a;
+        QueryPerformanceCounter(&a);
+        t_fault_qpc = a.QuadPart;
+    }
     EnterCriticalSection(&g_lock);
     if (!commit_page(page) ||
         !VirtualProtect((void *)(uintptr_t)page, 0x1000, PAGE_READWRITE, &old)) {
@@ -292,6 +369,11 @@ int nv2a_single_step(CONTEXT *ctx) {
     *reg = val;
     VirtualProtect((void *)(uintptr_t)t_page, 0x1000, PAGE_NOACCESS, &old);
     t_pending = 0;
+    {
+        LARGE_INTEGER z;
+        QueryPerformanceCounter(&z);
+        InterlockedExchangeAdd64(&g_mmio_ticks, z.QuadPart - t_fault_qpc);
+    }
     LeaveCriticalSection(&g_lock);
     ngb_kernel_leave(ngb_thread_current());
     if (t_is_write) /* PUT or pusher re-enable: a FLIP may be pending */
@@ -306,6 +388,21 @@ uint32_t nv2a_mmio_count(void) {
         n += g_reads[i] + g_writes[i];
     return n;
 }
+
+/* PUT written by the emulator instead of D3D (stall rescue in pgraph.c), with the same effect as
+ * D3D's own write. */
+void nv2a_rescue_put(uint32_t put) {
+    EnterCriticalSection(&g_lock);
+    if (!g_fifo_off && put != g_put) {
+        g_put = put;
+        g_get = pgraph_kick(g_regs[PFIFO_CACHE1_DMA_INSTANCE / 4] & 0xFFFFu, g_get, g_put);
+    }
+    LeaveCriticalSection(&g_lock);
+}
+
+LONG nv2a_mmio_fast(void) { return g_mmio_fast; }
+
+LONGLONG nv2a_mmio_ticks(void) { return InterlockedCompareExchange64(&g_mmio_ticks, 0, 0); }
 
 uint32_t nv2a_reg_read(uint32_t off) {
     return off < NV2A_MMIO_SIZE ? nv2a_value(off & ~3u) : 0;
@@ -392,6 +489,10 @@ int nv2a_init(const char *pgraph_log_path) {
     ngb_log("nv2a: MMIO at 0x%08X modeled; PRAMIN %s (physical RAMIN 0x%08X at %p)",
             NV2A_MMIO_BASE, g_pramin_mapped ? "RAM alias" : "via the VEH (no alias)",
             NV2A_RAMIN_PHYS, (void *)g_ramin);
+    {
+        const char *slow = getenv("NGB_MMIO_SLOW");
+        g_slow_only = slow && *slow == '1';
+    }
     g_ready = 1;
     return pgraph_init(pgraph_log_path);
 }

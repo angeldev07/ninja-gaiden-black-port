@@ -338,15 +338,44 @@ static uint64_t KeResetEvent(uint32_t *args) {
     return RET32(old);
 }
 
+/* Waits on one event, counted for the perf lines (ngb_ke_waits_take): D3D's vblank event. */
+static volatile uint32_t g_counted_event;
+static volatile LONG g_counted_waits;
+
+long ngb_ke_waits_take(uint32_t event) {
+    if (event != g_counted_event) {
+        g_counted_event = event;
+        InterlockedExchange(&g_counted_waits, 0);
+        return 0;
+    }
+    return InterlockedExchange(&g_counted_waits, 0);
+}
+
+/* Threads blocked on one KEVENT right now (D3D_BlockOnTime's), for the stall rescue in
+ * pgraph.c. */
+static volatile uint32_t g_waited_event;
+static volatile LONG g_waiters;
+
+void ngb_ke_watch_waiters(uint32_t event) { g_waited_event = event; }
+long ngb_ke_waiters(void) { return g_waiters; }
+
 /* 159 NTSTATUS KeWaitForSingleObject(PVOID Object, KWAIT_REASON, KPROCESSOR_MODE,
  *                                    BOOLEAN Alertable, PLARGE_INTEGER Timeout) */
 static uint64_t KeWaitForSingleObject(uint32_t *args) {
     HANDLE h = obj_handle(ARG(0));
     DWORD r;
+    int watched;
     if (!h)
         return RET32(STATUS_INVALID_HANDLE);
     sync_event(ARG(0), h);
+    if (ARG(0) == g_counted_event)
+        InterlockedIncrement(&g_counted_waits);
+    watched = ARG(0) == g_waited_event;
+    if (watched)
+        InterlockedIncrement(&g_waiters);
     r = WaitForSingleObjectEx(h, timeout_ms((const int64_t *)PTR(4)), (ARG(3) & 0xFF) != 0);
+    if (watched)
+        InterlockedDecrement(&g_waiters);
     if (r == WAIT_OBJECT_0)
         after_wait(ARG(0));
     return RET32(wait_status(r, WAIT_OBJECT_0));

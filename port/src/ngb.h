@@ -99,6 +99,14 @@ void ngb_prof_report(void);
  * kernel calls so far. */
 long long ngb_log_ticks(void);
 long ngb_kernel_calls(void);
+/* Time the Xbox threads spent inside kernel calls since the previous call: the total and the
+ * five costliest thread, ordinal and caller triples, in ms per frame over `frames` frames. */
+void ngb_kernel_time_take(char *out, size_t outlen, uint32_t frames);
+/* Waits on the KEVENT at `event` since the previous call with the same event. */
+long ngb_ke_waits_take(uint32_t event);
+/* Threads blocked right now in KeWaitForSingleObject on the KEVENT given to ngb_ke_watch_waiters. */
+void ngb_ke_watch_waiters(uint32_t event);
+long ngb_ke_waiters(void);
 
 /* memory.c */
 int ngb_memory_init(void);
@@ -109,6 +117,8 @@ void *ngb_contig_alloc(uint32_t size, uint32_t align, uint32_t lowest, uint32_t 
 int ngb_contig_free(void *p);
 uint32_t ngb_contig_size(const void *p);
 int ngb_contig_contains(const void *p);
+/* End of the committed part of the arena, as an offset from its base. */
+uint32_t ngb_contig_committed(void);
 size_t ngb_contig_written(uint32_t *phys, size_t cap);
 /* Bumped when the game may have made memory unreadable (MmSetAddressProtect,
  * NtFreeVirtualMemory, MmDeleteKernelStack): caches of readable pages start over (pgraph.c,
@@ -150,6 +160,7 @@ typedef struct ngb_thread {
     int32_t base_prio; /* KeSetBasePriorityThread increment (0 = normal) */
     void *xbox_stack;
     uint32_t saved_stack_base, saved_stack_limit, saved_seh;
+    uint64_t cpu_mark; /* QueryThreadCycleTime at the last ngb_thread_cpu_take */
 } ngb_thread_t;
 
 ngb_thread_t *ngb_thread_spawn(uint32_t start_routine, uint32_t start_context,
@@ -172,6 +183,9 @@ ngb_thread_t *ngb_thread_from_handle(HANDLE h);
 __declspec(noreturn) void ngb_thread_exit(uint32_t status);
 int ngb_thread_alive_count(void);
 void ngb_thread_dump_all(void); /* EIP of every live Xbox thread, to the log */
+/* CPU time of the Xbox threads since the previous call, for the perf lines: the total and the
+ * three busiest threads, in ms per frame over `frames` frames. Returns the total. */
+double ngb_thread_cpu_take(char *out, size_t outlen, uint32_t frames);
 uint32_t ngb_tls_total_size(const xbe_t *xbe);
 
 /* crash.c */

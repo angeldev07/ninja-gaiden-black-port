@@ -376,6 +376,53 @@ int ngb_thread_alive_count(void) {
     return n;
 }
 
+double ngb_thread_cpu_take(char *out, size_t outlen, uint32_t frames) {
+    static uint64_t tsc0;
+    static LONGLONG qpc0;
+    struct { int index; double ms; } top[3] = {{0, 0}};
+    uint64_t tsc = __rdtsc();
+    LARGE_INTEGER q, f;
+    ngb_thread_t *t;
+    double total = 0, cycles_per_ms;
+    int i, j;
+    /* QueryThreadCycleTime counts TSC cycles; GetThreadTimes is sampled on the clock tick and
+     * misses threads that block often. The TSC rate comes from the window itself. */
+    QueryPerformanceCounter(&q);
+    QueryPerformanceFrequency(&f);
+    cycles_per_ms = qpc0 && q.QuadPart > qpc0
+                        ? (double)(tsc - tsc0) * (double)f.QuadPart / (double)(q.QuadPart - qpc0) / 1000.0
+                        : 0;
+    tsc0 = tsc;
+    qpc0 = q.QuadPart;
+    if (out && outlen)
+        out[0] = 0;
+    if (g_tls == TLS_OUT_OF_INDEXES)
+        return 0;
+    EnterCriticalSection(&g_threads_lock);
+    for (t = g_threads; t; t = t->next) {
+        ULONG64 now;
+        double ms;
+        if (t->exited || !QueryThreadCycleTime(t->handle, &now))
+            continue;
+        ms = cycles_per_ms > 0 && frames ? (double)(now - t->cpu_mark) / cycles_per_ms / frames : 0;
+        t->cpu_mark = now;
+        total += ms;
+        for (i = 0; i < 3 && top[i].ms >= ms; i++)
+            ;
+        if (i < 3) {
+            for (j = 2; j > i; j--)
+                top[j] = top[j - 1];
+            top[i].index = t->index;
+            top[i].ms = ms;
+        }
+    }
+    LeaveCriticalSection(&g_threads_lock);
+    if (out && outlen && frames)
+        snprintf(out, outlen, "Xbox threads %.2f ms of CPU per frame (T%d %.2f, T%d %.2f, T%d %.2f)", total,
+                 top[0].index, top[0].ms, top[1].index, top[1].ms, top[2].index, top[2].ms);
+    return total;
+}
+
 static void log_inflight(const ngb_thread_t *t) {
     if (t->inflight_ordinal) {
         const ngb_kexport_t *e = ngb_kexport(t->inflight_ordinal);
