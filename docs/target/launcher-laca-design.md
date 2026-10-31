@@ -7,7 +7,7 @@ status: draft
 # Launcher redesign: "lacquer and ink" (design spec)
 
 > PROPOSAL. This page describes the launcher we are building for v0.8.0, not the current one.
-> The current launcher is described in [[log]] (entries "Launcher v2" and later).
+> The current launcher is described in [[log]] (entries "Launcher v2" and later). Plan: [[launcher-laca-plan]].
 
 ## Why
 
@@ -142,7 +142,8 @@ From the art survey of 2026-10-31 (exports under `%NGB_DATA%\extracted\launcher-
 | `port/launcher/art.c`, `art.h` | Rewritten: backdrop composition only (hero source, darkening, bars). The chrome wordmark, red mist, speed lines and shuriken are removed. |
 | `port/launcher/ink.c`, `ink.h` | New: procedural landscape into a `canvas_t`. |
 | `port/launcher/kamon.c`, `kamon.h` | New: the crest at any size. |
-| `port/launcher/gameart.c`, `gameart.h` | New: AFS + XPR0 readers, decode via `texconv.c`, grading, worker thread. |
+| `port/launcher/gamedata.c`, `gamedata.h` | New: AFS, XPR0 and sprite-table readers (pure, unit-tested). |
+| `port/launcher/gameart.c`, `gameart.h` | New: decode via `texconv.c`, grading, worker thread. |
 | `port/launcher/ui.c`, `ui.h` | New palette and fonts (embedded Josefin, Yu Mincho), tracked text, square button, switch, top tabs; old chrome helpers removed. |
 | `port/launcher/launcher.c` | Top bar instead of sidebar; Play page and inner pages re-laid out; `game_art` setting. |
 | `port/launcher/strings.h` | New and changed strings (English and Spanish). |
