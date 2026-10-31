@@ -1,26 +1,25 @@
 /*
- * ach.h: port-side achievements (feasibility spike, see docs/target/achievements-brief.md).
+ * ach.h: port-side achievements (docs/target/achievements-design.md).
  *
- * The game is never patched: the main thread reads a few of the game's variables every 5 ms,
- * turns their changes into events ("chapter N complete") and records each unlock in
- * %NGB_DATA%\achievements.json, which the launcher reads. The presenter draws a toast
- * (gfx/toast.c) over the frame.
+ * The game is never patched: the loader's main thread reads a few of the game's variables every
+ * 5 ms (ngb_ach_tick), turns their changes into unlocks, records them in
+ * %NGB_DATA%\achievements.json (store.c) and queues a toast (gfx/toast.c). The variables are found
+ * in the game's own code at start (sig.c), so the same detectors work on PAL, NTSC-U and modified
+ * builds of either; when the code is not there, the detectors stay off and the log says so.
  *
- * The variables are found in the game's own code at start (ach.c, find_vars), so the same
- * detectors work on PAL, NTSC-U and modified builds of either; when the code is not there,
- * the detectors stay off and the log says so.
- *
- *   ngb_ach_init(&xbe, demo);   // after the XBE is mapped
- *   ngb_ach_tick();             // main thread, every few ms
+ *   ngb_ach_init(&xbe);       // after the XBE is mapped
+ *   ngb_ach_tick();           // main thread, every few ms
+ *   ngb_ach_screenshot();     // F12 saved a shot
+ *   ngb_ach_shutdown();       // from ngb_stop: saves the play time
  */
 #ifndef NGB_ACH_H
 #define NGB_ACH_H
 
 #include "../xbe.h"
 
-/* `demo` = 1 (--ach-demo): a test unlock 5 s after start, to check the toast and the file
- * without playing. */
-void ngb_ach_init(const xbe_t *xbe, int demo);
+void ngb_ach_init(const xbe_t *xbe);
 void ngb_ach_tick(void);
+void ngb_ach_screenshot(void);
+void ngb_ach_shutdown(void);
 
 #endif

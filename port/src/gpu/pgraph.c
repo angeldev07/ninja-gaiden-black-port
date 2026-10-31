@@ -18,6 +18,7 @@
 
 #include "../ngb.h"
 #include "../libaddr.h"
+#include "../ach/ach.h"
 #include "nv2a.h"
 #include "../gfx/present.h"
 #include "png.h"
@@ -888,9 +889,11 @@ static void present_and_pace(void) {
             snprintf(path, sizeof path, "%s-shot-%05u.png", g_png_base, g_flips);
         else
             user = gfx_take_shot_request(path, sizeof path); /* F12 */
-        if (!pgl_flip(&g_r, shot || user ? path : NULL))
+        if (!pgl_flip(&g_r, shot || user ? path : NULL)) {
             ngb_log("    · gfx: capture of frame %u -> %s (%.1f fps, GL)", g_flips, path, gfx_fps());
-        else if (user)
+            if (user)
+                ngb_ach_screenshot();
+        } else if (user)
             ngb_log("    · gfx: could not save the screenshot %s", path);
     } else if (g_present_offset && g_ngb_opts.window) {
         fb = nv2a_phys(g_present_offset, g_present_pitch * g_present_h);

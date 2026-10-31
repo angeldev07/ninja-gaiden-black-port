@@ -1,35 +1,49 @@
 /*
  * toast.c: see toast.h.
  *
- * toast_show() only copies the strings and bumps a generation counter. The render thread sees
- * the new generation in toast_draw(), draws the panel with GDI into a DIB at the size it will
- * have on screen (so the text is sharp at any window size), uploads it as a texture and
- * composites it with a textured quad. One toast at a time: a newer one replaces the one shown.
+ * toast_show() only queues the strings. The render thread takes the next one in toast_draw(),
+ * draws it with GDI into a DIB at the size it will have on screen (so the text is sharp at any
+ * window size), fixes the alpha by geometry (GDI leaves it at 0), uploads it as a texture and
+ * composites it with one textured quad. Fonts: Josefin Sans and the Shippori Mincho subset,
+ * embedded in ngb-core.dll (port/res/ngb.rc) and loaded privately.
  */
 #include "toast.h"
 
+#include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "../ngb.h"
+#include <mmsystem.h> /* PlaySound; windows.h left it out (WIN32_LEAN_AND_MEAN) */
+
 #include "../gl/glbackend.h"
 #include "../gl/glload.h"
 
-#define TOAST_IN 0.35    /* seconds to slide in */
-#define TOAST_OUT 0.40   /* seconds to fade out */
-#define TOAST_TOTAL 5.0  /* seconds on screen, fade included */
+#define QUEUE 8
+#define T_IN 0.35  /* seconds to rise and fade in */
+#define T_OUT 0.40 /* seconds to fade out */
+
+/* Lacquer and ink (docs/target/launcher-laca-design.md). */
+#define C_BG RGB(19, 17, 15)
+#define C_CREAM RGB(239, 231, 214)
+#define C_VERM RGB(210, 63, 47)
 
 static SRWLOCK g_lock = SRWLOCK_INIT;
-static wchar_t g_title[64], g_text[128];
-static volatile LONG g_gen;
+static struct {
+    wchar_t label[96], name[128];
+    int rare;
+} g_queue[QUEUE];
+static int g_head, g_count;
 
 /* Render thread only. */
-static LONG g_drawn_gen;
-static int g_active, g_tex_w, g_tex_h;
-static GLuint g_tex, g_prog, g_vao;
+static struct {
+    int active, rare, w, h, unit; /* texture size and the 480-line unit it was built for */
+    LARGE_INTEGER t0;
+    GLuint tex;
+} g_cur;
+static GLuint g_prog, g_vao;
 static GLint g_u_rect, g_u_alpha;
-static LARGE_INTEGER g_t0;
 
 static const char k_vs[] =
     "#version 400\n"
@@ -51,97 +65,237 @@ static const char k_fs[] =
     "    color = vec4(t.rgb, t.a * alpha);\n"
     "}\n";
 
-void toast_show(const wchar_t *title, const wchar_t *text) {
+void toast_show(const wchar_t *label, const wchar_t *name, int rare) {
     AcquireSRWLockExclusive(&g_lock);
-    wcsncpy_s(g_title, sizeof g_title / sizeof g_title[0], title, _TRUNCATE);
-    wcsncpy_s(g_text, sizeof g_text / sizeof g_text[0], text, _TRUNCATE);
+    if (g_count < QUEUE) {
+        int i = (g_head + g_count) % QUEUE;
+        wcsncpy_s(g_queue[i].label, sizeof g_queue[i].label / sizeof g_queue[i].label[0], label, _TRUNCATE);
+        wcsncpy_s(g_queue[i].name, sizeof g_queue[i].name / sizeof g_queue[i].name[0], name, _TRUNCATE);
+        g_queue[i].rare = rare;
+        g_count++;
+    }
     ReleaseSRWLockExclusive(&g_lock);
-    InterlockedIncrement(&g_gen);
 }
 
-static HFONT font(int px, int weight) {
-    return CreateFontW(-px, 0, 0, 0, weight, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                       CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+/* ---- sound: a low drum hit, made here (no game audio) ---- */
+
+static uint8_t g_wav[44 + 2 * 22050 * 45 / 100];
+
+static void put32(uint8_t *p, uint32_t v) { memcpy(p, &v, 4); }
+static void put16(uint8_t *p, uint16_t v) { memcpy(p, &v, 2); }
+
+/* 0.45 s at 22,050 Hz: a sine falling from 150 to 55 Hz under a fast decay, a soft skin click and
+ * a quieter second partial. */
+static void make_drum(void) {
+    uint32_t n = 22050 * 45 / 100, i, seed = 0x2545F491u;
+    double phase = 0, phase2 = 0;
+    memcpy(g_wav, "RIFF", 4);
+    put32(g_wav + 4, 36 + n * 2);
+    memcpy(g_wav + 8, "WAVEfmt ", 8);
+    put32(g_wav + 16, 16);
+    put16(g_wav + 20, 1);
+    put16(g_wav + 22, 1);
+    put32(g_wav + 24, 22050);
+    put32(g_wav + 28, 22050 * 2);
+    put16(g_wav + 32, 2);
+    put16(g_wav + 34, 16);
+    memcpy(g_wav + 36, "data", 4);
+    put32(g_wav + 40, n * 2);
+    for (i = 0; i < n; i++) {
+        double t = i / 22050.0, f = 55.0 + 95.0 * exp(-t * 18.0), v;
+        phase += 2.0 * 3.14159265358979 * f / 22050.0;
+        phase2 += 2.0 * 3.14159265358979 * f * 1.6 / 22050.0;
+        seed = seed * 1664525u + 1013904223u;
+        v = 0.62 * sin(phase) * exp(-t * 7.5) + 0.12 * sin(phase2) * exp(-t * 16.0) +
+            0.10 * ((double)(seed >> 9) / 4194304.0 - 1.0) * exp(-t * 140.0);
+        if (t < 0.002)
+            v *= t / 0.002;
+        put16(g_wav + 44 + i * 2, (uint16_t)(int16_t)(v * 26000.0));
+    }
 }
 
-/* Dark lacquer panel, a vermilion bar on the left, a small label and the achievement name. */
-static int build_texture(int h) {
-    wchar_t title[64], text[128];
+static void play_drum(void) {
+    if (g_ngb_opts.mute)
+        return;
+    if (!g_wav[0])
+        make_drum();
+    PlaySoundW((LPCWSTR)(const void *)g_wav, NULL, SND_MEMORY | SND_ASYNC | SND_NODEFAULT);
+}
+
+/* ---- drawing ---- */
+
+static void load_fonts(void) {
+    static int done;
+    HMODULE self = NULL;
+    int id;
+    if (done)
+        return;
+    done = 1;
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                       (LPCWSTR)(void *)load_fonts, &self);
+    for (id = 102; id <= 104; id++) { /* Josefin Light, Josefin SemiBold, Shippori kanji */
+        HRSRC r = FindResourceW(self, MAKEINTRESOURCEW(id), MAKEINTRESOURCEW(10) /* RT_RCDATA */);
+        HGLOBAL g = r ? LoadResource(self, r) : NULL;
+        void *p = g ? LockResource(g) : NULL;
+        DWORD n = 0;
+        if (!p || !AddFontMemResourceEx(p, SizeofResource(self, r), NULL, &n))
+            ngb_log("toast: embedded font %d not loaded; using a system font", id);
+    }
+}
+
+static HFONT font(int px, int weight, const wchar_t *face) {
+    return CreateFontW(-px, 0, 0, 0, weight, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
+                       ANTIALIASED_QUALITY, DEFAULT_PITCH, face);
+}
+
+static int text_w(HDC dc, const wchar_t *s, int track) {
+    SIZE e;
+    int w = 0;
+    for (; *s; s++)
+        if (GetTextExtentPoint32W(dc, s, 1, &e))
+            w += e.cx + track;
+    return w;
+}
+
+/* GDI has no letter-spacing: tracked text glyph by glyph, as the launcher does. */
+static void text_tracked(HDC dc, int x, int y, const wchar_t *s, int track) {
+    SIZE e;
+    for (; *s; s++) {
+        TextOutW(dc, x, y, s, 1);
+        if (GetTextExtentPoint32W(dc, s, 1, &e))
+            x += e.cx + track;
+    }
+}
+
+static int inside(int x, int y, const RECT *r) { return x >= r->left && x < r->right && y >= r->top && y < r->bottom; }
+
+/* Distance from (x, y) to the rectangle, 0 inside. */
+static double dist(int x, int y, const RECT *r) {
+    double dx = x < r->left ? r->left - x : x >= r->right ? x - r->right + 1 : 0;
+    double dy = y < r->top ? r->top - y : y >= r->bottom ? y - r->bottom + 1 : 0;
+    return sqrt(dx * dx + dy * dy);
+}
+
+static int build(int unit, const wchar_t *label, const wchar_t *name, int rare) {
+    int h = (42 * unit + 8) / 16, m = h / 2, pad = h / 3, ruler = unit >= 32 ? unit / 16 : 1, track, w, panel_w, i, x;
+    int lab_px = h * 19 / 100 > 7 ? h * 19 / 100 : 7;
     BITMAPINFO bi;
-    void *bits = NULL;
+    uint8_t *px = NULL;
     HDC dc;
     HBITMAP bmp;
     HGDIOBJ old;
-    HFONT small, big;
-    HBRUSH bg, bar;
-    RECT all, r;
-    SIZE ext;
-    int w, i;
-    AcquireSRWLockShared(&g_lock);
-    memcpy(title, g_title, sizeof title);
-    memcpy(text, g_text, sizeof text);
-    ReleaseSRWLockShared(&g_lock);
+    HFONT f_lab, f_name, f_seal;
+    HBRUSH b;
+    RECT panel, seal, strip, r;
+    load_fonts();
     if ((dc = CreateCompatibleDC(NULL)) == NULL)
         return -1;
-    small = font(h * 22 / 100, FW_NORMAL);
-    big = font(h * 32 / 100, FW_SEMIBOLD);
-    old = SelectObject(dc, big); /* the panel grows with the name, between 3 and 8 heights */
-    if (!GetTextExtentPoint32W(dc, text, (int)wcslen(text), &ext))
-        ext.cx = h * 4;
-    w = ext.cx + h / 4 + h / 3;
-    w = w < h * 3 ? h * 3 : w > h * 8 ? h * 8 : w;
+    /* Static weights other than regular and bold register under their legacy family names. */
+    f_lab = font(lab_px, FW_SEMIBOLD, L"Josefin Sans SemiBold");
+    f_name = font(h * 34 / 100, FW_LIGHT, L"Josefin Sans Light");
+    f_seal = font(h * 50 / 100, FW_SEMIBOLD, L"Shippori Mincho B1 SemiBold");
+    track = lab_px * 26 / 100;
+    old = SelectObject(dc, f_lab);
+    panel_w = text_w(dc, label, track);
+    SelectObject(dc, f_name);
+    i = text_w(dc, name, 0);
+    panel_w = h + pad + (i > panel_w ? i : panel_w) + pad * 4 / 3;
+    w = panel_w + 2 * m; /* the margin holds the shadow and the rare rule */
     SelectObject(dc, old);
     memset(&bi, 0, sizeof bi);
     bi.bmiHeader.biSize = sizeof bi.bmiHeader;
     bi.bmiHeader.biWidth = w;
-    bi.bmiHeader.biHeight = -h; /* top-down */
+    bi.bmiHeader.biHeight = -(h + 2 * m); /* top-down */
     bi.bmiHeader.biPlanes = 1;
     bi.bmiHeader.biBitCount = 32;
     bi.bmiHeader.biCompression = BI_RGB;
-    bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
-    if (!bmp || !bits) {
-        DeleteObject(small);
-        DeleteObject(big);
+    bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, (void **)&px, NULL, 0);
+    if (!bmp || !px) {
+        DeleteObject(f_lab);
+        DeleteObject(f_name);
+        DeleteObject(f_seal);
         DeleteDC(dc);
         return -1;
     }
     old = SelectObject(dc, bmp);
-    SetRect(&all, 0, 0, w, h);
-    bg = CreateSolidBrush(RGB(22, 17, 19));
-    FillRect(dc, &all, bg);
-    SetRect(&r, 0, 0, h / 12 + 1, h);
-    bar = CreateSolidBrush(RGB(214, 58, 38));
-    FillRect(dc, &r, bar);
+    SetRect(&panel, m, m, m + panel_w, m + h);
+    SetRect(&seal, m, m, m + h, m + h);
+    SetRect(&strip, m + h, m, m + panel_w, m + h);
+    b = CreateSolidBrush(C_BG);
+    FillRect(dc, &strip, b);
+    DeleteObject(b);
+    b = CreateSolidBrush(C_VERM);
+    FillRect(dc, &seal, b);
+    SetRect(&r, strip.left, strip.top, strip.right, strip.top + ruler);
+    FillRect(dc, &r, b);
+    DeleteObject(b);
     SetBkMode(dc, TRANSPARENT);
-    SelectObject(dc, small);
-    SetTextColor(dc, RGB(200, 184, 160));
-    SetRect(&r, h / 4, h * 14 / 100, w - h / 6, h / 2);
-    DrawTextW(dc, title, -1, &r, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
-    SelectObject(dc, big);
-    SetTextColor(dc, RGB(244, 238, 228));
-    SetRect(&r, h / 4, h * 42 / 100, w - h / 6, h);
-    DrawTextW(dc, text, -1, &r, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+    if (rare) { /* an ensō: an open brush circle */
+        HPEN pen = CreatePen(PS_SOLID, h / 11 > 1 ? h / 11 : 1, C_CREAM);
+        HGDIOBJ op = SelectObject(dc, pen), ob = SelectObject(dc, GetStockObject(NULL_BRUSH));
+        int c = m + h / 2, rr = h * 30 / 100;
+        /* counter-clockwise from about 70 degrees round to about 15: an opening at the upper right */
+        Arc(dc, c - rr, c - rr, c + rr, c + rr, c + rr / 3, c - rr, c + rr, c - rr / 4);
+        SelectObject(dc, op);
+        SelectObject(dc, ob);
+        DeleteObject(pen);
+    } else {
+        SelectObject(dc, f_seal);
+        SetTextColor(dc, C_CREAM);
+        DrawTextW(dc, L"誉", -1, &seal, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    }
+    x = strip.left + pad;
+    SelectObject(dc, f_lab);
+    SetTextColor(dc, RGB(150, 144, 133)); /* cream at 56 % over the lacquer */
+    text_tracked(dc, x, m + h * 17 / 100, label, track);
+    SelectObject(dc, f_name);
+    SetTextColor(dc, C_CREAM);
+    TextOutW(dc, x, m + h * 42 / 100, name, (int)wcslen(name));
     GdiFlush();
-    for (i = 0; i < w * h; i++) /* GDI leaves alpha at 0: the panel is opaque, the fade is a uniform */
-        ((uint8_t *)bits)[i * 4 + 3] = 0xF0;
-    if (!g_tex)
-        glGenTextures(1, &g_tex);
-    glBindTexture(GL_TEXTURE_2D, g_tex);
+    for (i = 0; i < w * (h + 2 * m); i++) {
+        int y = i / w, xx = i % w;
+        uint8_t *p = px + i * 4;
+        RECT outer;
+        if (inside(xx, y, &seal))
+            p[3] = 255;
+        else if (inside(xx, y, &panel))
+            p[3] = 240;
+        else {
+            /* the soft shadow, lowered a little */
+            double d = dist(xx, y - h / 10, &panel), a = d < m ? 0.42 * (1.0 - d / m) * (1.0 - d / m) : 0.0;
+            p[0] = p[1] = p[2] = 0;
+            p[3] = (uint8_t)(a * 255.0);
+            if (rare) { /* the second vermilion rule, 3 units outside the panel */
+                int g = 3 * unit / 16 + 1;
+                SetRect(&outer, panel.left - g - ruler, panel.top - g - ruler, panel.right + g + ruler,
+                        panel.bottom + g + ruler);
+                if (inside(xx, y, &outer) && dist(xx, y, &panel) > g) {
+                    p[0] = 47; /* C_VERM as B, G, R */
+                    p[1] = 63;
+                    p[2] = 210;
+                    p[3] = 255;
+                }
+            }
+        }
+    }
+    if (!g_cur.tex)
+        glGenTextures(1, &g_cur.tex);
+    glBindTexture(GL_TEXTURE_2D, g_cur.tex);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_BGRA, GL_UNSIGNED_BYTE, bits);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h + 2 * m, 0, GL_BGRA, GL_UNSIGNED_BYTE, px);
     SelectObject(dc, old);
-    DeleteObject(small);
-    DeleteObject(big);
-    DeleteObject(bg);
-    DeleteObject(bar);
+    DeleteObject(f_lab);
+    DeleteObject(f_name);
+    DeleteObject(f_seal);
     DeleteObject(bmp);
     DeleteDC(dc);
-    g_tex_w = w;
-    g_tex_h = h;
+    g_cur.w = w;
+    g_cur.h = h + 2 * m;
+    g_cur.unit = unit;
     return 0;
 }
 
@@ -161,41 +315,61 @@ static int ensure_program(void) {
     return 0;
 }
 
+/* Takes the next queued toast, if any, and builds its texture for a picture `gh` pixels high. */
+static void next_toast(int gh) {
+    wchar_t label[96], name[128];
+    int rare = 0, have = 0;
+    AcquireSRWLockExclusive(&g_lock);
+    if (g_count) {
+        memcpy(label, g_queue[g_head].label, sizeof label);
+        memcpy(name, g_queue[g_head].name, sizeof name);
+        rare = g_queue[g_head].rare;
+        g_head = (g_head + 1) % QUEUE;
+        g_count--;
+        have = 1;
+    }
+    ReleaseSRWLockExclusive(&g_lock);
+    /* unit: 1/16 of a pixel per 480-line pixel, so 42 px at 480 lines and 94 at 1080 */
+    if (!have || ensure_program() || build(gh * 16 / 480 > 8 ? gh * 16 / 480 : 8, label, name, rare))
+        return;
+    g_cur.rare = rare;
+    g_cur.active = 1;
+    QueryPerformanceCounter(&g_cur.t0);
+    play_drum();
+}
+
 void toast_draw(int cw, int ch, const int r[4]) {
-    LONG gen = g_gen;
     LARGE_INTEGER now, freq;
-    double t, u, slide, alpha;
-    int gw = r[2] - r[0], gh = r[3] - r[1], margin, x0, top;
+    double t, total, u, alpha;
+    int gw = r[2] - r[0], gh = r[3] - r[1], x0, top, m;
     float rect[4];
     GLfloat a;
     if (cw <= 0 || ch <= 0 || gw <= 0 || gh <= 0)
         return;
-    if (gen != g_drawn_gen) {
-        g_drawn_gen = gen;
-        g_active = !ensure_program() && !build_texture(gh * 13 / 100 > 24 ? gh * 13 / 100 : 24);
-        QueryPerformanceCounter(&g_t0);
-    }
-    if (!g_active)
+    if (!g_cur.active)
+        next_toast(gh);
+    if (!g_cur.active)
         return;
     QueryPerformanceCounter(&now);
     QueryPerformanceFrequency(&freq);
-    t = (double)(now.QuadPart - g_t0.QuadPart) / (double)freq.QuadPart;
-    if (t >= TOAST_TOTAL) {
-        g_active = 0;
+    t = (double)(now.QuadPart - g_cur.t0.QuadPart) / (double)freq.QuadPart;
+    total = g_cur.rare ? 7.0 : 5.0;
+    if (t >= total) {
+        g_cur.active = 0;
         return;
     }
-    u = t < TOAST_IN ? t / TOAST_IN : 1.0;
-    slide = 1.0 - (1.0 - u) * (1.0 - u) * (1.0 - u); /* ease out */
-    alpha = t > TOAST_TOTAL - TOAST_OUT ? (TOAST_TOTAL - t) / TOAST_OUT : 1.0;
-    margin = gh * 6 / 100;
-    x0 = (r[0] + r[2]) / 2 - g_tex_w / 2;
-    top = r[3] - margin - g_tex_h + (int)((1.0 - slide) * (double)(g_tex_h + margin));
+    u = t < T_IN ? t / T_IN : 1.0;
+    u = 1.0 - (1.0 - u) * (1.0 - u) * (1.0 - u); /* ease out */
+    alpha = t < T_IN ? u : t > total - T_OUT ? (total - t) / T_OUT : 1.0;
+    m = ((42 * g_cur.unit + 8) / 16) / 2; /* the texture's margin around the panel */
+    x0 = (r[0] + r[2]) / 2 - g_cur.w / 2;
+    top = r[3] - 22 * g_cur.unit / 16 - (g_cur.h - m) + (int)((1.0 - u) * 12.0 * g_cur.unit / 16.0);
     rect[0] = 2.0f * (float)x0 / (float)cw - 1.0f;
-    rect[1] = 1.0f - 2.0f * (float)(top + g_tex_h) / (float)ch;
-    rect[2] = 2.0f * (float)(x0 + g_tex_w) / (float)cw - 1.0f;
+    rect[1] = 1.0f - 2.0f * (float)(top + g_cur.h) / (float)ch;
+    rect[2] = 2.0f * (float)(x0 + g_cur.w) / (float)cw - 1.0f;
     rect[3] = 1.0f - 2.0f * (float)top / (float)ch;
     glViewport(0, 0, cw, ch);
-    glEnable(GL_SCISSOR_TEST); /* it slides in from the bottom edge of the picture, not of the window */
+    glEnable(GL_SCISSOR_TEST); /* never outside the game picture */
     glScissor(r[0], ch - r[3], gw, gh);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_STENCIL_TEST);
@@ -208,7 +382,7 @@ void toast_draw(int cw, int ch, const int r[4]) {
     a = (GLfloat)alpha;
     ngl_glUniform1fv(g_u_alpha, 1, &a);
     ngl_glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, g_tex);
+    glBindTexture(GL_TEXTURE_2D, g_cur.tex);
     ngl_glBindVertexArray(g_vao);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     ngl_glBindVertexArray(0);

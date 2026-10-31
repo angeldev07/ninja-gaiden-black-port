@@ -17,6 +17,13 @@
 
 1 ICON "ngb.ico"
 
+#ifdef NGB_RC_CORE
+/* The achievement toast's fonts (gfx/toast.c), SIL OFL 1.1, see fonts/README.md. */
+102 RCDATA "fonts/JosefinSans-Light.ttf"
+103 RCDATA "fonts/JosefinSans-SemiBold.ttf"
+104 RCDATA "fonts/ShipporiMinchoB1-SemiBold-kanji.ttf"
+#endif
+
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION NGB_VERSION_NUM
 PRODUCTVERSION NGB_VERSION_NUM

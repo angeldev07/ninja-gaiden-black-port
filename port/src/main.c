@@ -69,7 +69,9 @@ static void usage(void) {
             "  --input-script  gamepad presses, e.g. \"t=3s:START,t=5s:A@500ms\"\n"
             "                  (\"t=2400p:A@10p\": in gamepad reads, not in ms)\n"
             "  --no-host-input neither PC gamepad nor keyboard: only the script\n"
-            "  --ach-demo   a test achievement 5 s after start (toast and achievements.json)\n"
+            "  --ach-demo   both achievement toasts 5 s after start (nothing is recorded)\n"
+            "  --no-ach-toast  achievements still unlock and record, without the toast in the game\n"
+            "  --lang en|es language of the achievement toasts (en)\n"
             "  --profile    sample the render and audio threads; hot functions in <log>-profile.txt\n");
 }
 
@@ -232,6 +234,10 @@ static int parse_args(void) {
             g_ngb_opts.input_script = _strdup(argv[++i]);
         else if (!strcmp(a, "--ach-demo"))
             g_ngb_opts.ach_demo = 1;
+        else if (!strcmp(a, "--no-ach-toast"))
+            g_ngb_opts.ach_toast_off = 1;
+        else if (!strcmp(a, "--lang") && more)
+            g_ngb_opts.lang = !strcmp(argv[++i], "es");
         else if (!strcmp(a, "--no-host-input"))
             g_ngb_opts.no_host_input = 1;
         else if (!strcmp(a, "--watch") && more) {
@@ -423,7 +429,7 @@ __declspec(dllexport) int __cdecl ngb_main(void) {
         nv2a_init(pg);
     }
     ngb_memory_patch_irql(&g_ngb_xbe);
-    ngb_ach_init(&g_ngb_xbe, g_ngb_opts.ach_demo);
+    ngb_ach_init(&g_ngb_xbe);
     if (ngb_memory_patch_thunk(&g_ngb_xbe))
         ngb_stop(NGB_EXIT_USAGE, "the thunk imports unknown ordinals");
     /* H8: the gamepad, through XAPI HLE (USB has no devices). Before the first thread. */
