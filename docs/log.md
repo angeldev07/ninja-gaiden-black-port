@@ -994,3 +994,25 @@ Details in [[gpu-nv2a]].
 - **Known gaps, in the README:** the previous ones plus the occasional freeze the owner still sees, next on the list
   (general guards on the CPU/GPU waits).
 - `version.h` goes to `0.8.0` and then to `0.9.0-dev`.
+
+## [2026-10-31] query | Occasional freezes: what the logs can and cannot show (paused)
+- **Asked:** the owner still sees the game stop now and then and has to force it closed.
+- **Found in the owner's runs** (variant data folder, sessions of 26-30 Oct): the stall rescue of 26 Oct is saving
+  real sessions (for example 2 kicks of D3D's put in the 27 Oct 17:27 session). Only one kept session ends without
+  its `==== END` summary, the mark of a forced close: 28 Oct 20:32, one minute long. Its last seconds still present
+  frames, at 30 fps (a load); the main thread re-enters the same `KeWaitForSingleObject` (caller `0x0030E171`) and a
+  thread polls `KfRaiseIrql`/`KfLowerIrql` from DSOUND (`0x0037A70E`). Consistent with "waiting for something",
+  `UNVERIFIED`: the owner may have closed it.
+- **Why the logs miss it:** the render watchdog only fires when flips stop; a freeze in a load or in game logic keeps
+  presenting. A forced close writes nothing, the default short log keeps little, and `runs` keeps 10 sessions.
+- **Proposed, not started:** a state report on forced close (each guest thread's wait and object, the last calls of
+  each thread from an always-on ring, pusher/D3D, APU/DSOUND, pending file reads, a shot); a progress watchdog for
+  the main thread; F9 for a manual report; the launcher offering the report after a forced end. The owner put it
+  on hold for achievements.
+
+## [2026-10-31] decision | Achievements: the owner's list and the approach
+- The owner's list (story per difficulty and per chapter, Master Ninja rank per chapter and difficulty, "Eternal
+  Legend", the stadium challenge, "The True Ultimate Master Ninja", counters per weapon, Izuna Drop and ninpo) and
+  the decisions are in [[achievements-brief]].
+- **Toast in the game without patching it:** the port's presenter draws it over the frame, like the Steam overlay;
+  the launcher gets an Achievements page. Work starts in a fresh session with the feasibility spike of the brief.
