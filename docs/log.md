@@ -1044,3 +1044,11 @@ Details in [[gpu-nv2a]].
 - Owner's verdict on the placeholder toast: "muy fea y es invasiva", fine for the spike. The design must make it
   smaller and less intrusive.
 - The results screen's strings show no rank titles besides the difficulty names; asked the owner what the "rank" was.
+
+## [2026-10-31] ingest | Achievements: the end-of-chapter rank, read from the game's own formula
+- The owner showed the rank card ("MASTER NINJA", a picture) and dumped RAM on it. Diffing the dumps led to the run's
+  karma (`0x005B4780`) and the karma at the last chapter end (`0x005B4784`); `FUN_002ed790` computes the rank from
+  their difference and a per-chapter `{max, min}` table in a game data file. Replaying the formula on the dumps gives
+  rank 0 for karma 405,327 and 415,007 (Master Ninja from 260,000 in chapter 1), as on screen. Details in
+  [[game-state]].
+- So the owner's "Master Ninja rank per chapter" achievements need only RAM reads.

@@ -44,16 +44,46 @@ Ghidra (`H5Refs.java`, `H5Decomp.java` in `NGB_DATA\ghidra\scripts`) and checked
     unlocks more (table `0x00448B6D`).
   All `INFERRED` from the decompilation; not yet watched live.
 
-## Not found yet
+## Karma and the end-of-chapter rank
 
-- **Karma:** the load screen shows 5,685,887 for the "CHAPTER 10" save, but neither the u32, u64, f32 nor the text is
-  in RAM. It may be computed from parts.
-- **End-of-chapter results:** the message table of that screen (entries `{u32 id, 6 language pointers}` from
-  `0x0044D8A8`, English last) holds "Karma", "Combos", "Kill", "Time", "Chapter", the five difficulty names, "PHASE %d
-  COMPLETED" and "Total Karma:". No rank titles appear besides the difficulty names (`VERIFIED`, the table), so a
-  per-chapter "rank" is most likely the difficulty label (`INFERRED`, to confirm with the owner). The owner's three
-  F10 dumps around the end of chapter 1 (frames 12813, 13173, 13491) carry no screenshot, so their values are not
-  matched yet.
+| Address (PAL) | Type | What | Confidence |
+| --- | --- | --- | --- |
+| `0x005B4780` | u32 | Karma of the whole run so far. | `VERIFIED`: 405,327 and 415,007 at the end of chapter 1 in two runs |
+| `0x005B4784` | u32 | Karma at the last chapter end; `FUN_002ed790` updates it. | `VERIFIED` (copied when the rank shows) |
+| `0x005B4788` | u32 | Play time (the save name formats it, `FUN_001dab20` → `FUN_0022cc20`). | `INFERRED` |
+| `0x00E12EC4` | ptr | A game data file in RAM that holds the rank thresholds. | `VERIFIED` |
+
+All of them are 0 after `FUN_002e3580` (new game). The first three are in the save block, so their offsets from the
+saved chapter hold in every release (karma = saved chapter − 0x1F7); the data pointer is the chapter − 0x210 in PAL
+and in the modified NTSC-U build.
+
+**The rank** (the "MASTER NINJA" card after the chapter results; a picture, not text) is not stored: `FUN_002ed790`
+computes and returns it, `VERIFIED` against the owner's screen:
+
+- chapter karma = `[0x005B4780] − [0x005B4784]`, then `[0x005B4784] = [0x005B4780]`;
+- `{max, min}` = the u32 pair at `table + chapter*8`, where `table = base + [[base + 4] + 0x18 + base]` and
+  `base = [0x00E12EC4]`; chapter ≥ 16 uses the pair at `+0x80` (the whole game: the final rank, and the total is
+  kept in `0x005B4798`);
+- `d = (max − min) / 3`; rank 4 below `min`, 3 below `min + d`, 2 below `min + 2d`, 1 below `max`, **0 (Master Ninja)
+  from `max` up**;
+- on Ninja Dog difficulty the result maps through `{2, 3, 3, 4, 4}`: rank 0 or 1 is out of reach.
+
+Thresholds read from the owner's dumps (same in both runs):
+
+| Chapter | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | Game |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Master Ninja from | 260,000 | 280,000 | 360,000 | 366,667 | 380,000 | 463,333 | 423,333 | 410,000 | 643,333 | 860,000 | 330,000 | 923,333 | 480,000 | 426,667 | 973,333 | 393,333 | 7,973,333 |
+| Rank 4 below | 120,000 | 110,000 | 170,000 | 170,000 | 180,000 | 250,000 | 240,000 | 200,000 | 450,000 | 650,000 | 150,000 | 700,000 | 320,000 | 220,000 | 820,000 | 200,000 | 4,950,000 |
+
+The names of ranks 1 to 4 are pictures too and not read yet (the owner remembers "Ninja Dog" as the lowest).
+
+**Detector:** poll `[0x005B4784]`; when it changes during story mode with the chapter below 16, the chapter karma is
+the difference and the rank follows from the table: RAM only, no hook.
+
+## Not yet read
+
+- The kill count, essence and ninpo of the results screen ("Clear Time", "Kill", "Essence", "Ninpo", "Karma"; drawn
+  as pictures).
 
 ## Other releases
 
