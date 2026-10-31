@@ -38,3 +38,5 @@ void music_start(const wchar_t *game_dir); /* loads and starts silent, then fade
 void music_fade_to(float volume, int ms);  /* 0..1 */
 void music_stop(void);                     /* stops and frees */
 int music_playing(void);
+/* Buffers handed to waveOut since the last music_start (diagnostics and tests). */
+unsigned music_buffers_written(void);

@@ -60,7 +60,8 @@ int adx_parse(const uint8_t *p, size_t n, adx_info_t *h) {
     cutoff = be16(p + 0x10);
     h->version = p[0x12];
     if (h->channels < 1 || h->channels > 8 || h->rate <= 0 || h->rate > 192000 || h->version < 3 ||
-        h->version > 5 || cutoff * 2u >= (uint32_t)h->rate)
+        h->version > 5 || cutoff * 2u >= (uint32_t)h->rate || h->samples == 0 ||
+        data + (size_t)FRAME * (size_t)h->channels > n) /* at least one complete frame */
         return 0;
     h->data_offset = data;
     room = data - 6;
@@ -129,6 +130,7 @@ typedef struct player {
 } player_t;
 
 static player_t *g_p;
+static volatile LONG g_written;
 
 static DWORD WINAPI player_thread(LPVOID arg) {
     player_t *pl = (player_t *)arg;
@@ -172,8 +174,9 @@ static DWORD WINAPI player_thread(LPVOID arg) {
             goto out;
         hdr[i].lpData = (LPSTR)buf[i];
         hdr[i].dwBufferLength = (DWORD)(sizeof(int16_t) * BUF_SAMPLES * pl->h.channels);
-        hdr[i].dwFlags = WHDR_DONE; /* free to fill */
-        waveOutPrepareHeader(wo, &hdr[i], sizeof hdr[i]);
+        if (waveOutPrepareHeader(wo, &hdr[i], sizeof hdr[i]) != MMSYSERR_NOERROR)
+            goto out;
+        hdr[i].dwFlags |= WHDR_DONE; /* free to fill: preparing clears the other flags */
     }
     while (!pl->quit) {
         int filled = 0;
@@ -207,7 +210,7 @@ static DWORD WINAPI player_thread(LPVOID arg) {
                         st = loop_st;
                         frm = loop_frame;
                         if (adx_decode(&pl->h, pl->data, pl->len, frm, 1, frame, &st) != 1)
-                            break;
+                            goto out; /* nothing decodable: stop rather than play garbage */
                         frm++;
                         fpos = have_loop_st ? (int)(pl->h.loop_start % SPF) : 0;
                     }
@@ -227,6 +230,7 @@ static DWORD WINAPI player_thread(LPVOID arg) {
             }
             hdr[i].dwFlags &= ~WHDR_DONE;
             waveOutWrite(wo, &hdr[i], sizeof hdr[i]);
+            InterlockedIncrement(&g_written);
             filled = 1;
         }
         EnterCriticalSection(&pl->lock);
@@ -272,6 +276,7 @@ void music_stop(void) {
 void music_start(const wchar_t *game_dir) {
     player_t *pl;
     music_stop();
+    InterlockedExchange(&g_written, 0);
     pl = (player_t *)calloc(1, sizeof *pl);
     if (!pl)
         return;
@@ -302,3 +307,5 @@ void music_fade_to(float volume, int ms) {
 }
 
 int music_playing(void) { return g_p != NULL; }
+
+unsigned music_buffers_written(void) { return (unsigned)g_written; }

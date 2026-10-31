@@ -6,6 +6,10 @@
  *   PYTHONPATH=src python -c "from ngb_tools.audio import adx; ..."  (see docs/log.md 2026-10-31)
  * No game data.
  */
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <mmsystem.h>
+
 #include <stdio.h>
 #include <string.h>
 
@@ -32,6 +36,31 @@ static const int16_t PCM[] = {
     -90,  -106, -114, -115, -107, -90,  -65,  -31,  -20,  -26,  -43,  -67,  -94,  -122, -148, -170,
     -195, -214, -244, -258, -291, -300, -337, -340, -379, -375, -417, -407, -451, -434, -481, -459,
     -381, -380, -328, -340, -307, -326, -306, -327, -317, -338, -336, -356, -361, -378, -388, -401};
+
+static void put32(uint8_t *p, uint32_t v) { memcpy(p, &v, 4); }
+
+/* A one-entry AFS holding ADX as "bgm_title.adx", in a fresh temp folder; returns the folder. */
+static void make_bgm_afs(wchar_t *dir) {
+    static uint8_t afs[0x2000];
+    wchar_t path[MAX_PATH];
+    FILE *f;
+    memset(afs, 0, sizeof afs);
+    memcpy(afs, "AFS\0", 4);
+    put32(afs + 4, 1);
+    put32(afs + 8, 0x800);
+    put32(afs + 12, (uint32_t)sizeof ADX);
+    put32(afs + 16, 0x1000);
+    put32(afs + 20, 0x30);
+    memcpy(afs + 0x800, ADX, sizeof ADX);
+    memcpy(afs + 0x1000, "bgm_title.adx", 13);
+    GetTempPathW(MAX_PATH, dir);
+    wcscat(dir, L"ngb_music_test");
+    CreateDirectoryW(dir, NULL);
+    _snwprintf(path, MAX_PATH, L"%ls\\bgm.afs", dir);
+    f = _wfopen(path, L"wb");
+    fwrite(afs, 1, 0x1030, f);
+    fclose(f);
+}
 
 int main(void) {
     adx_info_t h;
@@ -70,6 +99,26 @@ int main(void) {
     memcpy(bad, ADX, sizeof ADX);
     bad[0x03] = 0xF0; /* data offset past the buffer */
     CHECK(!adx_parse(bad, sizeof bad, &h));
+
+    memcpy(bad, ADX, sizeof ADX);
+    bad[0x0C] = bad[0x0D] = bad[0x0E] = bad[0x0F] = 0; /* no samples */
+    CHECK(!adx_parse(bad, sizeof bad, &h));
+    CHECK(!adx_parse(ADX, 0x38 + 10, &h)); /* header only, no complete frame */
+
+    /* The player really hands buffers to waveOut (skipped on machines without an output). */
+    if (waveOutGetNumDevs() > 0) {
+        wchar_t dir[MAX_PATH];
+        int i;
+        make_bgm_afs(dir);
+        music_start(dir);
+        music_fade_to(0.0f, 1); /* silent: this is a test */
+        for (i = 0; i < 100 && music_buffers_written() == 0; i++)
+            Sleep(10);
+        CHECK(music_buffers_written() > 0);
+        music_stop();
+    } else {
+        printf("music_test: no audio output, player check skipped\n");
+    }
 
     printf("music_test: %s\n", g_fail ? "FAILED" : "ok");
     return g_fail ? 1 : 0;
