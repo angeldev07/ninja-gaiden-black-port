@@ -756,3 +756,124 @@ void ui_chevron(int x, int y) {
     capsule((float)x, (float)y, (float)x + 6, (float)y + 6, 2.0f, C_DIM);
     capsule((float)x + 6, (float)y + 6, (float)x + 12, (float)y, 2.0f, C_DIM);
 }
+
+/* ------------------------------------------------------------ lacquer widgets ---- */
+
+#define A_SEP 26    /* cream at 10 % */
+#define A_FRAME 72  /* cream at 28 %: inner frame of the primary button */
+#define A_OUTLINE 82 /* cream at 32 %: outline of the secondary button */
+
+static void upper(const wchar_t *s, wchar_t *out, int n) {
+    wcsncpy(out, s, (size_t)n - 1);
+    out[n - 1] = 0;
+    CharUpperBuffW(out, (DWORD)wcslen(out));
+}
+
+void ui_hair(int x, int y, int w) { fill_rect_a(x, y, w, 1, C_CREAM, A_SEP); }
+void ui_vhair(int x, int y, int h) { fill_rect_a(x, y, 1, h, C_CREAM, A_SEP); }
+
+static void frame_a(int x, int y, int w, int h, rgb_t c, int a) {
+    fill_rect_a(x, y, w, 1, c, a);
+    fill_rect_a(x, y + h - 1, w, 1, c, a);
+    fill_rect_a(x, y + 1, 1, h - 2, c, a);
+    fill_rect_a(x + w - 1, y + 1, 1, h - 2, c, a);
+}
+
+int ui_fit_tracked(int font, float em, const wchar_t *s, int max_w, float *em_out) {
+    float e = em;
+    while (tracked_w(font, e, s) > max_w && e > 0.08f)
+        e -= 0.02f;
+    if (e < 0.08f)
+        e = 0.08f;
+    *em_out = e;
+    return tracked_w(font, e, s) <= max_w;
+}
+
+void ui_label(int x, int y, const wchar_t *s, rgb_t col) {
+    wchar_t u[160];
+    upper(s, u, 160);
+    txt_tracked(F_LABEL, col, x, y, 14, 0.26f, u);
+}
+
+int ui_tab(int id, int x, int y, int h, const wchar_t *label, int active) {
+    wchar_t u[64];
+    int w;
+    upper(label, u, 64);
+    w = tracked_w(F_TAB, 0.24f, u);
+    txt_tracked(F_TAB, active ? C_CREAM : hot(id) ? C_MUTED : C_DIMC, x, y, h, 0.24f, u);
+    if (active)
+        fill_rect(x, y + h - 1, w, 1, C_VERM);
+    add_hit(x - 8, y, w + 16, h, id);
+    return w;
+}
+
+static void centred_label(int font, float em, rgb_t col, int x, int y, int w, int h, const wchar_t *u,
+                          const wchar_t *kanji) {
+    int kw = kanji && kanji[0] && ui_has_kanji() ? text_w(F_KANJI, kanji) + 18 : 0;
+    float e;
+    int lw, tx;
+    if (!ui_fit_tracked(font, em, u, w - 32 - kw, &e) && font == F_BTN) {
+        font = F_TAB; /* still too long: the smaller face */
+        ui_fit_tracked(font, em, u, w - 32 - kw, &e);
+    }
+    lw = tracked_w(font, e, u);
+    tx = x + (w - lw - kw) / 2;
+    txt_tracked(font, col, tx, y, h, e, u);
+    if (kw)
+        txt(F_KANJI, lerp_rgb(col, C_VERM, 90), tx + lw + 18, y, kw, h, DT_SINGLELINE | DT_VCENTER, kanji);
+}
+
+void ui_primary(int id, int x, int y, int w, int h, const wchar_t *label, const wchar_t *kanji,
+                int enabled) {
+    wchar_t u[64];
+    rgb_t fill = !enabled ? 0x3a2320 : pressed(id) ? C_VERM_DOWN : hot(id) ? C_VERM_HOT : C_VERM;
+    upper(label, u, 64);
+    fill_rect(x, y, w, h, fill);
+    frame_a(x + 4, y + 4, w - 8, h - 8, 0xfbf4e8, enabled ? A_FRAME : 30);
+    centred_label(F_BTN, 0.52f, enabled ? 0xfbf4e8 : C_DIMC, x, y, w, h, u, kanji);
+    if (enabled)
+        add_hit(x, y, w, h, id);
+}
+
+void ui_secondary(int id, int x, int y, int w, int h, const wchar_t *label, int enabled) {
+    wchar_t u[64];
+    upper(label, u, 64);
+    if (enabled && hot(id))
+        fill_rect_a(x, y, w, h, C_CREAM, 10);
+    frame_a(x, y, w, h, C_CREAM, !enabled ? 30 : hot(id) ? 150 : A_OUTLINE);
+    centred_label(F_TAB, 0.3f, enabled ? C_CREAM : C_DIMC, x, y, w, h, u, NULL);
+    if (enabled)
+        add_hit(x, y, w, h, id);
+}
+
+int ui_link(int id, int x, int y, const wchar_t *label, int enabled) {
+    wchar_t u[64];
+    int w;
+    upper(label, u, 64);
+    w = tracked_w(F_LABEL, 0.22f, u);
+    txt_tracked(F_LABEL, !enabled ? C_DIMC : hot(id) ? C_VERM_HOT : C_VERM, x, y, 16, 0.22f, u);
+    if (enabled && hot(id))
+        fill_rect(x, y + 14, w, 1, C_VERM_HOT);
+    if (enabled)
+        add_hit(x - 4, y - 4, w + 8, 24, id);
+    return w;
+}
+
+void ui_switch(int id, int x, int y, int on, int enabled) {
+    rgb_t edge = !enabled ? C_SEP : on ? C_VERM : hot(id) ? C_MUTED : 0x4a4640;
+    frame_a(x, y, 44, 22, edge, 255);
+    fill_rect(on ? x + 26 : x + 4, y + 4, 14, 14, !enabled ? C_SEP : on ? C_VERM : C_DIMC);
+    if (enabled)
+        add_hit(x - 4, y - 4, 52, 30, id);
+}
+
+void ui_rule_progress(int x, int y, int w, int permille) {
+    int fw = w * (permille < 0 ? 0 : permille > 1000 ? 1000 : permille) / 1000;
+    fill_rect_a(x, y, w, 2, C_CREAM, A_SEP);
+    fill_rect(x, y, fw, 2, C_VERM);
+}
+
+void ui_caret(int x, int y, rgb_t col) {
+    capsule((float)x, (float)y, (float)x + 4, (float)y + 4, 1.4f, col);
+    capsule((float)x + 4, (float)y + 4, (float)x + 8, (float)y, 1.4f, col);
+}

@@ -126,3 +126,26 @@ void ui_plate(int id, int x, int y, int w, int h, const wchar_t *label, int enab
 void ui_progress(int x, int y, int w, int h, int permille, int active);
 void ui_checkbox(int id, int x, int y, int on);
 void ui_chevron(int x, int y);
+
+/* Lacquer widgets (docs/target/launcher-laca-design.md). Square, flat, one accent. */
+void ui_hair(int x, int y, int w);  /* 1 px horizontal hairline, cream at 10 % */
+void ui_vhair(int x, int y, int h); /* vertical hairline */
+/* Tracked uppercase micro label (Josefin 600, 0.26 em). */
+void ui_label(int x, int y, const wchar_t *s, rgb_t col);
+/* Lowers the tracking of `s` (down to 0.08 em) until it fits max_w; 0 if it still does not. */
+int ui_fit_tracked(int font, float em, const wchar_t *s, int max_w, float *em_out);
+/* Top-bar tab: uppercase, tracked; a 1 px vermilion rule under the active one. Returns its width. */
+int ui_tab(int id, int x, int y, int h, const wchar_t *label, int active);
+/* Primary action: vermilion plate with a 1 px inner frame, tracked label and an optional kanji. */
+void ui_primary(int id, int x, int y, int w, int h, const wchar_t *label, const wchar_t *kanji,
+                int enabled);
+/* Secondary action: a 1 px cream outline. */
+void ui_secondary(int id, int x, int y, int w, int h, const wchar_t *label, int enabled);
+/* Vermilion text link (micro label). Returns its width. */
+int ui_link(int id, int x, int y, const wchar_t *label, int enabled);
+/* Square 44 x 22 switch. */
+void ui_switch(int id, int x, int y, int on, int enabled);
+/* 2 px progress rule. */
+void ui_rule_progress(int x, int y, int w, int permille);
+/* Small down caret (8 x 4) for drop-downs. */
+void ui_caret(int x, int y, rgb_t col);

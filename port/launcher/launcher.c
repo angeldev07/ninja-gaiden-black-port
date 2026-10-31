@@ -39,6 +39,7 @@
 #include "update.h"
 #include "strings.h"
 #include "ui.h"
+#include "kamon.h"
 #include "version.h"
 
 /* ------------------------------------------------------------------ constants ---- */
@@ -165,7 +166,7 @@ static wchar_t g_shot_path[MAX_PATH];
 static int g_shot_delay = 0;
 static int g_shot_after_import; /* with --iso: take the shot when the import ends */
 static int g_import_seen;
-static int g_demo; /* 1 progress, 2 error */
+static int g_demo; /* 1 progress, 2 error, 3 widgets */
 
 static const wchar_t *tr(int id) { return k_str[id][g_lang]; }
 
@@ -1652,7 +1653,50 @@ static void paint_footer(void) {
     (void)x;
 }
 
+/* --demo widgets: every lacquer widget and state on one screen, for review. */
+static void paint_widgets_demo(void) {
+    int x = 60, y = 40, i;
+    fill_rect(0, 0, LOGICAL_W, LOGICAL_H, C_BG);
+    kamon_draw(80, 70, 14, C_VERM);
+    txt_tracked(F_TAB, C_CREAM, 104, 56, 28, 0.34f, L"NINJA GAIDEN");
+    for (i = 0; i < 4; i++)
+        ui_tab(900 + i, 300 + i * 110, 42, 56, i == 0 ? tr(S_NAV_PLAY) : i == 1 ? tr(S_NAV_GRAPHICS) : i == 2 ? tr(S_NAV_CONTROLS) : tr(S_NAV_ABOUT), i == 0);
+    ui_hair(0, 98, LOGICAL_W);
+    y = 130;
+    ui_label(x, y, L"Primary", C_VERM);
+    ui_primary(910, x, y + 24, 232, 60, tr(S_BTN_PLAY), L"始", 1);
+    ui_primary(911, x + 260, y + 24, 232, 60, tr(S_CTA_BTN_ISO), NULL, 1);
+    ui_primary(912, x + 520, y + 24, 232, 60, tr(S_BTN_PLAY), L"始", 0);
+    y += 110;
+    ui_label(x, y, L"Secondary and links", C_VERM);
+    ui_secondary(920, x, y + 24, 210, 58, tr(S_CTA_BTN_FOLDER), 1);
+    ui_secondary(921, x + 230, y + 24, 210, 58, tr(S_CTA_BTN_FOLDER), 0);
+    ui_link(922, x + 470, y + 46, tr(S_BTN_CHANGE), 1);
+    ui_link(923, x + 580, y + 46, tr(S_BTN_OPEN), 1);
+    y += 110;
+    ui_label(x, y, L"Switches and progress", C_VERM);
+    ui_switch(930, x, y + 30, 1, 1);
+    ui_switch(931, x + 70, y + 30, 0, 1);
+    ui_switch(932, x + 140, y + 30, 0, 0);
+    ui_rule_progress(x + 220, y + 40, 400, 620);
+    ui_caret(x + 660, y + 38, C_DIMC);
+    y += 90;
+    ui_hair(x, y, 700);
+    txt(F_VALUE, C_CREAM, x, y + 14, 400, 24, T_LINE, L"Resolución interna");
+    txt(F_LSMALL, C_DIMC, x, y + 40, 600, 20, T_LINE, L"Dibuja por encima de los 720×480 de la Xbox.");
+    ui_hair(x, y + 76, 700);
+    if (ui_has_kanji())
+        txt(F_KANJI, C_VERM, x + 760, 140, 40, 200, DT_WORDBREAK, L"忍者外伝");
+    txt(F_DISPLAY, C_CREAM, x, 560, 1000, 100, T_LINE, L"NINJA GAIDEN");
+}
+
 static void paint_all(void) {
+    if (g_demo == 3) {
+        ui_begin(ART_INNER);
+        paint_widgets_demo();
+        ui_end();
+        return;
+    }
     ui_begin(g_page == PG_PLAY ? ART_HERO : ART_INNER);
     paint_sidebar();
     switch (g_page) {
@@ -2128,7 +2172,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show) {
         } else if (!wcscmp(a, L"--fonts")) {
             wfmt(fonts_path, MAX_PATH, L"%ls", v);
         } else if (!wcscmp(a, L"--demo")) {
-            g_demo = !wcscmp(v, L"progress") ? 1 : 2;
+            g_demo = !wcscmp(v, L"progress") ? 1 : !wcscmp(v, L"widgets") ? 3 : 2;
         } else {
             continue; /* unknown: do not swallow the next argument */
         }
