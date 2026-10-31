@@ -102,6 +102,13 @@ finds these variables at start in the game's code (`port/src/ach/ach.c`, `find_v
 | Difficulty | `0x005B4975` | `0x00589755` |
 | Mode | `0x005B497A` | `0x0058975A` |
 | Saved chapter | `0x005B4977` | `0x00589757` |
+| Karma of the run | `0x005B4780` | `0x00589560` |
+| Karma at the last chapter end | `0x005B4784` | `0x00589564` |
+| Rank data pointer | `0x00E12EC4` | `0x00DB98C4` |
+
+The last three come from fixed distances (saved chapter − 0x1F7 and − 0x1F3; chapter − 0x210), `VERIFIED` on the
+owner's dumps of the modified build; the port checks the rank table it reaches (17 pairs with max > min) before using
+it. Code: `port/src/ach/sig.c`, tested with synthetic code in `port/tests/ach_test.c`.
 
 `VERIFIED`: the search gives these on the three XBEs, and a run of the modified build loads a save and starts
 chapter 1 with the chapter read as 0 and the difficulty as 1.

@@ -123,7 +123,7 @@ cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\gameart_test.pdb" /Fe"%OUT%\gameart_t
 rem 5) ngb-launcher.exe: the graphical launcher (Win32 + GDI; bcrypt and winhttp for the updater). See launcher\launcher.c.
 rc /nologo /I"%PORT%res" /I"%PORT%launcher" /fo"%OUT%\obj\launcher.res" "%PORT%launcher\launcher.rc" || exit /b 1
 cl %CFLAGS% /I"%PORT%res" /I"%PORT%launcher" /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\launcher.pdb" /Fe"%OUT%\ngb-launcher.exe" ^
-  "%PORT%launcher\launcher.c" "%PORT%launcher\pages.c" "%PORT%launcher\ui.c" "%PORT%launcher\art.c" "%PORT%launcher\ink.c" "%PORT%launcher\gamedata.c" "%PORT%launcher\gameart.c" "%SRC%\gl\texconv.c" "%PORT%launcher\import.c" "%PORT%launcher\xdvdfs.c" "%PORT%launcher\update.c" "%OUT%\obj\launcher.res" ^
+  "%PORT%launcher\launcher.c" "%PORT%launcher\pages.c" "%PORT%launcher\ui.c" "%PORT%launcher\art.c" "%PORT%launcher\ink.c" "%PORT%launcher\gamedata.c" "%PORT%launcher\gameart.c" "%SRC%\gl\texconv.c" "%PORT%launcher\import.c" "%PORT%launcher\xdvdfs.c" "%PORT%launcher\update.c" "%SRC%\ach\catalog.c" "%SRC%\ach\store.c" "%OUT%\obj\launcher.res" ^
   /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib shell32.lib comdlg32.lib advapi32.lib ole32.lib bcrypt.lib winhttp.lib || exit /b 1
 echo build: %OUT%\ngb-loader.exe + ngb-core.dll + ngb-launcher.exe
 endlocal

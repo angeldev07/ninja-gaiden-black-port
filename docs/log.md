@@ -1052,3 +1052,20 @@ Details in [[gpu-nv2a]].
   rank 0 for karma 405,327 and 415,007 (Master Ninja from 260,000 in chapter 1), as on screen. Details in
   [[game-state]].
 - So the owner's "Master Ninja rank per chapter" achievements need only RAM reads.
+
+## [2026-10-31] milestone | Achievements, phase 1: detectors, the seal toast and the launcher page
+- Built on `feat/achievements` from [[achievements-design]] and [[achievements-plan]]: a shared catalog of 27
+  (`port/src/ach/catalog.c`), `achievements.json` v2 with progress (`store.c`), the game's rank formula (`rules.c`),
+  the variables found by signature with the karma and the rank table added (`sig.c`, [[game-state]]), and the
+  detectors for chapter 1, the story per difficulty (`INFERRED`: the chapter going past 15), the Master Ninja rank
+  with the sixteen seals, the first session, the hours played and F12.
+- **Toast** (`port/src/gfx/toast.c`): the mockup's variant A (seal 誉) and D (ensō, double rule, 7 s) with a queue, a
+  12-unit rise, Josefin Sans and the Shippori subset embedded in the core (the subset gains 誉 極 試 数 蒐 挑 灯), and a
+  drum hit synthesized by the port. `--lang en|es`, `--no-ach-toast`, `--ach-demo` shows both.
+- **Launcher:** an Achievements page (05; Advanced and About move to 06 and 07), filters, newest first, progress
+  rules, the two switches; the Play page column reads "n / 27"; PLAY passes the language and the toast switch.
+- Gotcha: Josefin's static Light and SemiBold faces register under their legacy family names ("Josefin Sans Light"),
+  as the launcher already knew; asking for "Josefin Sans" with a weight gave a fallback face in the toast.
+- Checked: `ach_test` (catalog, store, rank edges, signatures), the Python suite, both toasts in the window back
+  buffer, the page in both languages with `--shot`, and a chapter 2 load that unlocks nothing.
+- Needs the owner: a clear of the last chapter for the story detector; phase 1b dumps (missions, inventory, deaths).

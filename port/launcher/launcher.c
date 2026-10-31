@@ -15,8 +15,8 @@
  *   - Only options that the loader's argument parser (port\src\main.c) understands are shown.
  *
  *   ngb-launcher.exe [--page N] [--lang en|es] [--iso FILE] [--shot FILE.bmp [--shot-delay MS]]
- *       --page N       start on page N (0 Play .. 5 About)
- *       --log-view     with --page 4: open the log viewer (the sub-view of Advanced)
+ *       --page N       start on page N (0 Play .. 6 About)
+ *       --log-view     with --page 5: open the log viewer (the sub-view of Advanced)
  *       --lang         force a language for this run (not saved)
  *       --iso FILE     start importing that disc image right away
  *       --shot FILE    render the window to a BMP and exit (used to review the interface)
@@ -86,6 +86,7 @@ static wchar_t g_runs[MAX_PATH];
 static wchar_t g_upd_url[1024] = UPD_MANIFEST_URL; /* --update-url replaces it (tests) */
 static int g_upd_forced;                          /* --update-url: check now, whatever the day */
 int g_upd_wanted;                          /* the user pressed Update */
+int g_ach_scroll, g_ach_filter, g_ach_secrets;     /* the Achievements page: first row, filter, secrets shown */
 wchar_t g_upd_fail[160];                   /* why the last apply failed */
 wchar_t g_updated_to[32];                  /* --updated X: the update that just finished */
 static void poll_update(void);
@@ -265,6 +266,7 @@ static void save_settings(void) {
     ini_put_int(L"update", L"check", g_set.check_updates);
     ini_put_int(L"update", L"last_day", g_set.update_day);
     ini_put_int(L"launcher", L"game_art", g_set.game_art);
+    ini_put_int(L"achievements", L"toast", g_set.ach_toast);
 }
 
 static void game_refresh(void) {
@@ -316,6 +318,7 @@ static void load_settings(void) {
     g_set.check_updates = ini_int(L"update", L"check", 1) != 0;
     g_set.update_day = ini_int(L"update", L"last_day", 0);
     g_set.game_art = ini_int(L"launcher", L"game_art", 1) != 0;
+    g_set.ach_toast = ini_int(L"achievements", L"toast", 1) != 0;
     for (i = 0; i < (int)(sizeof k_logcap_vals / sizeof k_logcap_vals[0]); i++)
         ok |= k_logcap_vals[i] == g_set.log_cap;
     if (!ok)
@@ -442,6 +445,10 @@ void build_cmdline(wchar_t *out, size_t n) {
         wfmt(t, 40, L" --log-cap %d", g_set.log_cap);
         wcat(out, n, t);
     }
+    if (g_lang == LANG_ES) /* the achievement toasts follow the launcher */
+        wcat(out, n, L" --lang es");
+    if (!g_set.ach_toast)
+        wcat(out, n, L" --no-ach-toast");
 }
 
 
@@ -998,6 +1005,11 @@ static void activate(int id) {
         goto_page(id - ID_NAV0);
         return;
     }
+    if (id >= ID_ACH_FILTER0 && id < ID_ACH_FILTER0 + ACH_FILTERS) {
+        g_ach_filter = id - ID_ACH_FILTER0;
+        g_ach_scroll = 0;
+        return;
+    }
     if (id >= ID_ITEM0 && g_open_combo != ID_NONE) {
         int i = id - ID_ITEM0;
         if (g_open_combo == ID_CB_RENDERER)
@@ -1049,6 +1061,8 @@ static void activate(int id) {
     case ID_CHK_LENIENT: g_set.lenient = !g_set.lenient; save_settings(); break;
     case ID_CHK_DETAIL: g_set.detailed_log = !g_set.detailed_log; save_settings(); break;
     case ID_CHK_UPDATES: g_set.check_updates = !g_set.check_updates; save_settings(); break;
+    case ID_CHK_ACH_TOAST: g_set.ach_toast = !g_set.ach_toast; save_settings(); break;
+    case ID_CHK_ACH_SECRETS: g_ach_secrets = !g_ach_secrets; break;
     case ID_CHK_GAMEART:
         g_set.game_art = !g_set.game_art;
         save_settings();
@@ -1330,7 +1344,12 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     case WM_MOUSEWHEEL:
-        if (log_view() && g_log_n) {
+        if (g_page == PG_ACH) {
+            g_ach_scroll -= GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA; /* pages.c clamps it */
+            if (g_ach_scroll < 0)
+                g_ach_scroll = 0;
+            redraw();
+        } else if (log_view() && g_log_n) {
             g_log_scroll -= (GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA) * 4;
             if (g_log_scroll < 0)
                 g_log_scroll = 0;

@@ -21,6 +21,7 @@
     X(NAV_CONTROLS, L"Controls", L"Controles")                                                   \
     X(NAV_ADVANCED, L"Advanced", L"Avanzado")                                                    \
     X(NAV_ABOUT, L"About", L"Acerca de")                                                         \
+    X(NAV_ACH, L"Achievements", L"Logros")                                                       \
     /* footer */                                                                                 \
     X(BTN_PLAY, L"PLAY", L"JUGAR")                                                               \
     X(BTN_STOP, L"Stop", L"Detener")                                                             \
@@ -245,7 +246,24 @@
     X(GFX_GAMEART, L"Game art in the launcher", L"Arte del juego en el launcher") \
     X(GFX_GAMEART_DESC, L"Artwork from your imported copy instead of the ink landscape. Read from your files, never distributed.", L"Ilustraciones de tu copia importada en lugar del paisaje de tinta. Se leen de tus archivos y nunca se distribuyen.") \
     X(GFX_LAUNCHER, L"Launcher", L"Launcher") \
-    X(PAGE_LOG_KANJI, L"録", L"録")
+    X(PAGE_LOG_KANJI, L"録", L"録") \
+    X(ACH_SUB, L"What you have earned with this copy of the game. Kept in your data folder, apart from your saves.", L"Lo que llevas conseguido con esta copia del juego. Se guarda en tu carpeta de datos, aparte de tus partidas.") \
+    X(ACH_COUNT, L"UNLOCKED", L"LOGROS") \
+    X(ACH_HONOR, L"HONOR", L"HONOR") \
+    X(ACH_F_ALL, L"All", L"Todos") \
+    X(ACH_F_STORY, L"Story and rank", L"Historia y rango") \
+    X(ACH_F_MISSIONS, L"Missions", L"Misiones") \
+    X(ACH_F_COUNTERS, L"Counters and collection", L"Contadores y colección") \
+    X(ACH_F_CHALLENGES, L"Challenges and port", L"Retos y port") \
+    X(ACH_TOAST, L"NOTICES IN THE GAME", L"AVISOS EN EL JUEGO") \
+    X(ACH_SECRETS, L"SHOW SECRETS", L"MOSTRAR SECRETOS") \
+    X(ACH_SECRET_NAME, L"Secret achievement", L"Logro secreto") \
+    X(ACH_SECRET_DESC, L"Keep playing to find out.", L"Sigue jugando para descubrirlo.") \
+    X(ACH_UNLOCKED, L"UNLOCKED  ·  %ls", L"DESBLOQUEADO  ·  %ls") \
+    X(ACH_LOCKED, L"LOCKED", L"BLOQUEADO") \
+    X(ACH_SECRET, L"SECRET", L"SECRETO") \
+    X(ACH_HOURS, L"%llu / %u h", L"%llu / %u h") \
+    X(ACH_NONE, L"Nothing in this group yet.", L"Todavía nada en este grupo.")
 
 enum {
 #define X(id, en, es) S_##id,
