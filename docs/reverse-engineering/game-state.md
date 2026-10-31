@@ -52,6 +52,21 @@ Ghidra (`H5Refs.java`, `H5Decomp.java` in `NGB_DATA\ghidra\scripts`) and checked
 
 ## Other releases
 
-The game's own sections move between builds (only library code is handled by `port/src/libaddr.c`). The spike checks
-that `0x00406A20` holds the save-name format and switches the detectors off otherwise. NTSC-U needs its own table,
-found by the same string cross-reference or by a signature of `FUN_002ee750`.
+The game's own sections move between builds (only library code is handled by `port/src/libaddr.c`), so the port
+finds these variables at start in the game's code (`port/src/ach/ach.c`, `find_vars`):
+
+- the save-name routine (PAL `FUN_001dab20`) is `mov al, [mode]` … `cmp al, 2` … `movzx eax, byte [chapter]` …
+  `push L"%d. CHAPTER %d %s"`: the format string is found in the data, then the one `push` of its address;
+- the load routine (PAL `FUN_002fe3c0`) is `mov cl, [saved chapter]` … `mov [chapter], cl`;
+- the save block has the same layout in every release (the saves of one load in another, `VERIFIED`), so the
+  difficulty is the saved chapter − 2 and the mode the saved chapter + 3; the second fact cross-checks the first.
+
+| Variable | PAL | NTSC-U and its modified build |
+| --- | --- | --- |
+| Chapter | `0x00E130D4` | `0x00DB9AD4` |
+| Difficulty | `0x005B4975` | `0x00589755` |
+| Mode | `0x005B497A` | `0x0058975A` |
+| Saved chapter | `0x005B4977` | `0x00589757` |
+
+`VERIFIED`: the search gives these on the three XBEs, and a run of the modified build loads a save and starts
+chapter 1 with the chapter read as 0 and the difficulty as 1.

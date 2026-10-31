@@ -6,9 +6,9 @@
  * %NGB_DATA%\achievements.json, which the launcher reads. The presenter draws a toast
  * (gfx/toast.c) over the frame.
  *
- * The variables are located by address in the reference build only (PAL default.xbe, title id
- * 0x5443000D); ngb_ach_init() checks a known string at a known address and switches the
- * detectors off on any other build.
+ * The variables are found in the game's own code at start (ach.c, find_vars), so the same
+ * detectors work on PAL, NTSC-U and modified builds of either; when the code is not there,
+ * the detectors stay off and the log says so.
  *
  *   ngb_ach_init(&xbe, demo);   // after the XBE is mapped
  *   ngb_ach_tick();             // main thread, every few ms

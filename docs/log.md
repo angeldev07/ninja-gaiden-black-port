@@ -1030,3 +1030,10 @@ Details in [[gpu-nv2a]].
   save does not unlock anything.
 - **Open:** a real chapter end (the owner plays chapter 1 to the end with the spike build) to check the detector and
   to find the end-of-chapter rank.
+
+## [2026-10-31] ingest | Achievements: the game variables found in the code, on every release
+- The owner played chapter 1 on the modified build, where the spike's PAL-only address check switched the detectors
+  off; F10 and F12 also left nothing (no `RAM dump` line, no shot), most likely a keyboard sending media keys.
+- **Now** the port finds the chapter, difficulty, mode and saved-chapter variables in the game's own code at start
+  ([[game-state]] § Other releases), so PAL, NTSC-U and modified builds work with no table per release. Checked on
+  the three XBEs and live on the modified build.
