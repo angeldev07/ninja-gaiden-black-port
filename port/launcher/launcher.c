@@ -27,6 +27,7 @@
  *       --fonts FILE   write the faces GDI picked for the fonts and exit (tests)
  *       --perf-anim FILE  write the mean ms of an animated frame and exit (tests)
  *       --no-embedded-fonts  skip the embedded fonts (tests the fallback)
+ *       --emblem-mask FILE   write the emblem's dragon as a 512 px BMP and exit (make_icon.py)
  */
 #define UNICODE
 #define WIN32_LEAN_AND_MEAN
@@ -47,7 +48,6 @@
 #include "update.h"
 #include "strings.h"
 #include "ui.h"
-#include "kamon.h"
 #include "launcher_int.h"
 #include "gameart.h"
 #include "version.h"
@@ -1549,7 +1549,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show) {
     MSG msg;
     HDC dc;
     int x, y, ow, oh, argc = 0, i, dpi, forced_lang = -1;
-    wchar_t iso[MAX_PATH], fonts_path[MAX_PATH] = L"", perf_path[MAX_PATH] = L"";
+    wchar_t iso[MAX_PATH], fonts_path[MAX_PATH] = L"", perf_path[MAX_PATH] = L"", mask_path[MAX_PATH] = L"";
     LPWSTR *argv;
     DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
     (void)prev;
@@ -1605,6 +1605,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show) {
             wfmt(g_updated_to, 32, L"%ls", v);
         } else if (!wcscmp(a, L"--dpi")) {
             dpi = _wtoi(v); /* review aid: render as if the system DPI were this */
+        } else if (!wcscmp(a, L"--emblem-mask")) {
+            wfmt(mask_path, MAX_PATH, L"%ls", v);
         } else if (!wcscmp(a, L"--perf-anim")) {
             wfmt(perf_path, MAX_PATH, L"%ls", v);
         } else if (!wcscmp(a, L"--fonts")) {
@@ -1622,7 +1624,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show) {
         g_lang = forced_lang;
     if (g_demo == 2)
         note_error(IMPE_NOT_NGB, L"Halo: Combat Evolved", 0);
-    if (!g_shot_path[0] && !perf_path[0] && !fonts_path[0]) {
+    if (!g_shot_path[0] && !perf_path[0] && !fonts_path[0] && !mask_path[0]) {
         /* On a 1080p laptop at 150 % the window would be taller than the screen and PLAY would
          * sit under the taskbar: draw at the largest scale that fits the work area instead. */
         RECT fr, wa;
@@ -1642,6 +1644,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show) {
         return write_fonts_and_quit(fonts_path);
     if (perf_path[0])
         return write_perf_and_quit(perf_path);
+    if (mask_path[0])
+        return ui_emblem_mask(mask_path, 512) ? 0 : 1;
     if (g_updated_to[0] && g_data[0]) { /* the update is in place: its zip and staging can go */
         wchar_t upd[MAX_PATH];
         wfmt(upd, MAX_PATH, L"%ls\\updates", g_data);

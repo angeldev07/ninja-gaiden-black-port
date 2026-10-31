@@ -19,7 +19,6 @@
 
 #include "art.h"
 #include "gameart.h"
-#include "kamon.h"
 #include "ui.h"
 #include "update.h"
 #include "version.h"
@@ -75,7 +74,7 @@ static void top_bar(void) {
     int i, x = 330, rx;
     fill_rect(0, 0, LOGICAL_W, TOP_H, 0x151311); /* opaque: no per-pixel blend every frame */
     ui_hair(0, TOP_H - 1, LOGICAL_W);
-    kamon_draw(40, 12, 40, C_VERM);
+    emblem_draw(42, 12, 40, C_CREAM, C_VERM);
     txt_tracked(F_TAB, C_CREAM, 86, 18, 28, 0.34f, L"NINJA GAIDEN");
     txt_tracked(F_TAB, C_VERM, 86 + tracked_w(F_TAB, 0.34f, L"NINJA GAIDEN") + 10, 18, 28, 0.34f, L"BLACK");
     for (i = 0; i < PG_COUNT; i++)
@@ -637,7 +636,7 @@ static void page_about(void) {
     int y = 104, x;
     wchar_t buf[96];
     page_side(6, tr(S_NAV_ABOUT), k_page_kanji[PG_ABOUT], tr(S_ABOUT_SUB));
-    kamon_draw(LX + LW - 110, 92, 110, C_VERM);
+    emblem_draw(LX + LW - 110, 92, 110, C_CREAM, C_VERM);
     txt(F_SUB, C_CREAM, LX, y, LW - 140, 30, T_LINE, tr(S_ABOUT_PRODUCT));
     wfmt(buf, 96, tr(S_ABOUT_VERSION), L"" NGB_VERSION_STR);
     txt(F_LSMALL, C_DIMC, LX, y + 36, LW - 140, 20, T_LINE, buf);
@@ -652,7 +651,7 @@ static void page_about(void) {
     y = credit_row(y, tr(S_CRED_CXBX_NAME), tr(S_CRED_CXBX));
     y = credit_row(y, L"envytools", tr(S_CRED_ENVY));
     y = credit_row(y, L"RenderDoc", tr(S_CRED_RDOC));
-    y = credit_row(y, L"Josefin Sans, Shippori Mincho", L"SIL OFL 1.1");
+    y = credit_row(y, L"Josefin Sans, Shippori Mincho, Yuji", L"SIL OFL 1.1");
     txt(F_LSMALL, C_DIMC, LX, y + 4, LW, 20, T_LINE, tr(S_CRED_FULL));
     y = group(y + 40, tr(S_ABOUT_LEGAL)) + 10;
     txt(F_LSMALL, C_MUTED, LX, y, LW, 20, T_LINE, tr(S_LEGAL_1));

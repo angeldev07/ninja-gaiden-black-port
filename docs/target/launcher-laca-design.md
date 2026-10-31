@@ -86,8 +86,9 @@ Port of the prototype validated in the brainstorm (see [[log]] 2026-10-31):
 
 ### `kamon.c`: the emblem
 
-> Changed while building it: the crossed-swords crest became an original leaping-ninja silhouette, and in game
-> art mode the game's own emblem rotates as a hero and gives the window icon ([[log]] 2026-10-31).
+> Changed while building it: the crossed-swords crest became a brush 龍 (Yuji Boku, OFL) with a vermilion seal,
+> in the top bar, About and the app icon; in game art mode the game's own emblem rotates as a hero and gives the
+> window icon ([[log]] 2026-10-31).
 
 An original crest: a ring with two crossed straight swords (a traditional motif, drawn from scratch with the
 existing signed-distance shapes). Used in the top bar, the About page and **the new app icon** (`make_icon.py`

@@ -975,3 +975,12 @@ Details in [[gpu-nv2a]].
 - **New emblem and app icon:** the crossed-swords kamon is replaced by an original leaping-ninja silhouette (sword
   raised back over the head, scarf trailing), drawn from scratch as a union of tapered capsules shared by
   `kamon.c` and `make_icon.py` (black on a vermilion glow in the icon, vermilion in the top bar).
+
+## [2026-10-31] change | Launcher emblem and icon: a brush dragon with a seal
+- The leaping-ninja silhouette made of capsules looked like a stick figure (the owner: "se ve muy chistoso"). A
+  convincing human silhouette is not something primitives draw well, so the emblem is now calligraphy: the brush
+  龍 of Yuji Boku (SIL OFL 1.1, subset to that one glyph, 2.8 KB) in cream with a small vermilion seal, chosen by
+  the owner from three concepts (seal 忍, 忍 with a moon, 龍 with a seal).
+- `emblem_draw` (ui.c) draws it in the top bar and on About; `ngb-launcher.exe --emblem-mask FILE` writes the glyph
+  as a 512 px BMP and `make_icon.py` builds `ngb.ico` from it, so the icon and the window match. `kamon.c` and its
+  test are gone.

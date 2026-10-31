@@ -1,13 +1,15 @@
-"""Generates port/res/ngb.ico: the launcher's emblem, a black leaping ninja on a vermilion glow.
+"""Generates port/res/ngb.ico: the launcher's emblem, a brush dragon (龍) in cream with a vermilion seal
+on lacquer black.
 
-Original artwork drawn by code (no fonts, images or game data). Stdlib only: a small
-supersampling rasteriser renders every size and the ICO is assembled by hand (32-bit BMP
-entries with an AND mask up to 128 px, a PNG entry for 256 px, as Windows does since Vista).
-The silhouette (an original drawing, a union of tapered capsules) is the same table as the
-launcher's (launcher/kamon.c); keep both in step.
+The dragon is the glyph of Yuji Boku (SIL OFL 1.1, port/res/fonts), drawn by the launcher itself so
+that icon and window match: build the launcher, export the glyph, then run this script.
 
-    python port/res/make_icon.py                    # writes port/res/ngb.ico
+    build/port/ngb-launcher.exe --emblem-mask build/emblem-mask.bmp
+    python port/res/make_icon.py                    # reads build/emblem-mask.bmp, writes port/res/ngb.ico
     python port/res/make_icon.py --png preview.png  # also a 256 px preview
+
+Stdlib only: the ICO is assembled by hand (32-bit BMP entries with an AND mask up to 128 px, a PNG
+entry for 256 px, as Windows does since Vista).
 """
 
 from __future__ import annotations
@@ -29,27 +31,22 @@ VERMILION: RGB = (210.0, 63.0, 47.0)
 
 CORNER = 0.21  # corner radius of the square
 MARGIN = 0.02
-GLOW: RGB = (210.0, 40.0, 32.0)
-FIGURE: RGB = (8.0, 7.0, 7.0)
+CREAM: RGB = (239.0, 231.0, 214.0)
+GLYPH_BOX = (0.10, 0.08, 0.80)  # x, y, side of the emblem square inside the tile (unit canvas)
+SEAL = 0.14  # side of the seal, relative to the emblem square (launcher: emblem_draw)
 
-# (ax, ay, ra, bx, by, rb): tapered capsules on the unit square, y down (launcher/kamon.c).
-PARTS = (
-    (0.600, 0.290, 0.066, 0.600, 0.290, 0.066),  # head
-    (0.555, 0.285, 0.024, 0.300, 0.215, 0.006),  # scarf, upper tail
-    (0.555, 0.310, 0.018, 0.330, 0.345, 0.005),  # scarf, lower tail
-    (0.585, 0.370, 0.060, 0.505, 0.555, 0.050),  # torso
-    (0.615, 0.395, 0.032, 0.745, 0.245, 0.026),  # front arm, up to the hands
-    (0.545, 0.405, 0.029, 0.715, 0.265, 0.024),  # back arm
-    (0.745, 0.235, 0.017, 0.815, 0.262, 0.015),  # grip
-    (0.715, 0.195, 0.012, 0.758, 0.282, 0.012),  # guard
-    (0.735, 0.228, 0.013, 0.215, 0.055, 0.004),  # blade, raised back over the head
-    (0.545, 0.565, 0.050, 0.705, 0.615, 0.042),  # front thigh
-    (0.705, 0.615, 0.040, 0.665, 0.815, 0.031),  # front shin
-    (0.665, 0.815, 0.028, 0.755, 0.840, 0.019),  # front foot
-    (0.475, 0.585, 0.048, 0.355, 0.700, 0.039),  # back thigh
-    (0.355, 0.700, 0.037, 0.195, 0.815, 0.028),  # back shin
-    (0.195, 0.815, 0.024, 0.150, 0.770, 0.015),  # back foot
-)
+MASK: tuple[int, list[float]] = (0, [])  # (size, coverage 0..1 row by row), set by load_mask
+
+
+def load_mask(path: Path) -> None:
+    """The 32-bit top-down BMP that `ngb-launcher.exe --emblem-mask` writes (white glyph on black)."""
+    global MASK
+    data = path.read_bytes()
+    off = struct.unpack_from("<I", data, 10)[0]
+    w, h = struct.unpack_from("<ii", data, 18)
+    if w != -h and w != h:
+        raise SystemExit(f"{path}: expected a square mask")
+    MASK = (w, [data[off + i * 4 + 2] / 255.0 for i in range(w * w)])
 
 
 def _lerp(a: RGB, b: RGB, t: float) -> RGB:
@@ -68,16 +65,17 @@ def _square_sdf(x: float, y: float) -> float:
     return math.hypot(max(qx, 0.0), max(qy, 0.0)) + min(max(qx, qy), 0.0) - CORNER
 
 
-def figure_sdf(x: float, y: float, thick: float) -> float:
-    """Signed distance to the silhouette (launcher/kamon.c: kamon_coverage)."""
-    d = 9.0
-    for ax, ay, ra, bx, by, rb in PARTS:
-        dx, dy = bx - ax, by - ay
-        length2 = dx * dx + dy * dy
-        t = 0.0 if length2 == 0 else _clamp(((x - ax) * dx + (y - ay) * dy) / length2)
-        px, py = ax + dx * t, ay + dy * t
-        d = min(d, math.hypot(x - px, y - py) - (ra + (rb - ra) * t) * thick)
-    return d
+def _glyph(u: float, v: float) -> float:
+    """Bilinear coverage of the dragon at (u, v) of the emblem square (0..1)."""
+    n, cov = MASK
+    x, y = u * n - 0.5, v * n - 0.5
+    if x < 0 or y < 0 or x >= n - 1 or y >= n - 1:
+        return 0.0
+    x0, y0 = int(x), int(y)
+    fx, fy = x - x0, y - y0
+    a, b = cov[y0 * n + x0], cov[y0 * n + x0 + 1]
+    c, d = cov[(y0 + 1) * n + x0], cov[(y0 + 1) * n + x0 + 1]
+    return (a + (b - a) * fx) * (1 - fy) + (c + (d - c) * fx) * fy
 
 
 def sample(x: float, y: float, size: int) -> RGBA:
@@ -85,14 +83,15 @@ def sample(x: float, y: float, size: int) -> RGBA:
     d = _square_sdf(x, y)
     if d > 0:
         return (0.0, 0.0, 0.0, 0.0)
-    glow = max(0.0, 1.0 - math.hypot(x - 0.52, y - 0.48) / 0.62) ** 1.5
-    color = _lerp(LACQUER, GLOW, glow)
+    color = LACQUER
     if d > -0.02:  # a faint lighter edge so the tile reads on dark taskbars
         color = _lerp(color, LACQUER_EDGE, _clamp((d + 0.02) / 0.02))
-    thick = 1.7 if size <= 16 else 1.35 if size <= 32 else 1.0
-    cover = _clamp(0.5 - figure_sdf(x, y, thick) * size)
-    if cover > 0:
-        color = _lerp(color, FIGURE, cover)
+    bx, by, side = GLYPH_BOX
+    u, v = (x - bx) / side, (y - by) / side
+    seal = SEAL if size > 24 else 0.20  # a bigger seal keeps a dot of colour at 16 px
+    if 1 - seal <= u <= 1 and 1 - seal <= v <= 1:
+        return (VERMILION[0], VERMILION[1], VERMILION[2], 1.0)
+    color = _lerp(color, CREAM, _glyph(u, v))
     return (color[0], color[1], color[2], 1.0)
 
 
@@ -180,6 +179,8 @@ def build_ico() -> tuple[bytes, bytes]:
 
 
 def main() -> None:
+    root = Path(__file__).resolve().parents[2]
+    load_mask(root / "build" / "emblem-mask.bmp")
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--out", type=Path, default=Path(__file__).with_name("ngb.ico"))
     parser.add_argument("--png", type=Path, help="256 px PNG preview (keep it out of the repo)")

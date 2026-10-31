@@ -15,7 +15,6 @@
 #include <string.h>
 
 #include "ui.h"
-#include "kamon.h"
 
 int g_dpi = 96;
 int g_hover = 0, g_down = 0;
@@ -95,13 +94,13 @@ int g_no_embedded_fonts;
 static int g_kanji_ok;
 static int g_fonts_loaded;
 
-/* The embedded fonts are RCDATA 101..104 of the exe (launcher.rc); private to the process. */
+/* The embedded fonts are RCDATA 101..105 of the exe (launcher.rc); private to the process. */
 static void load_embedded_fonts(void) {
     int id;
     if (g_fonts_loaded || g_no_embedded_fonts)
         return;
     g_fonts_loaded = 1;
-    for (id = 101; id <= 104; id++) {
+    for (id = 101; id <= 105; id++) {
         HRSRC r = FindResourceW(NULL, MAKEINTRESOURCEW(id), MAKEINTRESOURCEW(10) /* RT_RCDATA */);
         HGLOBAL g = r ? LoadResource(NULL, r) : NULL;
         void *p = g ? LockResource(g) : NULL;
@@ -333,6 +332,66 @@ void ui_present(HDC dc) {
     }
 }
 
+int ui_emblem_mask(const wchar_t *path, int size) {
+    BITMAPINFO bi;
+    BITMAPFILEHEADER fh;
+    void *bits = NULL;
+    HDC screen = GetDC(NULL), dc = CreateCompatibleDC(screen);
+    HBITMAP bmp, old_bmp;
+    HFONT font;
+    HGDIOBJ old_font;
+    wchar_t got[LF_FACESIZE];
+    RECT r;
+    int s = size * 14 / 100, ok = 0;
+    HANDLE h;
+    DWORD n;
+    memset(&bi, 0, sizeof bi);
+    bi.bmiHeader.biSize = sizeof bi.bmiHeader;
+    bi.bmiHeader.biWidth = size;
+    bi.bmiHeader.biHeight = -size;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bmp = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
+    ReleaseDC(NULL, screen);
+    if (!bmp || !bits) {
+        DeleteDC(dc);
+        return 0;
+    }
+    old_bmp = (HBITMAP)SelectObject(dc, bmp);
+    memset(bits, 0, (size_t)size * size * 4);
+    font = CreateFontW(-(size * 86 / 100), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                       OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+                       L"Yuji Boku");
+    old_font = SelectObject(dc, font);
+    got[0] = 0;
+    GetTextFaceW(dc, LF_FACESIZE, got);
+    if (!_wcsicmp(got, L"Yuji Boku")) {
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, RGB(255, 255, 255));
+        SetRect(&r, 0, 0, size - s / 2, size - s / 3); /* the same box as emblem_draw */
+        DrawTextW(dc, L"\u9F8D", 1, &r, DT_SINGLELINE | DT_CENTER | DT_VCENTER | DT_NOPREFIX);
+        GdiFlush();
+        h = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (h != INVALID_HANDLE_VALUE) {
+            memset(&fh, 0, sizeof fh);
+            fh.bfType = 0x4d42;
+            fh.bfOffBits = sizeof fh + sizeof bi.bmiHeader;
+            fh.bfSize = fh.bfOffBits + (DWORD)((size_t)size * size * 4);
+            WriteFile(h, &fh, sizeof fh, &n, NULL);
+            WriteFile(h, &bi.bmiHeader, sizeof bi.bmiHeader, &n, NULL);
+            WriteFile(h, bits, (DWORD)((size_t)size * size * 4), &n, NULL);
+            CloseHandle(h);
+            ok = 1;
+        }
+    }
+    SelectObject(dc, old_font);
+    DeleteObject(font);
+    SelectObject(dc, old_bmp);
+    DeleteObject(bmp);
+    DeleteDC(dc);
+    return ok;
+}
+
 void ui_set_view(int client_w, int client_h) {
     g_cw = client_w;
     g_ch = client_h;
@@ -471,20 +530,43 @@ void capsule(float ax, float ay, float bx, float by, float thick, rgb_t col) {
 }
 
 
-void kamon_draw(int x, int y, int size, rgb_t col) {
-    int X = S(x), Y = S(y), N = S(size), i, j;
-    float aa, thick;
-    if (N < 4)
-        return;
-    aa = 1.0f / (float)N;
-    thick = N < 24 ? 1.5f : 1.0f; /* thin parts vanish at tiny sizes */
-    gdi_sync();
-    for (j = 0; j < N; j++)
-        for (i = 0; i < N; i++) {
-            float c = kamon_coverage((i + 0.5f) / N, (j + 0.5f) / N, aa, thick);
-            if (c > 0.0f)
-                blend_px(X + i, Y + j, col, (int)(c * 255.0f + 0.5f));
+/* The emblem: the brush 龍 (Yuji Boku, embedded) in cream, with a small vermilion seal at the bottom
+ * right, in the square (x, y, size, size). Without the brush face: a Mincho dragon; without any, the seal. */
+void emblem_draw(int x, int y, int size, rgb_t ink, rgb_t seal) {
+    static const wchar_t *faces[] = {L"Yuji Boku", L"Shippori Mincho B1 SemiBold", L"Yu Mincho"};
+    static HFONT font;
+    static int font_px, font_face = -1;
+    int px = S(size) * 86 / 100, s = size * 14 / 100, i;
+    RECT r;
+    if (!font || font_px != px) {
+        wchar_t got[LF_FACESIZE];
+        if (font)
+            DeleteObject(font);
+        font = NULL;
+        font_face = -1;
+        for (i = 0; i < 3 && font_face < 0; i++) {
+            HFONT f = font_try(px, FW_NORMAL, ANTIALIASED_QUALITY, faces[i], got);
+            if (!_wcsicmp(got, faces[i])) {
+                font = f;
+                font_face = i;
+            } else {
+                DeleteObject(f);
+            }
         }
+        font_px = px;
+    }
+    if (font) {
+        HGDIOBJ old = SelectObject(g_mem, font);
+        SetBkMode(g_mem, TRANSPARENT);
+        SetTextColor(g_mem, cref(ink));
+        r.left = S(x);
+        r.top = S(y);
+        r.right = S(x + size - s / 2);
+        r.bottom = S(y + size - s / 3);
+        DrawTextW(g_mem, L"\u9F8D", 1, &r, DT_SINGLELINE | DT_CENTER | DT_VCENTER | DT_NOPREFIX);
+        SelectObject(g_mem, old);
+    }
+    fill_rect(x + size - s, y + size - s, s, s, seal);
 }
 
 void ui_clip(int x, int y, int w, int h) {

@@ -77,6 +77,10 @@ void ui_set_hero(int cur, int next, float mix);
 float ui_hero_weight(int hero);
 /* An alpha mask (aw x ah, 0..255) scaled to (x, y, w, h) and painted in one colour. */
 void ui_mask(int x, int y, int w, int h, const uint8_t *a, int aw, int ah, rgb_t col, int opacity);
+/* The launcher's emblem (a brush dragon and a seal) in the square (x, y, size, size). */
+void emblem_draw(int x, int y, int size, rgb_t ink, rgb_t seal);
+/* The emblem's dragon, white on black, size x size, as a 32-bit BMP (for port/res/make_icon.py). */
+int ui_emblem_mask(const wchar_t *path, int size);
 int ui_save_bmp(const wchar_t *path);
 
 /* Shapes (logical coordinates). */
