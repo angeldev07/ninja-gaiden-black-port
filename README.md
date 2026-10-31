@@ -11,7 +11,7 @@ OpenGL renderer and an APU audio engine.
 > **You need your own copy of the game.** This repository and its releases contain no game data, no game assets and
 > nothing from the Microsoft XDK. Each player imports the files of their own disc.
 
-![The launcher](docs/images/launcher-play.png)
+![The launcher](docs/images/launcher-ready.png)
 
 ## Features
 
@@ -36,7 +36,7 @@ OpenGL renderer and an APU audio engine.
    and unzip it.
 2. Run `ngb-launcher.exe`. If Windows shows **"Windows protected your PC"**, see
    [the SmartScreen note](#windows-smartscreen) below.
-3. Click **Import game** and pick the image of your disc.
+3. Click **Disc image (.iso)** and pick the image of your disc (or drag it onto the window).
 4. Click **PLAY**.
 
 The **[getting started guide](docs/guide/getting-started.md)** covers each step in detail, including what the launcher
