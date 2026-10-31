@@ -104,6 +104,9 @@ rem 5b) Launcher updater: manifest, versions, SHA-256 and a whole local update (
 rem     Not named *update*.exe: Windows asks for elevation for such names without a manifest.
 cl %CFLAGS% /I"%PORT%res" /I"%PORT%launcher" /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\upd_test.pdb" /Fe"%OUT%\upd_test.exe" "%PORT%tests\update_test.c" "%PORT%launcher\update.c" "%PORT%launcher\import.c" "%PORT%launcher\xdvdfs.c" bcrypt.lib winhttp.lib || exit /b 1
 "%OUT%\upd_test.exe" || exit /b 1
+rem 5c) Launcher ink-wash landscape: deterministic, composed as designed, within the time budget.
+cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\ink_test.pdb" /Fe"%OUT%\ink_test.exe" "%PORT%tests\ink_test.c" "%PORT%launcher\ink.c" || exit /b 1
+"%OUT%\ink_test.exe" || exit /b 1
 
 rem 5) ngb-launcher.exe: the graphical launcher (Win32 + GDI; bcrypt and winhttp for the updater). See launcher\launcher.c.
 rc /nologo /I"%PORT%res" /I"%PORT%launcher" /fo"%OUT%\obj\launcher.res" "%PORT%launcher\launcher.rc" || exit /b 1
