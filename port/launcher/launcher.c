@@ -1,9 +1,11 @@
 /*
  * launcher.c: ngb-launcher.exe, the graphical launcher of the Ninja Gaiden Black PC port.
  *
- * One fixed-size window (1240x700 logical pixels, scaled to the system DPI) drawn entirely
- * by ui.c on a back buffer; art.c paints the original backdrop (red mist, chrome wordmark,
- * an abstract shuriken emblem). Nothing here comes from the game.
+ * One window (1240x700 logical pixels, scaled to the system DPI or to what fits the screen;
+ * maximized, the frame is redrawn at the largest scale that fits, centred) drawn entirely by
+ * ui.c on a back buffer. This file holds the logic; pages.c paints (launcher_int.h). The
+ * backdrop is our own ink-wash landscape (art.c, ink.c) or, in game art mode, artwork read at
+ * runtime from the user's own copy (gameart.c). Nothing from the game ships with it.
  *
  *   - Settings live in ngb.ini next to the exe (UTF-16 so paths with accents survive).
  *   - First run: the Play page asks the user to import their own copy, either a disc image
@@ -18,7 +20,13 @@
  *       --lang         force a language for this run (not saved)
  *       --iso FILE     start importing that disc image right away
  *       --shot FILE    render the window to a BMP and exit (used to review the interface)
- *       --demo NAME    fake a state for screenshots: progress | error
+ *       --demo NAME    fake a state for screenshots: progress | error | widgets
+ *       --maximized    open maximized
+ *       --no-game-art  the original art only, whatever ngb.ini says (README screenshots)
+ *       --dpi N        render as if the system DPI were N (review aid)
+ *       --fonts FILE   write the faces GDI picked for the fonts and exit (tests)
+ *       --perf-anim FILE  write the mean ms of an animated frame and exit (tests)
+ *       --no-embedded-fonts  skip the embedded fonts (tests the fallback)
  */
 #define UNICODE
 #define WIN32_LEAN_AND_MEAN
@@ -42,7 +50,6 @@
 #include "kamon.h"
 #include "launcher_int.h"
 #include "gameart.h"
-#include "music.h"
 #include "version.h"
 
 /* ------------------------------------------------------------------ constants ---- */
@@ -110,7 +117,8 @@ static int g_shot_delay = 0;
 static int g_shot_after_import; /* with --iso: take the shot when the import ends */
 static int g_import_seen;
 int g_demo; /* 1 progress, 2 error, 3 widgets */
-static int g_no_game_art; /* --no-game-art: the original art only (README screenshots) */
+static int g_no_game_art;
+static int g_start_maximized; /* --maximized */ /* --no-game-art: the original art only (README screenshots) */
 
 const wchar_t *tr(int id) { return k_str[id][g_lang]; }
 
@@ -255,7 +263,6 @@ static void save_settings(void) {
     ini_put_int(L"update", L"check", g_set.check_updates);
     ini_put_int(L"update", L"last_day", g_set.update_day);
     ini_put_int(L"launcher", L"game_art", g_set.game_art);
-    ini_put_int(L"launcher", L"music", g_set.music);
     ini_put_int(L"launcher", L"hero_index", g_set.hero_index);
 }
 
@@ -308,7 +315,6 @@ static void load_settings(void) {
     g_set.check_updates = ini_int(L"update", L"check", 1) != 0;
     g_set.update_day = ini_int(L"update", L"last_day", 0);
     g_set.game_art = ini_int(L"launcher", L"game_art", 1) != 0;
-    g_set.music = ini_int(L"launcher", L"music", 1) != 0;
     g_set.hero_index = ini_int(L"launcher", L"hero_index", 0);
     for (i = 0; i < (int)(sizeof k_logcap_vals / sizeof k_logcap_vals[0]); i++)
         ok |= k_logcap_vals[i] == g_set.log_cap;
@@ -353,9 +359,8 @@ int importing(void) {
 int can_play(void) { return !running() && !importing() && loader_ok() && xbe_ok(); }
 int game_art_on(void) { return g_set.game_art && xbe_ok() && !g_no_game_art; }
 
-#define MUSIC_VOLUME 0.35f
 
-/* (Re)starts or stops the game art and the title theme after anything that can change them:
+/* (Re)starts or stops the game art after anything that can change them:
  * start-up, an import, another data folder, the switches. The art arrives on WM_GAMEART_READY. */
 static void game_dir(wchar_t *dir) {
     wfmt(dir, MAX_PATH, L"%ls", g_set.xbe);
@@ -363,25 +368,9 @@ static void game_dir(wchar_t *dir) {
         *wcsrchr(dir, L'\\') = 0;
 }
 
-/* Starts or stops only the title theme (the art stays as it is). */
-static void refresh_music(int fade_ms) {
-    wchar_t dir[MAX_PATH];
-    if (!game_art_on() || !g_set.music || g_shot_path[0]) {
-        music_stop();
-        return;
-    }
-    if (!music_playing()) {
-        game_dir(dir);
-        music_start(dir);
-    }
-    if (!running())
-        music_fade_to(MUSIC_VOLUME, fade_ms);
-}
-
 static void refresh_game_art(void) {
     wchar_t dir[MAX_PATH];
     ui_set_game_art(0);
-    music_stop();
     if (!game_art_on()) {
         gameart_stop();
         return;
@@ -389,14 +378,8 @@ static void refresh_game_art(void) {
     game_dir(dir);
     gameart_notify(g_hwnd, WM_GAMEART_READY);
     gameart_start(dir, g_set.hero_index);
-    refresh_music(2000);
 }
 
-static void set_music(int on) {
-    g_set.music = on;
-    save_settings();
-    refresh_music(1200);
-}
 
 /* Internal resolution the chosen scale gives; "auto" follows the loader: enough to cover the
  * picture on the monitor the launcher is on, on both axes (4:3 or 16:9), between 1 and 4. */
@@ -771,8 +754,6 @@ static void poll_game(void) {
         record_session_end(code);
         g_log_sig = 0;
         log_reload();
-        if (g_set.music && !IsIconic(g_hwnd))
-            music_fade_to(MUSIC_VOLUME, 1500);
     }
 }
 
@@ -806,7 +787,6 @@ static void start_game(void) {
     wfmt(g_last.start, 48, L"%04u-%02u-%02u %02u:%02u", st.wYear, st.wMonth, st.wDay, st.wHour,
          st.wMinute);
     g_open_combo = ID_NONE;
-    music_fade_to(0.0f, 600);
 }
 
 static void stop_game(void) {
@@ -1069,8 +1049,6 @@ static void activate(int id) {
         save_settings();
         refresh_game_art();
         break;
-    case ID_CHK_MUSIC:
-    case ID_TOP_MUSIC: set_music(!g_set.music); break;
     case ID_UPD_NOTES: {
         upd_status_t us;
         wchar_t url[256];
@@ -1144,7 +1122,7 @@ static int write_perf_and_quit(const wchar_t *path) {
         paint_all(); /* builds the cached backdrop outside the timing */
         QueryPerformanceCounter(&t0);
         for (i = 0; i < 120; i++) {
-            ui_set_motion(i / 20.0, (float)(i % 40) / 20.0f - 1.0f, 0.3f);
+            ui_set_motion(i / 20.0);
             paint_all(); /* the whole frame: backdrop, page, top bar */
         }
         QueryPerformanceCounter(&t1);
@@ -1177,7 +1155,6 @@ static void write_shot_and_quit(void) {
 /* ------------------------------------------------------------- living backdrop ---- */
 
 static ULONGLONG g_anim_t0;
-static float g_mouse_tx, g_mouse_ty, g_mouse_x, g_mouse_y; /* target and eased, -1..1 */
 static int g_anim_on;
 
 /* The backdrop moves only where something moves (the Play hero, the ring of the inner pages
@@ -1227,12 +1204,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             TrackMouseEvent(&t);
             g_mouse_tracked = 1;
         }
-        set_hover(hit_at(to_logical((short)LOWORD(lp)), to_logical((short)HIWORD(lp))));
-        /* -1..1 inside the window; a drag captured outside it must not throw the hero away */
-        g_mouse_tx = (float)to_logical((short)LOWORD(lp)) / (LOGICAL_W / 2) - 1.0f;
-        g_mouse_ty = (float)to_logical((short)HIWORD(lp)) / (LOGICAL_H / 2) - 1.0f;
-        g_mouse_tx = g_mouse_tx < -1.0f ? -1.0f : g_mouse_tx > 1.0f ? 1.0f : g_mouse_tx;
-        g_mouse_ty = g_mouse_ty < -1.0f ? -1.0f : g_mouse_ty > 1.0f ? 1.0f : g_mouse_ty;
+        set_hover(hit_at(ui_mouse_lx((short)LOWORD(lp)), ui_mouse_ly((short)HIWORD(lp))));
         return 0;
     }
     case WM_MOUSELEAVE:
@@ -1246,7 +1218,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         break;
     case WM_LBUTTONDOWN: {
-        int id = hit_at(to_logical((short)LOWORD(lp)), to_logical((short)HIWORD(lp)));
+        int id = hit_at(ui_mouse_lx((short)LOWORD(lp)), ui_mouse_ly((short)HIWORD(lp)));
         if (g_open_combo != ID_NONE && id != g_open_combo && id < ID_ITEM0) {
             g_open_combo = ID_NONE; /* a click outside closes the drop-down and does nothing else */
             g_down = ID_NONE;
@@ -1259,7 +1231,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     case WM_LBUTTONUP: {
-        int id = hit_at(to_logical((short)LOWORD(lp)), to_logical((short)HIWORD(lp)));
+        int id = hit_at(ui_mouse_lx((short)LOWORD(lp)), ui_mouse_ly((short)HIWORD(lp)));
         int was = g_down;
         g_down = ID_NONE;
         if (GetCapture() == hwnd)
@@ -1312,18 +1284,26 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_ACTIVATEAPP:
         anim_update();
         break;
+    case WM_SIZE:
+        if (wp != SIZE_MINIMIZED && LOWORD(lp) > 0 && HIWORD(lp) > 0) {
+            /* Maximized or restored: redraw at the largest scale that fits, centred. */
+            int dpi = art_fit_dpi(4 * 96, LOWORD(lp), HIWORD(lp), 0, 0);
+            if (dpi != g_dpi) {
+                ui_init(dpi);
+                KillTimer(hwnd, TIMER_ANIM); /* its rate depends on the scale */
+                g_anim_on = 0;
+            }
+            ui_set_view(LOWORD(lp), HIWORD(lp));
+            anim_update();
+            InvalidateRect(hwnd, NULL, FALSE);
+        }
+        break;
     case WM_GAMEART_READY:
         /* Always rebuild: a READY from a load that was replaced may have cached the ink. */
         ui_set_game_art(1);
         ui_invalidate_backdrop();
         redraw();
         return 0;
-    case WM_SIZE:
-        if (wp == SIZE_MINIMIZED)
-            music_fade_to(0.0f, 600);
-        else if (wp == SIZE_RESTORED && g_set.music && !running())
-            music_fade_to(MUSIC_VOLUME, 1200);
-        break;
     case WM_DROPFILES: {
         wchar_t p[MAX_PATH];
         if (DragQueryFileW((HDROP)wp, 0, p, MAX_PATH) && !importing())
@@ -1334,9 +1314,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
     case WM_TIMER:
         if (wp == TIMER_ANIM) {
-            g_mouse_x += (g_mouse_tx - g_mouse_x) * 0.18f;
-            g_mouse_y += (g_mouse_ty - g_mouse_y) * 0.18f;
-            ui_set_motion((double)(GetTickCount64() - g_anim_t0) / 1000.0, g_mouse_x, g_mouse_y);
+            ui_set_motion((double)(GetTickCount64() - g_anim_t0) / 1000.0);
             InvalidateRect(hwnd, NULL, FALSE);
             return 0;
         }
@@ -1386,7 +1364,6 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_DESTROY:
         KillTimer(hwnd, TIMER_TICK);
         KillTimer(hwnd, TIMER_ANIM);
-        music_stop();
         gameart_stop();
         PostQuitMessage(0);
         return 0;
@@ -1489,7 +1466,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show) {
     int x, y, ow, oh, argc = 0, i, dpi, forced_lang = -1;
     wchar_t iso[MAX_PATH], fonts_path[MAX_PATH] = L"", perf_path[MAX_PATH] = L"";
     LPWSTR *argv;
-    DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+    DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
     (void)prev;
     (void)cmdline;
     (void)show;
@@ -1510,6 +1487,10 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show) {
         }
         if (!wcscmp(a, L"--log-view")) {
             g_log_view = 1;
+            continue;
+        }
+        if (!wcscmp(a, L"--maximized")) {
+            g_start_maximized = 1;
             continue;
         }
         if (!wcscmp(a, L"--no-game-art")) {
@@ -1646,7 +1627,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show) {
         return 1;
     dark_title_bar(g_hwnd);
     SetTimer(g_hwnd, TIMER_TICK, TICK_MS, NULL);
-    ShowWindow(g_hwnd, g_shot_path[0] ? SW_SHOWNOACTIVATE : SW_SHOWNORMAL);
+    ShowWindow(g_hwnd, g_start_maximized ? SW_SHOWMAXIMIZED : g_shot_path[0] ? SW_SHOWNOACTIVATE : SW_SHOWNORMAL);
     UpdateWindow(g_hwnd);
     refresh_game_art();
     if (game_art_on() && !g_shot_path[0]) { /* the next launch shows the next key art */

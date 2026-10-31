@@ -135,24 +135,17 @@ From the art survey of 2026-10-31 (exports under `%NGB_DATA%\extracted\launcher-
 - Logos, characters and the title art are Koei Tecmo's. They are only ever read from the user's copy, at runtime,
   in memory; the README screenshots use the default ink art.
 
-### Title music (`music.c`, game art mode)
+### Title music (removed)
 
-A fan opens the launcher and hears the game. The launcher plays the title theme from the user's `bgm.afs`.
-
-- **Source:** the `bgm.afs` entry whose name contains `bgm_title`; else `bgm_startmenu`; else silence.
-- **Decode:** CRI ADX (port of `ngb_tools.audio.adx`: header, AINF/loop block, 4-bit ADPCM with the cutoff
-  coefficients), streamed to `waveOut` from a worker thread with two or three buffers; loops at the file's loop
-  points.
-- **Behaviour:** volume 35 %, 2 s fade-in once the window is shown; 0.6 s fade-out on PLAY, minimize or focus loss
-  to the game; resumes after the game exits. A `MUSIC` / `MÚSICA` micro label in the top bar toggles it
-  (`[launcher] music`, default 1). No music in the default (original art) mode.
+Built and then removed at the owner's request (2026-10-31): music in a launcher was felt as a nuisance. The ADX facts
+found on the way are in [[log]].
 
 ### Living backdrop (both modes)
 
 - A 30 fps timer while the window is visible, the game is not running and Windows' "Show animations" setting
   (`SPI_GETCLIENTAREAANIMATION`) is on; otherwise the backdrop is static.
-- Layers over the cached hero: two drifting mist strips (6 and 10 px/s, alpha ≤ 10 %); a mouse parallax of the hero
-  (±8 px, eased); in ink mode the moon halo breathes (±3 % over 8 s); in game art mode the ornament ring turns
+- Layers over the cached hero: two drifting mist strips (6 and 10 px/s, alpha ≤ 10 %) (a mouse parallax was built
+  and removed at the owner's request); in ink mode the moon halo breathes (±3 % over 8 s); in game art mode the ornament ring turns
   (one turn per 120 s) on inner pages.
 - Budget: frame composition under 6 ms at 100 % DPI, under 3 % of one core.
 
@@ -176,7 +169,6 @@ The next release brings the game's 3D models into the launcher, with their own s
 | `port/launcher/kamon.c`, `kamon.h` | New: the crest at any size. |
 | `port/launcher/gamedata.c`, `gamedata.h` | New: AFS, XPR0 and sprite-table readers (pure, unit-tested). |
 | `port/launcher/gameart.c`, `gameart.h` | New: decode via `texconv.c`, grading, worker thread. |
-| `port/launcher/music.c`, `music.h` | New: ADX decoder and `waveOut` streaming of the title theme. |
 | `port/launcher/ui.c`, `ui.h` | New palette and fonts (embedded Josefin, Yu Mincho), tracked text, square button, switch, top tabs; old chrome helpers removed. |
 | `port/launcher/launcher.c` | Top bar instead of sidebar; Play page and inner pages re-laid out; `game_art` setting. |
 | `port/launcher/strings.h` | New and changed strings (English and Spanish). |

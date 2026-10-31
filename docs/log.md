@@ -951,3 +951,14 @@ Details in [[gpu-nv2a]].
   `--perf-anim FILE`, `--no-embedded-fonts`, `--demo widgets`. New `ngb.ini` keys under `[launcher]`: `game_art`,
   `music`, `hero_index`.
 - README and [[getting-started]] screenshots are the original art only, from a clean first run.
+
+## [2026-10-31] change | Launcher: no music, no mouse parallax; it can be maximized
+- At the owner's request after trying it: the title theme and the mouse parallax are gone (both felt as a nuisance).
+  `music.c`, its test and the Music switches are removed; the ADX facts of the previous entry stay valid. The mist,
+  the moon and the ring still move, and only while the window is in front.
+- **Maximize:** the window has a maximize box. Maximized (or restored), the frame is redrawn at the largest scale that
+  fits (`art_fit_dpi`), centred, with lacquer margins; the mouse maps through `ui_mouse_lx/ly`. `--maximized` opens it
+  so. On the owner's 1080p screen the maximized frame is 1783 x 1006.
+- Fixes from the whole-branch review: buffers never reached `waveOut` (moot now), the window did not fit at 150 % on
+  1080p, frames cost 8 ms (opaque bars, 20 fps, 15 above 120 dpi, paused in the background: about 4 ms), a stale
+  game-art READY could leave the ink cached.

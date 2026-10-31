@@ -242,11 +242,8 @@
     X(PACE_FREE, L"Unlimited", L"Sin límite") \
     X(LAST_LINE, L"Last session  ·  %ls  ·  %ls  ·  %ls", L"Última sesión  ·  %ls  ·  %ls  ·  %ls") \
     X(GFX_GAMEART, L"Game art in the launcher", L"Arte del juego en el launcher") \
-    X(GFX_GAMEART_DESC, L"Artwork and the title theme from your imported copy instead of the ink landscape. Read from your files, never distributed.", L"Ilustraciones y el tema del título de tu copia importada en lugar del paisaje de tinta. Se leen de tus archivos y nunca se distribuyen.") \
+    X(GFX_GAMEART_DESC, L"Artwork from your imported copy instead of the ink landscape. Read from your files, never distributed.", L"Ilustraciones de tu copia importada en lugar del paisaje de tinta. Se leen de tus archivos y nunca se distribuyen.") \
     X(GFX_LAUNCHER, L"Launcher", L"Launcher") \
-    X(AUD_MUSIC, L"Title theme in the launcher", L"Tema del título en el launcher") \
-    X(AUD_MUSIC_DESC, L"Plays the game's title theme from your copy while the launcher is open (with game art on).", L"Suena el tema del título de tu copia mientras el launcher está abierto (con el arte del juego activado).") \
-    X(TOP_MUSIC, L"Music", L"Música") \
     X(PAGE_LOG_KANJI, L"録", L"録")
 
 enum {

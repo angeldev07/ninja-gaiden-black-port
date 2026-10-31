@@ -105,9 +105,10 @@ them. Uninstalling the launcher does not touch it.
   with bars at the sides.
 - **Limit to 60 fps:** the game's speed. Leave it on.
 - **Game art in the launcher:** once your game is imported, the launcher can show the game's own key art and
-  logotype, and play the title theme, all read from your copy while it runs. Nothing is copied or shared. It is on by
-  default; turn it off for the launcher's own ink-wash art. **Music** in the top bar (or **Audio > Title theme in the
-  launcher**) silences the theme.
+  logotype, read from your copy while it runs. Nothing is copied or shared. It is on by default; turn it off for the
+  launcher's own ink-wash art.
+
+The launcher window can be maximized: everything is redrawn larger.
 
 ## 6. Updates
 

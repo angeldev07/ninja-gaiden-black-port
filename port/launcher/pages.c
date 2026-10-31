@@ -6,7 +6,7 @@
  * (launcher_int.h); nothing here changes settings.
  *
  * Layout, in logical pixels (1240 x 700):
- *   - top bar 0..64: crest and wordmark, the six sections, music toggle, ES / EN;
+ *   - top bar 0..64: crest and wordmark, the six sections, ES / EN;
  *   - Play: the hero fills the window; title block at x 92; bottom bar 588..700 with the
  *     settings at a glance and the primary action at (964, 614, 232 x 60);
  *   - inner pages: left column 0..310 (ghost number, title, kanji, one sentence) and hairline
@@ -91,18 +91,6 @@ static void top_bar(void) {
         add_hit(xe - 6, 12, we + 12, 40, ID_LANG_EN);
         add_hit(xs - 6, 12, ws + 12, 40, ID_LANG_ES);
         rx = xs - 36;
-    }
-    /* music toggle, only where there is music */
-    if (game_art_on()) {
-        wchar_t u[32];
-        int w;
-        wfmt(u, 32, L"%ls", tr(S_TOP_MUSIC));
-        CharUpperBuffW(u, (DWORD)wcslen(u));
-        w = tracked_w(F_LABEL, 0.26f, u);
-        txt_tracked(F_LABEL, g_set.music ? C_CREAM : hot(ID_TOP_MUSIC) ? C_MUTED : C_DIMC, rx - w, 18, 28, 0.26f, u);
-        if (g_set.music)
-            fill_rect(rx - w, 40, w - 3, 1, C_VERM);
-        add_hit(rx - w - 6, 12, w + 12, 40, ID_TOP_MUSIC);
     }
     (void)num;
 }
@@ -483,8 +471,7 @@ static void page_audio(void) {
     y = group(y, tr(S_AUD_SECTION));
     y = row_switch(ID_CHK_MUTE, y, tr(S_AUD_MUTE), tr(S_AUD_MUTE_DESC), g_set.mute, 1);
     y = row_switch(ID_CHK_WAV, y, tr(S_AUD_WAV), tr(S_AUD_WAV_DESC), g_set.audio_wav, 1);
-    y = group(y + 14, tr(S_GFX_LAUNCHER));
-    (void)row_switch(ID_CHK_MUSIC, y, tr(S_AUD_MUSIC), tr(S_AUD_MUSIC_DESC), g_set.music, game_art_on());
+    (void)y;
 }
 
 /* One row of the controls table: key caps (separated by '|') and what they do. */

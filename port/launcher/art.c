@@ -7,8 +7,7 @@
  * the crop) at x 870, the crop's left edge softened over 160 pixels.
  * Inner pages (ART_INNER): flat lacquer; in game art mode the title screen background graded
  * at 7 % in the left column.
- * Every frame, art_animate copies the cached backdrop and adds what moves: the hero's parallax,
- * two drifting mist strips, the ink moon's breathing halo and, in game art mode, the ornament
+ * Every frame, art_animate copies the cached backdrop and adds what moves: two drifting mist strips, the ink moon's breathing halo and, in game art mode, the ornament
  * ring turning at 5 % behind the page number. With t fixed it is a still picture.
  */
 #include <math.h>
@@ -178,29 +177,6 @@ static uint32_t towards(uint32_t p, int r, int g, int b, int a256) {
     return ((uint32_t)pr << 16) | ((uint32_t)pg << 8) | (uint32_t)pb;
 }
 
-/* Copies `src` into `dst` moved by (dx, dy) device pixels, repeating the edges. */
-static void shifted_copy(uint32_t *dst, const uint32_t *src, int w, int h, int dx, int dy) {
-    int y;
-    for (y = 0; y < h; y++) {
-        int sy = y - dy;
-        const uint32_t *s;
-        uint32_t *d = dst + (size_t)y * w;
-        sy = sy < 0 ? 0 : sy >= h ? h - 1 : sy;
-        s = src + (size_t)sy * w;
-        if (dx >= 0) {
-            int i;
-            memcpy(d + dx, s, sizeof(uint32_t) * (size_t)(w - dx));
-            for (i = 0; i < dx; i++)
-                d[i] = s[0];
-        } else {
-            int i;
-            memcpy(d, s - dx, sizeof(uint32_t) * (size_t)(w + dx));
-            for (i = w + dx; i < w; i++)
-                d[i] = s[w - 1];
-        }
-    }
-}
-
 /* A soft horizontal band of mist drifting at `speed` logical px/s. The horizontal density is
  * computed once per frame (two sines per column), the vertical profile once per row. */
 static void mist_strip(canvas_t *c, float y0, float y1, float speed, float phase, double t) {
@@ -230,15 +206,14 @@ static void mist_strip(canvas_t *c, float y0, float y1, float speed, float phase
     free(dens);
 }
 
-void art_animate(canvas_t *frame, const canvas_t *cached, int kind, int game_art, double t, float mx, float my) {
+void art_animate(canvas_t *frame, const canvas_t *cached, int kind, int game_art, double t) {
+    memcpy(frame->px, cached->px, sizeof(uint32_t) * (size_t)frame->w * frame->h);
     if (kind == ART_HERO) {
-        int dx = (int)(-mx * 8.0f * frame->k), dy = (int)(-my * 4.0f * frame->k);
         int ink = !(game_art && gameart_get(GA_HERO));
-        shifted_copy(frame->px, cached->px, frame->w, frame->h, dx, dy);
         mist_strip(frame, ART_H * 0.58f, ART_H * 0.74f, 6.0f, 0.7f, t);
         mist_strip(frame, ART_H * 0.70f, ART_H * 0.86f, 10.0f, 2.3f, t);
         if (ink) { /* the moon's halo breathes: +-3 % over 8 s */
-            float cx = ART_W * 0.76f * frame->k + (float)dx, cy = ART_H * 0.25f * frame->k + (float)dy;
+            float cx = ART_W * 0.76f * frame->k, cy = ART_H * 0.25f * frame->k;
             float r = ART_H * 0.062f * 5.5f * frame->k, f = 0.03f * sinf((float)t * 2.0f * PI_F / 8.0f);
             int X0 = (int)(cx - r), X1 = (int)(cx + r), Y0 = (int)(cy - r), Y1 = (int)(cy + r), X, Y;
             for (Y = Y0 < 0 ? 0 : Y0; Y < Y1 && Y < frame->h; Y++)
@@ -253,7 +228,6 @@ void art_animate(canvas_t *frame, const canvas_t *cached, int kind, int game_art
         }
         return;
     }
-    memcpy(frame->px, cached->px, sizeof(uint32_t) * (size_t)frame->w * frame->h);
     if (game_art) { /* the ornament ring, 200 px, one turn every 120 s */
         const ga_image_t *ring = gameart_get(GA_RING);
         float ang = (float)fmod(t, 120.0) / 120.0f * 2.0f * PI_F, ca = cosf(ang), sa = sinf(ang);

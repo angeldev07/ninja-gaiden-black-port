@@ -60,12 +60,17 @@ void ui_init(int dpi);
 void ui_begin(int backdrop_kind);
 void ui_end(void);
 void ui_present(HDC dc);
+/* The client area: in a maximized window the frame is centred and the margins are lacquer. */
+void ui_set_view(int client_w, int client_h);
+/* Client mouse coordinates to logical frame coordinates. */
+int ui_mouse_lx(int client_x);
+int ui_mouse_ly(int client_y);
 /* Backdrops are cached per page kind; this drops the cache (game art arrived or changed). */
 void ui_invalidate_backdrop(void);
 /* Use the game art in the backdrops (invalidates the cache when it changes). */
 void ui_set_game_art(int on);
-/* What the next frames show of the moving backdrop (art_animate): time in seconds, mouse -1..1. */
-void ui_set_motion(double t, float mx, float my);
+/* What the next frames show of the moving backdrop (art_animate): time in seconds. */
+void ui_set_motion(double t);
 /* An alpha mask (aw x ah, 0..255) scaled to (x, y, w, h) and painted in one colour. */
 void ui_mask(int x, int y, int w, int h, const uint8_t *a, int aw, int ah, rgb_t col, int opacity);
 int ui_save_bmp(const wchar_t *path);

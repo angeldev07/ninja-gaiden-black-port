@@ -26,9 +26,9 @@ static uint32_t *g_px;
 static int g_pw, g_ph;
 static HFONT g_fonts[F_COUNT];
 static uint32_t *g_bg[2];
+static int g_ox, g_oy, g_cw, g_ch; /* frame offset in a larger (maximized) client */
 static int g_bg_game_art;
 static double g_motion_t;
-static float g_motion_x, g_motion_y;
 
 typedef struct hit {
     int x, y, w, h, id;
@@ -188,7 +188,13 @@ void ui_init(int dpi) {
     BITMAPINFO bi;
     HDC screen = GetDC(NULL);
     void *bits = NULL;
-    g_dpi = dpi < 96 ? 96 : dpi;
+    if (g_mem) { /* again, at another scale (the window was maximized or restored) */
+        SelectObject(g_mem, g_bmp_old);
+        DeleteObject(g_bmp);
+        DeleteDC(g_mem);
+        ui_invalidate_backdrop();
+    }
+    g_dpi = dpi < 72 ? 72 : dpi;
     g_pw = S(ART_W);
     g_ph = S(ART_H);
     memset(&bi, 0, sizeof bi);
@@ -230,17 +236,13 @@ void ui_begin(int kind) {
         frame.w = cached.w = g_pw;
         frame.h = cached.h = g_ph;
         frame.k = cached.k = (float)g_dpi / 96.0f;
-        art_animate(&frame, &cached, kind, g_bg_game_art, g_motion_t, g_motion_x, g_motion_y);
+        art_animate(&frame, &cached, kind, g_bg_game_art, g_motion_t);
     } else {
         memset(g_px, 0, bytes);
     }
 }
 
-void ui_set_motion(double t, float mx, float my) {
-    g_motion_t = t;
-    g_motion_x = mx;
-    g_motion_y = my;
-}
+void ui_set_motion(double t) { g_motion_t = t; }
 
 void ui_end(void) { gdi_sync(); }
 
@@ -281,7 +283,32 @@ void ui_mask(int x, int y, int w, int h, const uint8_t *a, int aw, int ah, rgb_t
     }
 }
 
-void ui_present(HDC dc) { BitBlt(dc, 0, 0, g_pw, g_ph, g_mem, 0, 0, SRCCOPY); }
+void ui_present(HDC dc) {
+    BitBlt(dc, g_ox, g_oy, g_pw, g_ph, g_mem, 0, 0, SRCCOPY);
+    if (g_cw > g_pw || g_ch > g_ph) { /* the margins of a maximized window: plain lacquer */
+        HBRUSH b = CreateSolidBrush(RGB((C_BG >> 16) & 255, (C_BG >> 8) & 255, C_BG & 255));
+        RECT r;
+        SetRect(&r, 0, 0, g_cw, g_oy);
+        FillRect(dc, &r, b);
+        SetRect(&r, 0, g_oy + g_ph, g_cw, g_ch);
+        FillRect(dc, &r, b);
+        SetRect(&r, 0, g_oy, g_ox, g_oy + g_ph);
+        FillRect(dc, &r, b);
+        SetRect(&r, g_ox + g_pw, g_oy, g_cw, g_oy + g_ph);
+        FillRect(dc, &r, b);
+        DeleteObject(b);
+    }
+}
+
+void ui_set_view(int client_w, int client_h) {
+    g_cw = client_w;
+    g_ch = client_h;
+    g_ox = client_w > g_pw ? (client_w - g_pw) / 2 : 0;
+    g_oy = client_h > g_ph ? (client_h - g_ph) / 2 : 0;
+}
+
+int ui_mouse_lx(int client_x) { return to_logical(client_x - g_ox); }
+int ui_mouse_ly(int client_y) { return to_logical(client_y - g_oy); }
 
 int ui_save_bmp(const wchar_t *path) {
     BITMAPFILEHEADER fh;

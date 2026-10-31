@@ -178,6 +178,8 @@ with the plan.
 
 ### Task 5b: Title music (`music.c`)
 
+> Built, then removed at the owner's request with the mouse parallax of Task 7b ([[log]] 2026-10-31).
+
 **Files:**
 - Create: `port/launcher/music.c`, `port/launcher/music.h`, `port/tests/music_test.c`
 - Modify: `port/build.cmd` (test 5e; `winmm.lib` for the launcher)

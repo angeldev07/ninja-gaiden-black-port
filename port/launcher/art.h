@@ -28,9 +28,8 @@ typedef struct canvas {
 /* Paints a whole backdrop. game_art: use the user's game art where it is available. */
 void art_backdrop(canvas_t *c, int kind, int game_art);
 
-/* One frame: `cached` (a backdrop of the same size) plus what moves at time t (seconds), with the
- * mouse at (mx, my) in -1..1 for the hero's parallax. t = 0 and mx = my = 0 give a still frame. */
-void art_animate(canvas_t *frame, const canvas_t *cached, int kind, int game_art, double t, float mx, float my);
+/* One frame: `cached` (a backdrop of the same size) plus what moves at time t (seconds). */
+void art_animate(canvas_t *frame, const canvas_t *cached, int kind, int game_art, double t);
 
 /* The largest DPI, not above `dpi` and not below 72, at which the window (ART_W x ART_H logical plus
  * a frame of frame_w x frame_h device pixels) fits in avail_w x avail_h device pixels. */

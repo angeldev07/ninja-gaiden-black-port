@@ -25,7 +25,7 @@ enum ui_id {
     ID_DATA_OPEN, ID_VIEW_LOG, ID_OPEN_RUNS, ID_CB_RENDERER, ID_CB_SCALE, ID_CB_LOGCAP, ID_CHK_PACING, ID_CHK_FULLSCREEN, ID_CHK_WIDESCREEN,
     ID_CHK_MUTE, ID_CHK_WAV, ID_CHK_RDOC, ID_CHK_LENIENT, ID_CHK_DETAIL, ID_LANG_EN, ID_LANG_ES,
     ID_LOG_BACK, ID_COPY_INFO, ID_ABOUT_REPO, ID_ABOUT_CONTRIB, ID_ABOUT_LICENSE,
-    ID_CHK_UPDATES, ID_UPD_NOTES, ID_UPD_GO, ID_CHK_GAMEART, ID_CHK_MUSIC, ID_TOP_MUSIC,
+    ID_CHK_UPDATES, ID_UPD_NOTES, ID_UPD_GO, ID_CHK_GAMEART,
     ID_ITEM0 = 100 /* items of the open drop-down */
 };
 
@@ -47,8 +47,7 @@ typedef struct settings {
     int log_cap;   /* --log-cap */
     int check_updates; /* look for a new release once a day (update.h) */
     int update_day;    /* day number of the last check */
-    int game_art;   /* [launcher] game_art: art and music from the user's copy */
-    int music;      /* [launcher] music: the title theme in game art mode */
+    int game_art;   /* [launcher] game_art: art from the user's copy */
     int hero_index; /* [launcher] hero_index: which key art this launch shows */
 } settings_t;
 
