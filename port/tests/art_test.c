@@ -58,6 +58,20 @@ int main(void) {
     CHECK(unwritten(&c) == 0);
     CHECK(max_channel(&c, 0, ART_W) < 48);
     free(c.px);
+
+    /* Window fit: the largest DPI (<= the system's) whose window fits the work area. Sizes round
+     * like S() (MulDiv). */
+    CHECK(art_fit_dpi(96, 1920, 1040, 16, 39) == 96);  /* 1080p at 100 %: fits as is */
+    {
+        int d = art_fit_dpi(144, 1920, 1008, 16, 39); /* 1080p laptop at 150 %: 1050 px tall does not fit */
+        CHECK(d < 144 && (ART_H * d + 48) / 96 + 39 <= 1008 && (ART_H * (d + 1) + 48) / 96 + 39 > 1008);
+    }
+    {
+        int d = art_fit_dpi(96, 1366, 728, 16, 31); /* 1366 x 768 at 100 % */
+        CHECK(d < 96 && (ART_H * d + 48) / 96 + 31 <= 728);
+    }
+    CHECK(art_fit_dpi(192, 3840, 2100, 16, 39) == 192); /* 4K at 200 %: fits */
+    CHECK(art_fit_dpi(96, 400, 300, 16, 31) == 72);     /* absurdly small: floor */
     printf("art_test: %s\n", g_fail ? "FAILED" : "ok");
     return g_fail ? 1 : 0;
 }

@@ -6,9 +6,10 @@ is missing, the tests are skipped.
 
 - `--fonts FILE` writes the face GDI selected for each font of the toolkit and exits. The embedded
   Josefin Sans must win; with `--no-embedded-fonts` the Segoe UI fallback must be used instead.
-- `--perf-anim FILE` composes 120 frames of the moving backdrop (Play hero and an inner page) and
-  writes the mean milliseconds per frame. The design budget is 6 ms at 100 % DPI; the test allows
-  a 16 ms frame so that slow CI machines do not fail it, and prints the figure.
+- `--perf-anim FILE` paints 120 whole animated frames of Play and of Graphics and writes the mean
+  milliseconds per frame. At 20 fps a 6 ms frame is 12 % of one core while the launcher is in
+  front (it stops when it is not); the test allows 16 ms so that slow CI machines do not fail it,
+  and prints the figure.
 """
 
 from __future__ import annotations

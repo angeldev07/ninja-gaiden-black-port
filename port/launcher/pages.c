@@ -73,7 +73,7 @@ static void hair_box(int x, int y, int w, int h, int alpha) {
 static void top_bar(void) {
     wchar_t num[8];
     int i, x = 330, rx;
-    fill_rect_a(0, 0, LOGICAL_W, TOP_H, C_BG, 200);
+    fill_rect(0, 0, LOGICAL_W, TOP_H, 0x151311); /* opaque: no per-pixel blend every frame */
     ui_hair(0, TOP_H - 1, LOGICAL_W);
     kamon_draw(58, 32, 14, C_VERM);
     txt_tracked(F_TAB, C_CREAM, 86, 18, 28, 0.34f, L"NINJA GAIDEN");
@@ -110,7 +110,7 @@ static void top_bar(void) {
 /* ------------------------------------------------------------------ play page ---- */
 
 static void bottom_bar(void) {
-    fill_rect_a(0, BAR_Y, LOGICAL_W, LOGICAL_H - BAR_Y, 0x0e0c0b, 224);
+    fill_rect(0, BAR_Y, LOGICAL_W, LOGICAL_H - BAR_Y, 0x100e0d);
     ui_hair(0, BAR_Y, LOGICAL_W);
 }
 

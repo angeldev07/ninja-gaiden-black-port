@@ -52,7 +52,7 @@
 #define SLOW_EVERY 5 /* the game/log poll runs every 5th tick */
 #define WM_GAMEART_READY (WM_APP + 1)
 #define TIMER_ANIM 2
-#define ANIM_MS 33
+#define ANIM_MS 50 /* 20 fps: the motion is slow, the CPU stays low */
 
 #define URL_REPO L"https://github.com/angeldev07/ninja-gaiden-black-port"
 #define URL_CONTRIB URL_REPO L"/graphs/contributors"
@@ -357,31 +357,45 @@ int game_art_on(void) { return g_set.game_art && xbe_ok() && !g_no_game_art; }
 
 /* (Re)starts or stops the game art and the title theme after anything that can change them:
  * start-up, an import, another data folder, the switches. The art arrives on WM_GAMEART_READY. */
-static void refresh_game_art(void) {
-    wchar_t dir[MAX_PATH];
-    ui_set_game_art(0);
-    if (!game_art_on()) {
-        gameart_stop();
-        music_stop();
-        return;
-    }
+static void game_dir(wchar_t *dir) {
     wfmt(dir, MAX_PATH, L"%ls", g_set.xbe);
     if (wcsrchr(dir, L'\\'))
         *wcsrchr(dir, L'\\') = 0;
+}
+
+/* Starts or stops only the title theme (the art stays as it is). */
+static void refresh_music(int fade_ms) {
+    wchar_t dir[MAX_PATH];
+    if (!game_art_on() || !g_set.music || g_shot_path[0]) {
+        music_stop();
+        return;
+    }
+    if (!music_playing()) {
+        game_dir(dir);
+        music_start(dir);
+    }
+    if (!running())
+        music_fade_to(MUSIC_VOLUME, fade_ms);
+}
+
+static void refresh_game_art(void) {
+    wchar_t dir[MAX_PATH];
+    ui_set_game_art(0);
+    music_stop();
+    if (!game_art_on()) {
+        gameart_stop();
+        return;
+    }
+    game_dir(dir);
     gameart_notify(g_hwnd, WM_GAMEART_READY);
     gameart_start(dir, g_set.hero_index);
-    if (g_set.music && !g_shot_path[0] && !running()) {
-        music_start(dir);
-        music_fade_to(MUSIC_VOLUME, 2000);
-    } else {
-        music_stop();
-    }
+    refresh_music(2000);
 }
 
 static void set_music(int on) {
     g_set.music = on;
     save_settings();
-    refresh_game_art();
+    refresh_music(1200);
 }
 
 /* Internal resolution the chosen scale gives; "auto" follows the loader: enough to cover the
@@ -1117,8 +1131,8 @@ static int write_fonts_and_quit(const wchar_t *path) {
     return 0;
 }
 
-/* --perf-anim FILE: mean milliseconds to compose one frame of the moving backdrop (120 frames
- * each of the Play hero and of an inner page), written as "hero_ms=X inner_ms=Y". */
+/* --perf-anim FILE: mean milliseconds to paint one whole animated frame (120 frames each of Play
+ * and of Graphics), written as "hero_ms=X inner_ms=Y". */
 static int write_perf_and_quit(const wchar_t *path) {
     LARGE_INTEGER f, t0, t1;
     double ms[2];
@@ -1126,11 +1140,12 @@ static int write_perf_and_quit(const wchar_t *path) {
     FILE *out;
     QueryPerformanceFrequency(&f);
     for (kind = 0; kind < 2; kind++) {
-        ui_begin(kind); /* builds the cached backdrop outside the timing */
+        g_page = kind == 0 ? PG_PLAY : PG_GRAPHICS;
+        paint_all(); /* builds the cached backdrop outside the timing */
         QueryPerformanceCounter(&t0);
         for (i = 0; i < 120; i++) {
-            ui_set_motion(i / 30.0, (float)(i % 40) / 20.0f - 1.0f, 0.3f);
-            ui_begin(kind);
+            ui_set_motion(i / 20.0, (float)(i % 40) / 20.0f - 1.0f, 0.3f);
+            paint_all(); /* the whole frame: backdrop, page, top bar */
         }
         QueryPerformanceCounter(&t1);
         ms[kind] = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart / 120.0;
@@ -1166,11 +1181,11 @@ static float g_mouse_tx, g_mouse_ty, g_mouse_x, g_mouse_y; /* target and eased, 
 static int g_anim_on;
 
 /* The backdrop moves only where something moves (the Play hero, the ring of the inner pages
- * in game art mode), while the window is shown, the game is not running and Windows' "Show
+ * in game art mode), while the window is in front, the game is not running and Windows' "Show
  * animations in Windows" setting is on. Screenshots are always still. */
 static int anim_wanted(void) {
     BOOL anim = TRUE;
-    if (g_shot_path[0] || g_demo || running() || IsIconic(g_hwnd))
+    if (g_shot_path[0] || g_demo || running() || IsIconic(g_hwnd) || GetForegroundWindow() != g_hwnd)
         return 0;
     SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &anim, 0);
     if (!anim)
@@ -1183,7 +1198,7 @@ static void anim_update(void) {
     if (want && !g_anim_on) {
         if (!g_anim_t0)
             g_anim_t0 = GetTickCount64();
-        SetTimer(g_hwnd, TIMER_ANIM, ANIM_MS, NULL);
+        SetTimer(g_hwnd, TIMER_ANIM, g_dpi > 120 ? ANIM_MS * 4 / 3 : ANIM_MS, NULL); /* 15 fps on big DPIs */
     } else if (!want && g_anim_on) {
         KillTimer(g_hwnd, TIMER_ANIM);
     }
@@ -1213,8 +1228,11 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g_mouse_tracked = 1;
         }
         set_hover(hit_at(to_logical((short)LOWORD(lp)), to_logical((short)HIWORD(lp))));
+        /* -1..1 inside the window; a drag captured outside it must not throw the hero away */
         g_mouse_tx = (float)to_logical((short)LOWORD(lp)) / (LOGICAL_W / 2) - 1.0f;
         g_mouse_ty = (float)to_logical((short)HIWORD(lp)) / (LOGICAL_H / 2) - 1.0f;
+        g_mouse_tx = g_mouse_tx < -1.0f ? -1.0f : g_mouse_tx > 1.0f ? 1.0f : g_mouse_tx;
+        g_mouse_ty = g_mouse_ty < -1.0f ? -1.0f : g_mouse_ty > 1.0f ? 1.0f : g_mouse_ty;
         return 0;
     }
     case WM_MOUSELEAVE:
@@ -1291,8 +1309,13 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             redraw();
         }
         return 0;
+    case WM_ACTIVATEAPP:
+        anim_update();
+        break;
     case WM_GAMEART_READY:
+        /* Always rebuild: a READY from a load that was replaced may have cached the ink. */
         ui_set_game_art(1);
+        ui_invalidate_backdrop();
         redraw();
         return 0;
     case WM_SIZE:
@@ -1311,8 +1334,8 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
     case WM_TIMER:
         if (wp == TIMER_ANIM) {
-            g_mouse_x += (g_mouse_tx - g_mouse_x) * 0.12f;
-            g_mouse_y += (g_mouse_ty - g_mouse_y) * 0.12f;
+            g_mouse_x += (g_mouse_tx - g_mouse_x) * 0.18f;
+            g_mouse_y += (g_mouse_ty - g_mouse_y) * 0.18f;
             ui_set_motion((double)(GetTickCount64() - g_anim_t0) / 1000.0, g_mouse_x, g_mouse_y);
             InvalidateRect(hwnd, NULL, FALSE);
             return 0;
@@ -1533,6 +1556,21 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show) {
         g_lang = forced_lang;
     if (g_demo == 2)
         note_error(IMPE_NOT_NGB, L"Halo: Combat Evolved", 0);
+    if (!g_shot_path[0] && !perf_path[0] && !fonts_path[0]) {
+        /* On a 1080p laptop at 150 % the window would be taller than the screen and PLAY would
+         * sit under the taskbar: draw at the largest scale that fits the work area instead. */
+        RECT fr, wa;
+        POINT pt;
+        MONITORINFO mi;
+        SetRect(&fr, 0, 0, 0, 0);
+        AdjustWindowRect(&fr, style, FALSE);
+        SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
+        memset(&mi, 0, sizeof mi);
+        mi.cbSize = sizeof mi;
+        if (GetCursorPos(&pt) && GetMonitorInfoW(MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY), &mi))
+            wa = mi.rcWork;
+        dpi = art_fit_dpi(dpi, wa.right - wa.left, wa.bottom - wa.top, fr.right - fr.left, fr.bottom - fr.top);
+    }
     ui_init(dpi);
     if (fonts_path[0])
         return write_fonts_and_quit(fonts_path);

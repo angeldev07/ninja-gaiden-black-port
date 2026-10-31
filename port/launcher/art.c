@@ -274,3 +274,12 @@ void art_animate(canvas_t *frame, const canvas_t *cached, int kind, int game_art
             }
     }
 }
+
+int art_fit_dpi(int dpi, int avail_w, int avail_h, int frame_w, int frame_h) {
+    /* S() is MulDiv(v, dpi, 96): the same rounding as the window size the launcher asks for */
+    while (dpi > 72 && (ART_W * dpi + 48) / 96 + frame_w > avail_w)
+        dpi--;
+    while (dpi > 72 && (ART_H * dpi + 48) / 96 + frame_h > avail_h)
+        dpi--;
+    return dpi;
+}
