@@ -1016,3 +1016,11 @@ Details in [[gpu-nv2a]].
   the decisions are in [[achievements-brief]].
 - **Toast in the game without patching it:** the port's presenter draws it over the frame, like the Steam overlay;
   the launcher gets an Achievements page. Work starts in a fresh session with the feasibility spike of the brief.
+
+## [2026-10-31] milestone | Checkpoints: named game saves the loader loads on its own
+- The owner's idea: checkpoints, so that traces and tests start at a known spot without playing to it. True save
+  states would mean freezing host threads, GL state and handles, so `ngb_tools.checkpoint` uses the game's own saves:
+  a library in `%NGB_DATA%\checkpoints`, and a sandbox data folder per checkpoint with only that save, which the load
+  route reaches on its own. Usage in [[tools]].
+- The library holds one checkpoint per chapter of the owner's PAL run (`ch01` … `ch16`, `story-cleared`). `run ch02
+  -- --ach-trace` loads chapter 2 and traces it.
