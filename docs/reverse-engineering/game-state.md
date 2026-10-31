@@ -29,8 +29,9 @@ Ghidra (`H5Refs.java`, `H5Decomp.java` in `NGB_DATA\ghidra\scripts`) and checked
   `0x005B497E`) at a save point; `FUN_002fe3c0` restores them. `VERIFIED` for the chapter copy.
 - **Load order seen live:** the mode turns 1 first, the chapter stays 0 for a moment, then becomes the saved one with
   the save copy already equal to it. A chapter that ends naturally changes the chapter while the save copy still holds
-  the old one: that is how the spike tells "chapter complete" from "a save loaded". The natural case is
-  `UNVERIFIED` until a real chapter end is logged.
+  the old one: that is how the spike tells "chapter complete" from "a save loaded". `VERIFIED` on
+  2026-10-31: the owner finished chapter 1 on the modified build and the log reads `chapter 0 -> 1 (save copy 0,
+  difficulty 1)`, then `unlocked chapter-01`.
 
 ## Profile block (the decrypted `system.dat`)
 
@@ -47,8 +48,12 @@ Ghidra (`H5Refs.java`, `H5Decomp.java` in `NGB_DATA\ghidra\scripts`) and checked
 
 - **Karma:** the load screen shows 5,685,887 for the "CHAPTER 10" save, but neither the u32, u64, f32 nor the text is
   in RAM. It may be computed from parts.
-- **End-of-chapter results:** the English table reads "Time", "Kill", "Combos", "Karma", "Total Karma:" (strings near
-  file offset `0x412B38`). Where the rank the owner mentions lives, and its values, need a RAM dump on that screen.
+- **End-of-chapter results:** the message table of that screen (entries `{u32 id, 6 language pointers}` from
+  `0x0044D8A8`, English last) holds "Karma", "Combos", "Kill", "Time", "Chapter", the five difficulty names, "PHASE %d
+  COMPLETED" and "Total Karma:". No rank titles appear besides the difficulty names (`VERIFIED`, the table), so a
+  per-chapter "rank" is most likely the difficulty label (`INFERRED`, to confirm with the owner). The owner's three
+  F10 dumps around the end of chapter 1 (frames 12813, 13173, 13491) carry no screenshot, so their values are not
+  matched yet.
 
 ## Other releases
 

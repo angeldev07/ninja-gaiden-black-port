@@ -1037,3 +1037,10 @@ Details in [[gpu-nv2a]].
 - **Now** the port finds the chapter, difficulty, mode and saved-chapter variables in the game's own code at start
   ([[game-state]] § Other releases), so PAL, NTSC-U and modified builds work with no table per release. Checked on
   the three XBEs and live on the modified build.
+
+## [2026-10-31] ingest | Achievements: the first real unlock
+- The owner finished chapter 1 on the modified build with the spike: the toast showed and `achievements.json` got
+  `chapter-01` (difficulty Normal). The detector of [[game-state]] works on a natural chapter end.
+- Owner's verdict on the placeholder toast: "muy fea y es invasiva", fine for the spike. The design must make it
+  smaller and less intrusive.
+- The results screen's strings show no rank titles besides the difficulty names; asked the owner what the "rank" was.
