@@ -70,6 +70,7 @@ static void usage(void) {
             "                  (\"t=2400p:A@10p\": in gamepad reads, not in ms)\n"
             "  --no-host-input neither PC gamepad nor keyboard: only the script\n"
             "  --ach-demo   both achievement toasts 5 s after start (nothing is recorded)\n"
+            "  --ach-trace  log the player's moves, kills, health, ki and ninpo (to map the game's moves)\n"
             "  --no-ach-toast  achievements still unlock and record, without the toast in the game\n"
             "  --lang en|es language of the achievement toasts (en)\n"
             "  --profile    sample the render and audio threads; hot functions in <log>-profile.txt\n");
@@ -234,6 +235,8 @@ static int parse_args(void) {
             g_ngb_opts.input_script = _strdup(argv[++i]);
         else if (!strcmp(a, "--ach-demo"))
             g_ngb_opts.ach_demo = 1;
+        else if (!strcmp(a, "--ach-trace"))
+            g_ngb_opts.ach_trace = 1;
         else if (!strcmp(a, "--no-ach-toast"))
             g_ngb_opts.ach_toast_off = 1;
         else if (!strcmp(a, "--lang") && more)

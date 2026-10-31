@@ -41,5 +41,7 @@ int ach_store_unlock(ach_store *s, const char *id, int difficulty, const char *t
 
 uint64_t ach_store_progress(const ach_store *s, const char *id);
 void ach_store_set_progress(ach_store *s, const char *id, uint64_t value);
+/* Drops a progress record (no-op if absent). */
+void ach_store_remove_progress(ach_store *s, const char *id);
 
 #endif

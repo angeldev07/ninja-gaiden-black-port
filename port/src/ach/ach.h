@@ -10,6 +10,7 @@
  *   ngb_ach_init(&xbe);       // after the XBE is mapped
  *   ngb_ach_tick();           // main thread, every few ms
  *   ngb_ach_screenshot();     // F12 saved a shot
+ *   ngb_ach_game_saved();     // the game wrote a save
  *   ngb_ach_shutdown();       // from ngb_stop: saves the play time
  */
 #ifndef NGB_ACH_H
@@ -20,6 +21,8 @@
 void ngb_ach_init(const xbe_t *xbe);
 void ngb_ach_tick(void);
 void ngb_ach_screenshot(void);
+/* The game wrote one of its saves (kernel NtWriteFile under UDATA): a run checkpoint. */
+void ngb_ach_game_saved(void);
 void ngb_ach_shutdown(void);
 
 #endif

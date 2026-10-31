@@ -3,6 +3,8 @@
  */
 #include "rules.h"
 
+#include <stddef.h>
+
 int ach_rank(uint32_t karma, uint32_t max, uint32_t min, int difficulty) {
     static const int ninja_dog[5] = {2, 3, 3, 4, 4};
     uint32_t third = max > min ? (max - min) / 3 : 0;
@@ -27,6 +29,42 @@ int ach_bit_count(uint64_t mask) {
     for (; mask; mask &= mask - 1)
         n++;
     return n;
+}
+
+int ach_is_dragon_sword(unsigned item) { return item == 0x01 || item == 0xC9; }
+
+int ach_is_healing_item(unsigned item) {
+    /* Item ids from the game's messtr.mes (docs/reverse-engineering/game-state.md § Inventory). */
+    static const unsigned short heal[] = {
+        0xBE, 0xBF,          /* Elixir of Spiritual Life, Great Spirit Elixir */
+        0xC0, 0xC1,          /* Elixir of the Devil Way, Great Devil Elixir */
+        0x17E, 0x181,        /* Fragrance of Hydrangea, of Dayflower */
+        0x172, 0x180,        /* Ayane's Rations, Ration Bundle */
+        0x187, 0x188, 0x189, /* Ayane's Chestnut, Walnut, Cherry */
+        0xFB,                /* The Talisman of Rebirth */
+    };
+    size_t i;
+    for (i = 0; i < sizeof heal / sizeof heal[0]; i++)
+        if (heal[i] == item)
+            return 1;
+    return 0;
+}
+
+unsigned ach_run_marks(const ach_body *a, const ach_body *b) {
+    unsigned m = 0;
+    if (!a->health_max || !b->health_max) /* a load or a menu between the two reads */
+        return 0;
+    if (b->health_max > a->health_max || (a->ki_max && b->ki_max > a->ki_max))
+        m |= ACH_RUN_UPGRADE;
+    if (b->health_max == a->health_max && b->health < a->health)
+        m |= ACH_RUN_HIT;
+    if (b->ki_max == a->ki_max && b->ki < a->ki)
+        m |= ACH_RUN_NINPO;
+    if (b->heal_items < a->heal_items)
+        m |= ACH_RUN_HEAL;
+    if (b->weapon != 0xFFFF && !ach_is_dragon_sword(b->weapon))
+        m |= ACH_RUN_OTHER_WEAPON;
+    return m;
 }
 
 int ach_mission_slot(int mission) {

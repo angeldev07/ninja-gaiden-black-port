@@ -98,6 +98,32 @@ static void test_rules(void) {
     /* The mission menu: its first entry, "Eternal Legend" last, and an index it does not list. */
     CHECK(ach_mission_slot(0x25) == 0 && ach_mission_slot(ACH_MISSION_ETERNAL_LEGEND) == ACH_MISSIONS - 1);
     CHECK(ach_mission_slot(0x41) == ACH_MISSIONS - 2 && ach_mission_slot(0) == -1 && ach_mission_slot(0x62) == -1);
+    {
+        ach_body a = {2400, 2400, 200, 200, 0x01, 3}, b = a;
+        CHECK(ach_run_marks(&a, &b) == 0);
+        b.health = 1988; /* a hit, as a giant's in the trace */
+        CHECK(ach_run_marks(&a, &b) == ACH_RUN_HIT);
+        b = a;
+        b.health_max = 0; /* a load: nothing counts */
+        b.health = 0;
+        CHECK(ach_run_marks(&a, &b) == 0 && ach_run_marks(&b, &a) == 0);
+        b = a;
+        b.health_max = 2600; /* Life of the Gods */
+        b.health = 2600;
+        CHECK(ach_run_marks(&a, &b) == ACH_RUN_UPGRADE);
+        b = a;
+        b.ki = 100;
+        b.heal_items = 2;
+        CHECK(ach_run_marks(&a, &b) == (ACH_RUN_NINPO | ACH_RUN_HEAL));
+        b = a;
+        b.weapon = 0x133; /* Lunar */
+        CHECK(ach_run_marks(&a, &b) == ACH_RUN_OTHER_WEAPON);
+        b.weapon = 0xC9;
+        CHECK(ach_run_marks(&a, &b) == 0);
+        b.weapon = 0xFFFF;
+        CHECK(ach_run_marks(&a, &b) == 0);
+        CHECK(ach_is_healing_item(0xBE) && !ach_is_healing_item(0x59));
+    }
 }
 
 /* A synthetic XBE with the two routines the search reads, at the PAL addresses. */
@@ -166,7 +192,9 @@ static void test_sig(void) {
     CHECK(v.chapter == 0x00E130D4u && v.saved == 0x005B4977u && v.mode == 0x005B497Au);
     CHECK(v.difficulty == 0x005B4975u && v.karma == 0x005B4780u && v.karma_last == 0x005B4784u);
     CHECK(v.rank_data == 0x00E12EC4u && v.mission == 0x005B4978u);
-    CHECK(v.play_time == 0x005B4788u && v.scarabs == 0x005B4794u);
+    CHECK(v.play_time == 0x005B4788u && v.scarabs == 0x005B4794u && v.kills == 0x005B4614u);
+    CHECK(v.weapon == 0x005B47DAu && v.health == 0x005B5784u && v.ninpo == 0x005B5754u && v.ki == 0x005B578Cu);
+    CHECK(v.player == 0x00E1349Cu && v.inventory == 0x005B43F0u);
     CHECK(v.stage_end == 0); /* no stores of 0x80 into it */
     CHECK(sig_case(3, &v) == 0 && v.stage_end == 0x00E12E94u);
     CHECK(sig_case(1, &v) == -1 && v.chapter == 0);

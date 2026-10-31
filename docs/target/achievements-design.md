@@ -93,7 +93,22 @@ Found without the owner's help, from the code and from dumps of the owner's save
 - **Still open:** #12 needs the owner to say which mission "the stadium" is (the detector then only compares the
   mission index); #20 and #21 need the weapon list and levels settled (the inventory and the item ids are known).
 
-Phase 2 adds hooks for the rest.
+## Phase 2 (in progress)
+
+- **Run tracker (#9 and #23), RAM only:** a story run is followed from New Game (the play time under 20 s, no karma,
+  chapter 1). Each read while playing compares health, ki, their maxima, the healing and ki items carried and the
+  melee weapon with the read before (`ach_run_marks` in `rules.c`) and keeps marks: a hit taken, an item used, ki
+  spent (ninpo), an upgrade, a weapon other than the Dragon Sword (ids 0x01 and 0xC9). When the game writes a save
+  (the kernel's `NtWriteFile` under `UDATA`), the play time, the karma and the marks become a checkpoint in
+  `achievements.json` (`run-TTTTTTTT-KKKKKKKK`, the 40 newest kept). A load makes the play time jump: the run goes on
+  only if the loaded save matches a checkpoint (same karma, play time up to 10 s later), so a save from before the
+  port, or from another run, is never followed. A natural story end unlocks #23 with no weapon mark and #9 on Master
+  Ninja with none of the other marks. `VERIFIED`: New Game starts following and the trip into chapter 1 adds no mark.
+  `INFERRED`: checkpoints (no scripted save yet) and the end.
+- **Counters (#15 to #18):** the defeat counter and the player's move byte are found; the move ids still have to be
+  named. Next step: the owner plays a short session with `--ach-trace` doing each move a few times.
+- **Boss without damage (#22)** and **the stadium untouched (#13):** the health is read; they need to know when a
+  boss fight starts and ends, and which mission the stadium is.
 
 ## Toast
 

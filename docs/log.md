@@ -1086,3 +1086,15 @@ Details in [[gpu-nv2a]].
   save with 24 scarabs handed in counted nothing. The mission clear itself is still `INFERRED`.
 - Open: which mission the owner means by "the stadium", and the weapon list and levels for the collection
   achievements.
+
+## [2026-10-31] ingest | Achievements, phase 2 groundwork: the player, a trace mode and the run tracker
+- Found in `FUN_00023520` (player 1's per-frame update): the player object pointer, the defeat counter and its
+  "defeated one" flag, the combo; health and ki next to the save block. All at fixed distances in the three XBEs.
+  Details in [[game-state]] § The player.
+- `--ach-trace` logs the move byte, defeats, health, ki and ninpo as they change. A scripted fight in a mission shows
+  the health going down with each hit and the game over; the weapon variable is unused in mission mode.
+- Run tracker for "Only the Sword" and "The True Ultimate Master Ninja" ([[achievements-design]] § Phase 2): followed
+  from New Game, checkpoints when the game writes a save, resumed only from a save that matches one. First version
+  treated any change of mode as a load and lost the run between the intro and chapter 1; now only a jump of the play
+  time does.
+- Needs the owner: a short session with `--ach-trace` to name the moves (Izuna Drop, Flying Swallow, fire ninpo).
