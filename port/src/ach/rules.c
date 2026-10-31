@@ -20,9 +20,26 @@ int ach_rank(uint32_t karma, uint32_t max, uint32_t min, int difficulty) {
     return difficulty == 0 ? ninja_dog[rank] : rank;
 }
 
-int ach_seal_count(uint32_t mask) {
+int ach_seal_count(uint32_t mask) { return ach_bit_count(mask & 0xFFFFu); }
+
+int ach_bit_count(uint64_t mask) {
     int n = 0;
-    for (mask &= 0xFFFFu; mask; mask &= mask - 1)
+    for (; mask; mask &= mask - 1)
         n++;
     return n;
+}
+
+int ach_mission_slot(int mission) {
+    /* The game's mission menu, page by page (PAL 0x00469668, NTSC-U 0x004474B8): mission indices
+     * as the game numbers them in the profile. */
+    static const unsigned char menu[ACH_MISSIONS] = {
+        0x25, 0x1A, 0x24, 0x37, 0x23, 0x29, 0x14, 0x0D, 0x1B, 0x2C, 0x0F, 0x10, 0x1F, 0x12, 0x13, 0x05,
+        0x07, 0x34, 0x09, 0x38, 0x1C, 0x19, 0x22, 0x2B, 0x21, 0x17, 0x16, 0x15, 0x2E, 0x31, 0x3C, 0x3E,
+        0x3D, 0x3F, 0x40, 0x03, 0x0E, 0x1D, 0x04, 0x27, 0x43, 0x44, 0x42, 0x39, 0x41, ACH_MISSION_ETERNAL_LEGEND,
+    };
+    int i;
+    for (i = 0; i < ACH_MISSIONS; i++)
+        if (menu[i] == mission)
+            return i;
+    return -1;
 }
