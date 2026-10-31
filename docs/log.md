@@ -898,3 +898,31 @@ Details in [[gpu-nv2a]].
   without a load before them are still open); the game's own 30 fps hold after loads; the heat haze band; lighting
   details, floor reflections and the sword glow.
 - `version.h` goes to `0.7.0` and then back to `0.8.0-dev`.
+
+## [2026-10-31] decision | Launcher redesign: "lacquer and ink", with optional game art
+- **Why:** the owner found the v2 launcher "very AI": neon glow, chrome lettering, speed lines. Goal: professional,
+  elegant, visibly made with care, with elements of the game.
+- **Direction** (chosen from three mockups, then two polish rounds backed by research): warm lacquer black, one
+  vermilion accent, 1 px hairlines, flat surfaces, square buttons; ultra-thin wide-tracked Latin (Josefin Sans, OFL,
+  embedded) with bold serif kanji (Yu Mincho, ships with Windows); an original kamon (crossed swords in a ring) as
+  the only icon; navigation moves from the sidebar to a top bar. Spec: [[launcher-laca-design]].
+- **Default art:** a procedural ink-wash night landscape. Prototyped in Python: ridged fBm silhouettes, crest ink
+  fading into mist, air perspective, mist bands, paper fibre. The technique follows the open-source `inkwash`
+  renderer's notes, including what did not work there (brush strokes and iso-contours look mechanical).
+- **Legal line:** official art from the internet stays out of the repo and the release (copyright and trademark;
+  a DMCA would take down the repo and the updater with it). Game art is only read at runtime from the user's copy.
+- **Game art survey** (subagent; exports under `%NGB_DATA%\extracted\launcher-art-survey\`, `VERIFIED` by export):
+  - the best 2D art is in `demo.afs`, not `spr.afs`: `demo.spr` holds the Ryu and Ayane key art (P8 1024 x 512),
+    the "NINJA GAIDEN" and "BLACK" logotypes with alpha, and character portraits; `titlebg.spr` holds the title
+    screen's background and ornament rings (A8);
+  - `spr.afs` has 684 named entries, P8 and A8 only, all swizzled, many localized duplicates;
+  - `.spr` = XPR0 whose resource 0 is USERDATA: 24-byte sprite records `{f32 u0,v0,u1,v1; u32 texture ordinal;
+    u16 w,h}` that give each texture's used crop;
+  - full-screen 512 x 512 `.spr` hold two sprites: the main image (511 x 409) and a strip whose placement is
+    `UNVERIFIED`;
+  - `load_img.bin` is not art: it is a preload table of 206 AFS names with sizes and groups;
+  - the movies are CRI Sofdec (`.sfd`) and `ninja.aix` is CRI AIX audio.
+- **Game art prototype:** the Ryu key art graded into the palette (duotone bg to cream, 14 % chroma, reds toward
+  vermilion) and the logotypes used as cream and vermilion masks. The owner's review images are in
+  `%NGB_DATA%\comparisons\launcher-laca-2026-10-31\`.
+- **Out of scope here:** general guards against CPU/GPU wait freezes, a separate piece of work after v0.8.0.
