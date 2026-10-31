@@ -176,6 +176,29 @@ with the plan.
   logos as alpha masks. Log one line per disabled asset (`launcher.log`).
 - [ ] **Step 4:** Run; PASS. **Step 5:** Commit `feat(launcher): game art read from the user's copy`.
 
+### Task 5b: Title music (`music.c`)
+
+**Files:**
+- Create: `port/launcher/music.c`, `port/launcher/music.h`, `port/tests/music_test.c`
+- Modify: `port/build.cmd` (test 5e; `winmm.lib` for the launcher)
+
+**Interfaces:**
+- Consumes: `afs_find`, `gamedata_load` (Task 4).
+- Produces: `int adx_parse(const uint8_t *p, size_t n, adx_info_t *out);` (`adx_info_t { int channels, rate;
+  uint32_t frames, loop_start, loop_end; int has_loop; size_t data_offset; int block; int c1, c2; }`);
+  `int adx_decode(const adx_info_t *h, const uint8_t *p, size_t n, uint32_t frame0, uint32_t count, int16_t *out,
+  adx_state_t *st);` (interleaved, keeps history per channel); `void music_start(const wchar_t *game_dir);`
+  `void music_fade_to(float volume, int ms);` `void music_stop(void);`
+- [ ] **Step 1:** `music_test.c`: a synthetic ADX built in the test (header 0x80, version 3, one 18-byte frame per
+  channel with scale 1 and nibbles 0..15) decodes to the samples `ngb_tools.audio.adx.decode` gives for the same
+  bytes (expected values generated once with the Python tool, pasted with a comment naming the command);
+  truncated header → error; encrypted flag → error; loop parse from a version-4 header with AINF.
+- [ ] **Step 2:** Run; FAIL. **Step 3:** Port `adx.py` (`parse_header`, `parse_loop`, `compute_coefficients`,
+  `decode_channel`). Streaming: worker thread, 3 × 8192-frame `waveOut` buffers, wraps at the loop points; volume
+  applied per sample with a linear ramp. Entry name search: first containing `bgm_title`, else `bgm_startmenu`.
+- [ ] **Step 4:** Run; PASS. Manual: the theme plays, loops cleanly, fades on PLAY.
+- [ ] **Step 5:** Commit `feat(launcher): title theme from the user's copy`.
+
 ### Task 6: Widgets
 
 **Files:**
@@ -218,6 +241,23 @@ with the plan.
 - [ ] **Step 3:** Shots: Play with `--no-game-art` and with game art (owner's data), Graphics both ways.
 - [ ] **Step 4:** Commit `feat(launcher): ink or game-art backdrop`.
 
+### Task 7b: Living backdrop
+
+**Files:**
+- Modify: `port/launcher/art.c`, `port/launcher/ui.c`, `port/launcher/launcher.c`
+
+**Interfaces:**
+- Produces: `void art_animate(canvas_t *frame, const canvas_t *cached, int kind, double t, float mx, float my);`
+  (composes the moving layers over the cached backdrop into the frame); `ui_begin` calls it instead of `memcpy`
+  when animation is on.
+- [ ] **Step 1:** Timer `ID_TIMER_ANIM` at 33 ms; on only if visible, not minimized, game not running and
+  `SPI_GETCLIENTAREAANIMATION` is TRUE; `InvalidateRect` without erase.
+- [ ] **Step 2:** Layers per spec (mist strips 6 and 10 px/s ≤ 10 %; parallax ±8 px eased 0.12 per frame; moon
+  halo ±3 % over 8 s; ring 1 turn / 120 s). Mist strips precomputed once per DPI (1D noise × vertical profile).
+- [ ] **Step 3:** Measure: log the mean composition time over 300 frames with `--perf-anim`; expected < 6 ms at
+  96 dpi. Task Manager CPU < 3 % of one core.
+- [ ] **Step 4:** Commit `feat(launcher): living backdrop`.
+
 ### Task 8: Pages and states (`pages.c`, `launcher.c`)
 
 **Files:**
@@ -242,7 +282,7 @@ with the plan.
   (primary becomes STOP), update band (thin band under the top bar: version, WHAT'S NEW link, UPDATE secondary).
 - [ ] **Step 5:** Inner pages: left column (ghost number `0N`, F_H2 title, kanji 画 音 操 設 記 per page, one
   sentence), right column hairline rows with `ui_switch` / combo text + caret; open combo overlay restyled flat.
-  New Graphics row "Game art in the launcher" (`[launcher] game_art`, default 1; disabled while no game).
+  New Graphics row "Game art in the launcher" (`[launcher] game_art`, default 1; disabled while no game). Top bar `MUSIC` / `MÚSICA` toggle (`[launcher] music`, default 1) shown only in game art mode; `music_fade_to` on PLAY, minimize and game exit.
 - [ ] **Step 6:** `strings.h`: new keys in English and Spanish for every label above; remove unused ones.
 - [ ] **Step 7:** Shots of every page/state (`--page`, `--demo progress|error`, `--lang es`) at 96 and 144 dpi.
 - [ ] **Step 8:** Commit `feat(launcher): lacquer layout for every page and state`.
