@@ -7,6 +7,7 @@ fading downward into mist, air perspective toward the sky tone, horizontal mist 
 frequency macro mask that leaves blank areas, boundary noise, paper fibre and a vignette.
 Writes a PNG. Usage: python inkland.py OUT.png [W H SEED]
 """
+
 import math
 import struct
 import sys
@@ -25,6 +26,7 @@ def mulberry32(a):
         t = ((t ^ (t >> 15)) * (t | 1)) & 0xFFFFFFFF
         t ^= (t + (((t ^ (t >> 7)) * (t | 61)) & 0xFFFFFFFF)) & 0xFFFFFFFF
         return ((t ^ (t >> 14)) & 0xFFFFFFFF) / 4294967296.0
+
     return rnd
 
 
@@ -98,7 +100,10 @@ BANDS = [
 # Silhouettes: ridged fBm, then two smoothing passes.
 sil = []
 for base, hs, salt, _, _ in BANDS:
-    xs = [H * base - H * hs * (0.35 + 0.95 * x / W) * (ridged1(x / 340.0, salt) * 1.7 - 0.3) for x in range(W)]
+    xs = [
+        H * base - H * hs * (0.35 + 0.95 * x / W) * (ridged1(x / 340.0, salt) * 1.7 - 0.3)
+        for x in range(W)
+    ]
     for _ in range(2):
         xs = [(xs[max(i - 1, 0)] + 2 * xs[i] + xs[min(i + 1, W - 1)]) / 4 for i in range(W)]
     sil.append(xs)
@@ -119,7 +124,11 @@ for y in range(H):
         if dist < MOON[2] + 1.5:
             cov = min(1.0, MOON[2] + 1.5 - dist)
             tex = 0.92 + 0.08 * fbm2(x / 18.0, y / 18.0, 3)
-            r, g, b = mix(r, 150 * tex, cov * 0.32), mix(g, 138 * tex, cov * 0.32), mix(b, 120 * tex, cov * 0.32)
+            r, g, b = (
+                mix(r, 150 * tex, cov * 0.32),
+                mix(g, 138 * tex, cov * 0.32),
+                mix(b, 120 * tex, cov * 0.32),
+            )
 
         # Bands, far to near; each overwrites with its own ink.
         for (base, hs, salt, crest, fade), s in zip(BANDS, sil):
@@ -131,13 +140,18 @@ for y in range(H):
             ink = math.exp(-depth / fade)
             # Wash texture and the macro mask that opens blank areas.
             tex = 0.75 + 0.5 * fbm2(x / 70.0 + salt, y / 150.0, 4)
-            macro = smooth(min(1.0, max(0.0, fbm2(x / 420.0 + salt * 3, y / 300.0, 2) * 1.8 - 0.35)))
+            macro = smooth(
+                min(1.0, max(0.0, fbm2(x / 420.0 + salt * 3, y / 300.0, 2) * 1.8 - 0.35))
+            )
             k = min(1.0, ink * tex * (0.55 + 0.45 * macro))
             cr, cg, cb = (mix(MIST[i], crest[i], k) for i in range(3))
             r, g, b = mix(r, cr, cov), mix(g, cg, cov), mix(b, cb, cov)
 
         # Horizontal mist bands that cut the ranges apart.
-        mband = max(0.0, 1.0 - abs(t - 0.66) / 0.05) * 0.22 + max(0.0, 1.0 - abs(t - 0.79) / 0.04) * 0.16
+        mband = (
+            max(0.0, 1.0 - abs(t - 0.66) / 0.05) * 0.22
+            + max(0.0, 1.0 - abs(t - 0.79) / 0.04) * 0.16
+        )
         mband *= 0.6 + 0.4 * vnoise2(x / 160.0, 3.0)
         r, g, b = mix(r, MIST[0], mband), mix(g, MIST[1], mband), mix(b, MIST[2], mband)
 
@@ -154,7 +168,12 @@ def png(path, w, h, rows):
     raw = b"".join(rows)
 
     def chunk(tag, data):
-        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+        return (
+            struct.pack(">I", len(data))
+            + tag
+            + data
+            + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+        )
 
     with open(path, "wb") as f:
         f.write(b"\x89PNG\r\n\x1a\n")

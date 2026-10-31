@@ -1,11 +1,12 @@
-"""Generates port/res/ngb.ico: the launcher's emblem, a brush dragon (龍) in cream with a vermilion seal
-on lacquer black.
+"""Generates port/res/ngb.ico: the launcher's emblem.
+
+A brush dragon (龍) in cream with a vermilion seal, on lacquer black.
 
 The dragon is the glyph of Yuji Boku (SIL OFL 1.1, port/res/fonts), drawn by the launcher itself so
 that icon and window match: build the launcher, export the glyph, then run this script.
 
     build/port/ngb-launcher.exe --emblem-mask build/emblem-mask.bmp
-    python port/res/make_icon.py                    # reads build/emblem-mask.bmp, writes port/res/ngb.ico
+    python port/res/make_icon.py                    # reads it, writes port/res/ngb.ico
     python port/res/make_icon.py --png preview.png  # also a 256 px preview
 
 Stdlib only: the ICO is assembled by hand (32-bit BMP entries with an AND mask up to 128 px, a PNG
@@ -35,18 +36,18 @@ CREAM: RGB = (239.0, 231.0, 214.0)
 GLYPH_BOX = (0.10, 0.08, 0.80)  # x, y, side of the emblem square inside the tile (unit canvas)
 SEAL = 0.14  # side of the seal, relative to the emblem square (launcher: emblem_draw)
 
-MASK: tuple[int, list[float]] = (0, [])  # (size, coverage 0..1 row by row), set by load_mask
+_MASK: dict[str, object] = {"size": 0, "cov": []}  # set by load_mask: size, coverage 0..1
 
 
 def load_mask(path: Path) -> None:
-    """The 32-bit top-down BMP that `ngb-launcher.exe --emblem-mask` writes (white glyph on black)."""
-    global MASK
+    """Reads the 32-bit BMP that `ngb-launcher.exe --emblem-mask` writes (white glyph on black)."""
     data = path.read_bytes()
     off = struct.unpack_from("<I", data, 10)[0]
     w, h = struct.unpack_from("<ii", data, 18)
-    if w != -h and w != h:
+    if w not in (-h, h):
         raise SystemExit(f"{path}: expected a square mask")
-    MASK = (w, [data[off + i * 4 + 2] / 255.0 for i in range(w * w)])
+    _MASK["size"] = w
+    _MASK["cov"] = [data[off + i * 4 + 2] / 255.0 for i in range(w * w)]
 
 
 def _lerp(a: RGB, b: RGB, t: float) -> RGB:
@@ -67,7 +68,8 @@ def _square_sdf(x: float, y: float) -> float:
 
 def _glyph(u: float, v: float) -> float:
     """Bilinear coverage of the dragon at (u, v) of the emblem square (0..1)."""
-    n, cov = MASK
+    n = int(_MASK["size"])  # type: ignore[call-overload]
+    cov: list[float] = _MASK["cov"]  # type: ignore[assignment]
     x, y = u * n - 0.5, v * n - 0.5
     if x < 0 or y < 0 or x >= n - 1 or y >= n - 1:
         return 0.0

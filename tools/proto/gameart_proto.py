@@ -6,7 +6,7 @@ Reads exported PNGs of the user's own copy, grades them into the lacquer palette
 hero layer (1240x700) plus the logo masks tinted cream. Usage:
     python -I gameart_proto.py KEYART.png LOGO.png BLACK.png OUTDIR
 """
-import math
+
 import struct
 import sys
 import zlib
@@ -17,8 +17,8 @@ def read_png(path):
     assert data[:8] == b"\x89PNG\r\n\x1a\n"
     pos, idat, w = 8, b"", 0
     while pos < len(data):
-        n, tag = struct.unpack(">I4s", data[pos:pos + 8])
-        body = data[pos + 8:pos + 8 + n]
+        n, tag = struct.unpack(">I4s", data[pos : pos + 8])
+        body = data[pos + 8 : pos + 8 + n]
         if tag == b"IHDR":
             w, h, depth, ctype = struct.unpack(">IIBB", body[:10])
             assert depth == 8 and ctype in (2, 6)
@@ -32,7 +32,7 @@ def read_png(path):
     i = 0
     for _ in range(h):
         f = raw[i]
-        line = bytearray(raw[i + 1:i + 1 + stride])
+        line = bytearray(raw[i + 1 : i + 1 + stride])
         i += 1 + stride
         for x in range(stride):
             a = line[x - bpp] if x >= bpp else 0
@@ -50,17 +50,28 @@ def read_png(path):
                 line[x] = (line[x] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
         out.append(line)
         prev = line
-    px = [[tuple(r[x * bpp:x * bpp + bpp]) + ((255,) if bpp == 3 else ()) for x in range(w)] for r in out]
+    px = [
+        [tuple(r[x * bpp : x * bpp + bpp]) + ((255,) if bpp == 3 else ()) for x in range(w)]
+        for r in out
+    ]
     return w, h, px
 
 
 def write_png(path, w, h, rows, alpha=False):
     def chunk(tag, d):
-        return struct.pack(">I", len(d)) + tag + d + struct.pack(">I", zlib.crc32(tag + d) & 0xFFFFFFFF)
+        return (
+            struct.pack(">I", len(d))
+            + tag
+            + d
+            + struct.pack(">I", zlib.crc32(tag + d) & 0xFFFFFFFF)
+        )
 
     raw = b"".join(b"\x00" + bytes(r) for r in rows)
     with open(path, "wb") as f:
-        f.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6 if alpha else 2, 0, 0, 0)))
+        f.write(
+            b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6 if alpha else 2, 0, 0, 0))
+        )
         f.write(chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b""))
 
 
@@ -94,7 +105,10 @@ def sample(px, w, h, x, y):
     x0, y0 = int(x), int(y)
     fx, fy = x - x0, y - y0
     a, b, c, d = px[y0][x0], px[y0][x0 + 1], px[y0 + 1][x0], px[y0 + 1][x0 + 1]
-    return [(a[i] * (1 - fx) + b[i] * fx) * (1 - fy) + (c[i] * (1 - fx) + d[i] * fx) * fy for i in range(4)]
+    return [
+        (a[i] * (1 - fx) + b[i] * fx) * (1 - fy) + (c[i] * (1 - fx) + d[i] * fx) * fy
+        for i in range(4)
+    ]
 
 
 def hero(key_png, out_png, W=1240, H=700):

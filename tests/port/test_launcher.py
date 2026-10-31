@@ -58,7 +58,8 @@ class LauncherAnimationTest(unittest.TestCase):
     def test_backdrop_frame_cost(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "perf.txt"
-            subprocess.run([str(LAUNCHER), "--perf-anim", str(out), "--no-game-art"], check=True, timeout=60)
+            args = [str(LAUNCHER), "--perf-anim", str(out), "--no-game-art"]
+            subprocess.run(args, check=True, timeout=60)
             values = dict(line.split("=", 1) for line in out.read_text(encoding="utf-8").split())
         hero, inner = float(values["hero_ms"]), float(values["inner_ms"])
         print(f"backdrop frame: hero {hero:.2f} ms, inner {inner:.2f} ms")
