@@ -3,7 +3,7 @@
  *
  * Shapes are drawn pixel by pixel into the back buffer with signed-distance edges, so they
  * are antialiased without GDI+. Text goes through GDI (ClearType for body text, grayscale
- * for the chrome headings, whose glyph mask we recolour ourselves).
+ * antialiasing for the large display type).
  */
 #define UNICODE
 #define WIN32_LEAN_AND_MEAN
@@ -24,7 +24,14 @@ static HBITMAP g_bmp, g_bmp_old;
 static uint32_t *g_px;
 static int g_pw, g_ph;
 static HFONT g_fonts[F_COUNT];
-static uint32_t *g_bg[2];
+/* Cached backdrops: [0] the inner pages, [1] the ink hero, [2 + ART_HERO_*] the game's heroes. */
+#define NBG (2 + ART_HERO_COUNT)
+static uint32_t *g_bg[NBG];
+static int g_hero_cur = -1, g_hero_next = -1;
+static float g_hero_mix;
+static int g_ox, g_oy, g_cw, g_ch; /* frame offset in a larger (maximized) client */
+static int g_bg_game_art;
+static double g_motion_t;
 
 typedef struct hit {
     int x, y, w, h, id;
@@ -83,51 +90,114 @@ static void add_px(int x, int y, int r, int g, int b) {
 
 /* ------------------------------------------------------------------- lifecycle ---- */
 
+int g_no_embedded_fonts;
+static int g_kanji_ok;
+static int g_fonts_loaded;
+
+/* The embedded fonts are RCDATA 101..105 of the exe (launcher.rc); private to the process. */
+static void load_embedded_fonts(void) {
+    int id;
+    if (g_fonts_loaded || g_no_embedded_fonts)
+        return;
+    g_fonts_loaded = 1;
+    for (id = 101; id <= 105; id++) {
+        HRSRC r = FindResourceW(NULL, MAKEINTRESOURCEW(id), MAKEINTRESOURCEW(10) /* RT_RCDATA */);
+        HGLOBAL g = r ? LoadResource(NULL, r) : NULL;
+        void *p = g ? LockResource(g) : NULL;
+        DWORD n = 0;
+        if (p)
+            AddFontMemResourceEx(p, SizeofResource(NULL, r), NULL, &n);
+    }
+}
+
+static HFONT font_try(int px, int weight, BYTE quality, const wchar_t *face, wchar_t *got) {
+    HFONT f = CreateFontW(-px, 0, 0, 0, weight, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                          OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, quality,
+                          DEFAULT_PITCH | FF_DONTCARE, face);
+    HGDIOBJ old = SelectObject(g_mem, f);
+    got[0] = 0;
+    GetTextFaceW(g_mem, LF_FACESIZE, got);
+    SelectObject(g_mem, old);
+    return f;
+}
+
 static void make_fonts(void) {
     static const struct {
         const wchar_t *face;
-        int px, weight;
+        int px10, weight; /* px10: size in tenths of a logical pixel */
         BYTE quality;
+        const wchar_t *fallback;
     } spec[F_COUNT] = {
-        {L"Segoe UI", 15, FW_NORMAL, CLEARTYPE_QUALITY},
-        {L"Segoe UI", 12, FW_NORMAL, CLEARTYPE_QUALITY},
-        {L"Segoe UI", 15, FW_SEMIBOLD, CLEARTYPE_QUALITY},
-        {L"Segoe UI", 11, FW_SEMIBOLD, CLEARTYPE_QUALITY},
-        {L"Bahnschrift", 34, FW_SEMIBOLD, ANTIALIASED_QUALITY},
-        {L"Bahnschrift", 21, FW_SEMIBOLD, ANTIALIASED_QUALITY},
-        {L"Bahnschrift", 22, FW_BOLD, ANTIALIASED_QUALITY},
-        {L"Consolas", 12, FW_NORMAL, CLEARTYPE_QUALITY},
-        {L"Bahnschrift", 15, FW_SEMIBOLD, ANTIALIASED_QUALITY},
+        {L"Consolas", 120, FW_NORMAL, CLEARTYPE_QUALITY, NULL},
+        {L"Josefin Sans", 140, FW_LIGHT, CLEARTYPE_QUALITY, L"Segoe UI Light"},
+        {L"Josefin Sans", 125, FW_LIGHT, CLEARTYPE_QUALITY, L"Segoe UI Light"},
+        {L"Josefin Sans", 105, FW_SEMIBOLD, CLEARTYPE_QUALITY, L"Segoe UI Semibold"},
+        {L"Josefin Sans", 110, FW_SEMIBOLD, CLEARTYPE_QUALITY, L"Segoe UI Semibold"},
+        {L"Josefin Sans", 160, FW_LIGHT, CLEARTYPE_QUALITY, L"Segoe UI Light"},
+        {L"Josefin Sans", 880, FW_THIN, ANTIALIASED_QUALITY, L"Segoe UI Light"},
+        {L"Josefin Sans", 420, FW_THIN, ANTIALIASED_QUALITY, L"Segoe UI Light"},
+        {L"Josefin Sans", 540, FW_THIN, ANTIALIASED_QUALITY, L"Segoe UI Light"},
+        {L"Josefin Sans", 150, FW_SEMIBOLD, ANTIALIASED_QUALITY, L"Segoe UI Semibold"},
+        {L"Josefin Sans", 1280, FW_THIN, ANTIALIASED_QUALITY, L"Segoe UI Light"},
+        {L"Josefin Sans", 210, FW_LIGHT, ANTIALIASED_QUALITY, L"Segoe UI Light"},
+        {L"Shippori Mincho B1", 160, FW_SEMIBOLD, ANTIALIASED_QUALITY, L"Yu Mincho"},
     };
     int i;
+    load_embedded_fonts();
+    g_kanji_ok = 1;
     for (i = 0; i < F_COUNT; i++) {
-        const wchar_t *face = spec[i].face;
         wchar_t got[LF_FACESIZE];
-        HGDIOBJ old;
+        int px = MulDiv(spec[i].px10, g_dpi, 960);
         if (g_fonts[i])
             DeleteObject(g_fonts[i]);
-        g_fonts[i] = CreateFontW(-S(spec[i].px), 0, 0, 0, spec[i].weight, FALSE, FALSE, FALSE,
-                                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                 spec[i].quality, DEFAULT_PITCH | FF_DONTCARE, face);
-        old = SelectObject(g_mem, g_fonts[i]);
-        got[0] = 0;
-        GetTextFaceW(g_mem, LF_FACESIZE, got);
-        SelectObject(g_mem, old);
-        if (!_wcsicmp(face, L"Bahnschrift") && _wcsicmp(got, L"Bahnschrift")) { /* older Windows */
+        g_fonts[i] = font_try(px, spec[i].weight, spec[i].quality, spec[i].face, got);
+        if (_wcsicmp(got, spec[i].face) && spec[i].weight != FW_NORMAL && spec[i].weight != FW_BOLD) {
+            /* Static weights outside regular/bold register their legacy family name. */
+            wchar_t legacy[LF_FACESIZE];
+            _snwprintf(legacy, LF_FACESIZE, L"%ls %ls", spec[i].face,
+                       spec[i].weight == FW_SEMIBOLD ? L"SemiBold"
+                       : spec[i].weight == FW_THIN   ? L"Thin"
+                                                     : L"Light");
+            legacy[LF_FACESIZE - 1] = 0;
             DeleteObject(g_fonts[i]);
-            g_fonts[i] = CreateFontW(-S(spec[i].px), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-                                     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                     ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
-                                     L"Segoe UI");
+            g_fonts[i] = font_try(px, FW_NORMAL, spec[i].quality, legacy, got);
+            if (!_wcsicmp(got, legacy))
+                continue;
+            DeleteObject(g_fonts[i]);
+            g_fonts[i] = font_try(px, spec[i].weight, spec[i].quality, spec[i].face, got);
+        }
+        if (_wcsicmp(got, spec[i].face) && spec[i].fallback) { /* face missing: GDI substituted */
+            DeleteObject(g_fonts[i]);
+            g_fonts[i] = font_try(px, spec[i].weight, spec[i].quality, spec[i].fallback, got);
+            if (i == F_KANJI && _wcsicmp(got, spec[i].fallback)) {
+                DeleteObject(g_fonts[i]);
+                g_fonts[i] = font_try(px, spec[i].weight, spec[i].quality, L"MS Mincho", got);
+                g_kanji_ok = !_wcsicmp(got, L"MS Mincho");
+            }
         }
     }
+}
+
+int ui_has_kanji(void) { return g_kanji_ok; }
+
+void ui_font_face(int font, wchar_t *out, int n) {
+    HGDIOBJ old = SelectObject(g_mem, g_fonts[font]);
+    out[0] = 0;
+    GetTextFaceW(g_mem, n, out);
+    SelectObject(g_mem, old);
 }
 
 void ui_init(int dpi) {
     BITMAPINFO bi;
     HDC screen = GetDC(NULL);
     void *bits = NULL;
-    g_dpi = dpi < 96 ? 96 : dpi;
+    if (g_mem) { /* again, at another scale (the window was maximized or restored) */
+        SelectObject(g_mem, g_bmp_old);
+        DeleteObject(g_bmp);
+        DeleteDC(g_mem);
+        ui_invalidate_backdrop();
+    }
+    g_dpi = dpi < 72 ? 72 : dpi;
     g_pw = S(ART_W);
     g_ph = S(ART_H);
     memset(&bi, 0, sizeof bi);
@@ -145,32 +215,192 @@ void ui_init(int dpi) {
     make_fonts();
 }
 
-void ui_begin(int kind) {
+static canvas_t canvas_of(uint32_t *px) {
     canvas_t c;
+    c.px = px;
+    c.w = g_pw;
+    c.h = g_ph;
+    c.k = (float)g_dpi / 96.0f;
+    return c;
+}
+
+/* The cached backdrop for a page kind and hero (-1: the ink), built on first use. */
+static uint32_t *backdrop(int kind, int hero) {
+    int slot = kind != ART_HERO ? 0 : hero < 0 ? 1 : 2 + hero;
+    if (slot >= NBG)
+        slot = 1;
+    if (!g_bg[slot]) {
+        g_bg[slot] = (uint32_t *)malloc((size_t)g_pw * g_ph * sizeof(uint32_t));
+        if (g_bg[slot]) {
+            canvas_t c = canvas_of(g_bg[slot]);
+            art_backdrop(&c, kind, g_bg_game_art, slot >= 2 ? slot - 2 : -1);
+        }
+    }
+    return g_bg[slot];
+}
+
+void ui_begin(int kind) {
     size_t bytes = (size_t)g_pw * g_ph * sizeof(uint32_t);
+    uint32_t *a, *b = NULL;
     g_nhits = 0;
     if (kind < 0 || kind > 1)
         kind = 0;
-    if (!g_bg[kind]) {
-        g_bg[kind] = (uint32_t *)malloc(bytes);
-        if (g_bg[kind]) {
-            c.px = g_bg[kind];
-            c.w = g_pw;
-            c.h = g_ph;
-            c.k = (float)g_dpi / 96.0f;
-            art_backdrop(&c, kind);
-        }
-    }
+    a = backdrop(kind, kind == ART_HERO ? g_hero_cur : -1);
+    if (kind == ART_HERO && g_hero_mix > 0.0f && g_hero_next != g_hero_cur)
+        b = backdrop(kind, g_hero_next);
     gdi_sync();
-    if (g_bg[kind])
-        memcpy(g_px, g_bg[kind], bytes);
-    else
+    if (a) {
+        canvas_t frame = canvas_of(g_px), ca = canvas_of(a), cb = canvas_of(b);
+        art_animate(&frame, &ca, b ? &cb : NULL, g_hero_mix, kind, g_bg_game_art,
+                    kind == ART_HERO && g_hero_cur < 0, g_motion_t);
+    } else {
         memset(g_px, 0, bytes);
+    }
 }
+
+void ui_set_hero(int cur, int next, float mix) {
+    g_hero_cur = cur;
+    g_hero_next = next;
+    g_hero_mix = mix;
+}
+
+float ui_hero_weight(int hero) {
+    if (g_hero_cur == hero && g_hero_next == hero)
+        return 1.0f;
+    if (g_hero_cur == hero)
+        return 1.0f - g_hero_mix;
+    if (g_hero_next == hero)
+        return g_hero_mix;
+    return 0.0f;
+}
+
+void ui_set_motion(double t) { g_motion_t = t; }
 
 void ui_end(void) { gdi_sync(); }
 
-void ui_present(HDC dc) { BitBlt(dc, 0, 0, g_pw, g_ph, g_mem, 0, 0, SRCCOPY); }
+void ui_invalidate_backdrop(void) {
+    int i;
+    for (i = 0; i < NBG; i++) {
+        free(g_bg[i]);
+        g_bg[i] = NULL;
+    }
+}
+
+void ui_set_game_art(int on) {
+    if (on != g_bg_game_art) {
+        g_bg_game_art = on;
+        ui_invalidate_backdrop();
+    }
+}
+
+void ui_mask(int x, int y, int w, int h, const uint8_t *a, int aw, int ah, rgb_t col, int opacity) {
+    int X0 = S(x), Y0 = S(y), W = S(w), H = S(h), i, j;
+    if (!a || W <= 0 || H <= 0)
+        return;
+    gdi_sync();
+    for (j = 0; j < H; j++) {
+        float v = ((float)j + 0.5f) * (float)ah / (float)H - 0.5f;
+        int v0 = v < 0.0f ? 0 : (int)v, v1 = v0 + 1 < ah ? v0 + 1 : ah - 1;
+        float fv = v - (float)v0 < 0.0f ? 0.0f : v - (float)v0;
+        for (i = 0; i < W; i++) {
+            float u = ((float)i + 0.5f) * (float)aw / (float)W - 0.5f;
+            int u0 = u < 0.0f ? 0 : (int)u, u1 = u0 + 1 < aw ? u0 + 1 : aw - 1;
+            float fu = u - (float)u0 < 0.0f ? 0.0f : u - (float)u0;
+            float t = a[(size_t)v0 * aw + u0] + (a[(size_t)v0 * aw + u1] - a[(size_t)v0 * aw + u0]) * fu;
+            float b = a[(size_t)v1 * aw + u0] + (a[(size_t)v1 * aw + u1] - a[(size_t)v1 * aw + u0]) * fu;
+            int al = (int)((t + (b - t) * fv) * (float)opacity / 255.0f + 0.5f);
+            if (al > 0)
+                blend_px(X0 + i, Y0 + j, col, al);
+        }
+    }
+}
+
+void ui_present(HDC dc) {
+    BitBlt(dc, g_ox, g_oy, g_pw, g_ph, g_mem, 0, 0, SRCCOPY);
+    if (g_cw > g_pw || g_ch > g_ph) { /* the margins of a maximized window: plain lacquer */
+        HBRUSH b = CreateSolidBrush(RGB((C_BG >> 16) & 255, (C_BG >> 8) & 255, C_BG & 255));
+        RECT r;
+        SetRect(&r, 0, 0, g_cw, g_oy);
+        FillRect(dc, &r, b);
+        SetRect(&r, 0, g_oy + g_ph, g_cw, g_ch);
+        FillRect(dc, &r, b);
+        SetRect(&r, 0, g_oy, g_ox, g_oy + g_ph);
+        FillRect(dc, &r, b);
+        SetRect(&r, g_ox + g_pw, g_oy, g_cw, g_oy + g_ph);
+        FillRect(dc, &r, b);
+        DeleteObject(b);
+    }
+}
+
+int ui_emblem_mask(const wchar_t *path, int size) {
+    BITMAPINFO bi;
+    BITMAPFILEHEADER fh;
+    void *bits = NULL;
+    HDC screen = GetDC(NULL), dc = CreateCompatibleDC(screen);
+    HBITMAP bmp, old_bmp;
+    HFONT font;
+    HGDIOBJ old_font;
+    wchar_t got[LF_FACESIZE];
+    RECT r;
+    int s = size * 14 / 100, ok = 0;
+    HANDLE h;
+    DWORD n;
+    memset(&bi, 0, sizeof bi);
+    bi.bmiHeader.biSize = sizeof bi.bmiHeader;
+    bi.bmiHeader.biWidth = size;
+    bi.bmiHeader.biHeight = -size;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bmp = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
+    ReleaseDC(NULL, screen);
+    if (!bmp || !bits) {
+        DeleteDC(dc);
+        return 0;
+    }
+    old_bmp = (HBITMAP)SelectObject(dc, bmp);
+    memset(bits, 0, (size_t)size * size * 4);
+    font = CreateFontW(-(size * 86 / 100), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                       OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+                       L"Yuji Boku");
+    old_font = SelectObject(dc, font);
+    got[0] = 0;
+    GetTextFaceW(dc, LF_FACESIZE, got);
+    if (!_wcsicmp(got, L"Yuji Boku")) {
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, RGB(255, 255, 255));
+        SetRect(&r, 0, 0, size - s / 2, size - s / 3); /* the same box as emblem_draw */
+        DrawTextW(dc, L"\u9F8D", 1, &r, DT_SINGLELINE | DT_CENTER | DT_VCENTER | DT_NOPREFIX);
+        GdiFlush();
+        h = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (h != INVALID_HANDLE_VALUE) {
+            memset(&fh, 0, sizeof fh);
+            fh.bfType = 0x4d42;
+            fh.bfOffBits = sizeof fh + sizeof bi.bmiHeader;
+            fh.bfSize = fh.bfOffBits + (DWORD)((size_t)size * size * 4);
+            WriteFile(h, &fh, sizeof fh, &n, NULL);
+            WriteFile(h, &bi.bmiHeader, sizeof bi.bmiHeader, &n, NULL);
+            WriteFile(h, bits, (DWORD)((size_t)size * size * 4), &n, NULL);
+            CloseHandle(h);
+            ok = 1;
+        }
+    }
+    SelectObject(dc, old_font);
+    DeleteObject(font);
+    SelectObject(dc, old_bmp);
+    DeleteObject(bmp);
+    DeleteDC(dc);
+    return ok;
+}
+
+void ui_set_view(int client_w, int client_h) {
+    g_cw = client_w;
+    g_ch = client_h;
+    g_ox = client_w > g_pw ? (client_w - g_pw) / 2 : 0;
+    g_oy = client_h > g_ph ? (client_h - g_ph) / 2 : 0;
+}
+
+int ui_mouse_lx(int client_x) { return to_logical(client_x - g_ox); }
+int ui_mouse_ly(int client_y) { return to_logical(client_y - g_oy); }
 
 int ui_save_bmp(const wchar_t *path) {
     BITMAPFILEHEADER fh;
@@ -299,19 +529,44 @@ void capsule(float ax, float ay, float bx, float by, float thick, rgb_t col) {
         }
 }
 
-void status_dot(int x, int y, rgb_t c) {
-    int X = S(x), Y = S(y), R = S(11), i, j;
-    gdi_sync();
-    for (j = Y - R; j <= Y + R; j++)
-        for (i = X - R; i <= X + R; i++) {
-            float d = hypotf(i + 0.5f - X, j + 0.5f - Y);
-            if (d < (float)R) {
-                float a = 1.0f - d / (float)R;
-                add_px(i, j, (int)(((c >> 16) & 255) * a * a * 0.45f),
-                       (int)(((c >> 8) & 255) * a * a * 0.45f), (int)((c & 255) * a * a * 0.45f));
+
+/* The emblem: the brush 龍 (Yuji Boku, embedded) in cream, with a small vermilion seal at the bottom
+ * right, in the square (x, y, size, size). Without the brush face: a Mincho dragon; without any, the seal. */
+void emblem_draw(int x, int y, int size, rgb_t ink, rgb_t seal) {
+    static const wchar_t *faces[] = {L"Yuji Boku", L"Shippori Mincho B1 SemiBold", L"Yu Mincho"};
+    static HFONT font;
+    static int font_px, font_face = -1;
+    int px = S(size) * 86 / 100, s = size * 14 / 100, i;
+    RECT r;
+    if (!font || font_px != px) {
+        wchar_t got[LF_FACESIZE];
+        if (font)
+            DeleteObject(font);
+        font = NULL;
+        font_face = -1;
+        for (i = 0; i < 3 && font_face < 0; i++) {
+            HFONT f = font_try(px, FW_NORMAL, ANTIALIASED_QUALITY, faces[i], got);
+            if (!_wcsicmp(got, faces[i])) {
+                font = f;
+                font_face = i;
+            } else {
+                DeleteObject(f);
             }
         }
-    fill_circle(x, y, 4, c);
+        font_px = px;
+    }
+    if (font) {
+        HGDIOBJ old = SelectObject(g_mem, font);
+        SetBkMode(g_mem, TRANSPARENT);
+        SetTextColor(g_mem, cref(ink));
+        r.left = S(x);
+        r.top = S(y);
+        r.right = S(x + size - s / 2);
+        r.bottom = S(y + size - s / 3);
+        DrawTextW(g_mem, L"\u9F8D", 1, &r, DT_SINGLELINE | DT_CENTER | DT_VCENTER | DT_NOPREFIX);
+        SelectObject(g_mem, old);
+    }
+    fill_rect(x + size - s, y + size - s, s, s, seal);
 }
 
 void ui_clip(int x, int y, int w, int h) {
@@ -320,12 +575,6 @@ void ui_clip(int x, int y, int w, int h) {
 }
 void ui_unclip(void) { SelectClipRgn(g_mem, NULL); }
 
-void ui_card(int x, int y, int w, int h) {
-    fill_rrect_a(x, y, w, h, 5, 0x131318, 232);
-    stroke_rrect(x, y, w, h, 5, 0x2a2a33);
-    fill_rect(x + 16, y, 30, 2, C_RED);
-    fill_rect_a(x + 16, y + 2, 30, 3, C_RED, 70);
-}
 
 /* ------------------------------------------------------------------------- text ---- */
 
@@ -350,115 +599,42 @@ int text_w(int font, const wchar_t *s) {
     return MulDiv(sz.cx, 96, g_dpi);
 }
 
-static void blur_box(uint8_t *a, uint8_t *tmp, int w, int h, int r) {
-    int x, y, d;
-    if (r < 1)
-        return;
-    for (y = 0; y < h; y++)
-        for (x = 0; x < w; x++) {
-            int sum = 0;
-            for (d = -r; d <= r; d++)
-                if (x + d >= 0 && x + d < w)
-                    sum += a[(size_t)y * w + x + d];
-            tmp[(size_t)y * w + x] = (uint8_t)(sum / (2 * r + 1));
-        }
-    for (y = 0; y < h; y++)
-        for (x = 0; x < w; x++) {
-            int sum = 0;
-            for (d = -r; d <= r; d++)
-                if (y + d >= 0 && y + d < h)
-                    sum += tmp[(size_t)(y + d) * w + x];
-            a[(size_t)y * w + x] = (uint8_t)(sum / (2 * r + 1));
-        }
+static int font_em_px(int font) {
+    TEXTMETRICW tm;
+    HGDIOBJ old = SelectObject(g_mem, g_fonts[font]);
+    GetTextMetricsW(g_mem, &tm);
+    SelectObject(g_mem, old);
+    return tm.tmHeight - tm.tmInternalLeading; /* em height in device pixels */
 }
 
-void txt_chrome(int font, int x, int y, int w, int h, UINT fmt, int red_style, int spacing,
-                const wchar_t *s) {
-    int pad = S(7), pw = S(w), ph = S(h), mw = pw + 2 * pad, mh = ph + 2 * pad, i, j;
-    BITMAPINFO bi;
-    HDC dc = GetDC(NULL), mdc;
-    HBITMAP bmp, old_bmp;
-    HGDIOBJ old_font;
-    void *bits = NULL;
-    uint8_t *mask, *glow, *tmp;
+void txt_tracked(int font, rgb_t col, int x, int y, int h, float em, const wchar_t *s) {
     RECT r;
-    int top = mh, bot = -1, ox = S(x) - pad, oy = S(y) - pad;
-    memset(&bi, 0, sizeof bi);
-    bi.bmiHeader.biSize = sizeof bi.bmiHeader;
-    bi.bmiHeader.biWidth = mw;
-    bi.bmiHeader.biHeight = -mh;
-    bi.bmiHeader.biPlanes = 1;
-    bi.bmiHeader.biBitCount = 32;
-    bi.bmiHeader.biCompression = BI_RGB;
-    mdc = CreateCompatibleDC(dc);
-    bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
-    ReleaseDC(NULL, dc);
-    if (!bmp || !bits) {
-        DeleteDC(mdc);
-        return;
-    }
-    old_bmp = (HBITMAP)SelectObject(mdc, bmp);
-    old_font = SelectObject(mdc, g_fonts[font]);
-    SetBkMode(mdc, TRANSPARENT);
-    SetTextColor(mdc, RGB(255, 255, 255));
-    SetTextCharacterExtra(mdc, S(spacing));
-    r.left = pad;
-    r.top = pad;
-    r.right = pad + pw;
-    r.bottom = pad + ph;
-    DrawTextW(mdc, s, -1, &r, fmt | DT_NOPREFIX);
-    GdiFlush();
-    mask = (uint8_t *)malloc((size_t)mw * mh);
-    glow = (uint8_t *)malloc((size_t)mw * mh);
-    tmp = (uint8_t *)malloc((size_t)mw * mh);
-    if (mask && glow && tmp) {
-        const uint32_t *src = (const uint32_t *)bits;
-        for (j = 0; j < mh; j++)
-            for (i = 0; i < mw; i++) {
-                uint8_t v = (uint8_t)(src[(size_t)j * mw + i] & 255);
-                mask[(size_t)j * mw + i] = v;
-                if (v > 60) {
-                    if (j < top)
-                        top = j;
-                    if (j > bot)
-                        bot = j;
-                }
-            }
-        memcpy(glow, mask, (size_t)mw * mh);
-        blur_box(glow, tmp, mw, mh, S(2));
-        blur_box(glow, tmp, mw, mh, S(2));
-        gdi_sync();
-        for (j = 0; j < mh; j++)
-            for (i = 0; i < mw; i++) {
-                size_t k = (size_t)j * mw + i;
-                float m = mask[k] / 255.0f, g = fminf(1.0f, glow[k] / 255.0f * 1.9f);
-                float cr, cg, cb, t;
-                add_px(ox + i, oy + j, (int)(190 * g * g), (int)(8 * g * g), (int)(16 * g * g));
-                if (!mask[k] || bot < top)
-                    continue;
-                t = (float)(j - top) / (float)(bot - top + 1);
-                art_chrome(t, red_style, &cr, &cg, &cb);
-                blend_px(ox + i, oy + j,
-                         ((rgb_t)clampf(cr, 0, 255) << 16) | ((rgb_t)clampf(cg, 0, 255) << 8) |
-                             (rgb_t)clampf(cb, 0, 255),
-                         (int)(m * 255));
-            }
-    }
-    free(mask);
-    free(glow);
-    free(tmp);
-    SelectObject(mdc, old_font);
-    SelectObject(mdc, old_bmp);
-    DeleteObject(bmp);
-    DeleteDC(mdc);
+    HGDIOBJ old = SelectObject(g_mem, g_fonts[font]);
+    SetBkMode(g_mem, TRANSPARENT);
+    SetTextColor(g_mem, cref(col));
+    SetTextCharacterExtra(g_mem, (int)(em * (float)font_em_px(font) + 0.5f));
+    r.left = S(x);
+    r.top = S(y);
+    r.right = S(x + 4000);
+    r.bottom = S(y + h);
+    DrawTextW(g_mem, s, -1, &r, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    SetTextCharacterExtra(g_mem, 0);
+    SelectObject(g_mem, old);
 }
 
-void caption_col(int x, int y, int w, rgb_t col, const wchar_t *s) {
-    SetTextCharacterExtra(g_mem, S(2));
-    txt(F_TINY, col, x, y, w, 16, DT_SINGLELINE, s);
-    SetTextCharacterExtra(g_mem, 0);
+int tracked_w(int font, float em, const wchar_t *s) {
+    SIZE sz;
+    int n = (int)wcslen(s);
+    HGDIOBJ old = SelectObject(g_mem, g_fonts[font]);
+    int extra = (int)(em * (float)font_em_px(font) + 0.5f);
+    GetTextExtentPoint32W(g_mem, s, n, &sz);
+    SelectObject(g_mem, old);
+    /* the last glyph's spacing is trailing; do not count it */
+    return MulDiv(sz.cx + extra * (n > 0 ? n - 1 : 0), 96, g_dpi);
 }
-void caption(int x, int y, int w, const wchar_t *s) { caption_col(x, y, w, C_DIM, s); }
+
+
+
 
 /* ------------------------------------------------------------------ click zones ---- */
 
@@ -489,152 +665,131 @@ int pressed(int id) { return g_down == id && g_hover == id; }
 /* ---------------------------------------------------------------------- widgets ---- */
 
 /* Chamfered box: signed distance (device pixels) of a point relative to the centre. */
-static float chamfer_sdf(float px, float py, float hw, float hh, float ch) {
-    float qx = fabsf(px) - hw, qy = fabsf(py) - hh;
-    float d_box = fmaxf(qx, qy);
-    float d_cut = (fabsf(px) + fabsf(py) - (hw + hh - ch)) * 0.70710678f;
-    return fmaxf(d_box, d_cut);
-}
 
 /* state: 0 idle, 1 hot, 2 pressed, 3 disabled. */
-static void plate_dev(int X, int Y, int W, int H, int ch, int state) {
-    int M = S(30), i, j;
-    float hw = W * 0.5f, hh = H * 0.5f, cx = X + hw, cy = Y + hh, glow_k = S(11) * 1.0f;
-    float gi = state == 1 ? 0.95f : state == 2 ? 0.5f : state == 3 ? 0.0f : 0.62f;
-    gdi_sync();
-    for (j = Y - M; j < Y + H + M; j++)
-        for (i = X - M; i < X + W + M; i++) {
-            float d = chamfer_sdf(i + 0.5f - cx, j + 0.5f - cy, hw, hh, (float)ch);
-            float v = clampf((j + 0.5f - Y) / (float)H, 0, 1);
-            if (d > 0.5f) {
-                float a = expf(-d / glow_k) * gi;
-                if (a > 0.012f)
-                    add_px(i, j, (int)(255 * a * 0.55f), (int)(24 * a * 0.55f), (int)(34 * a * 0.55f));
-                continue;
-            }
-            {
-                float cov = clampf(0.5f - d, 0, 1), depth = -d, r, g, b, cr, cg, cb;
-                int bw = S(2) < 2 ? 2 : S(2);
-                if (state == 3) {
-                    r = 74 - 36 * v;
-                    g = 40 - 20 * v;
-                    b = 44 - 22 * v;
-                } else {
-                    float s = state == 2 ? 0.72f : state == 1 ? 1.12f : 1.0f;
-                    r = (238 - 140 * v) * s;
-                    g = (52 - 44 * v) * s;
-                    b = (56 - 42 * v) * s;
-                    if (v < 0.5f) { /* gloss on the upper half */
-                        float gl = (1.0f - v / 0.5f) * 40.0f;
-                        r += gl;
-                        g += gl * 0.7f;
-                        b += gl * 0.7f;
-                    }
-                }
-                r += (float)((int)(((uint32_t)(j * 2654435761u) >> 28)) - 8) * 0.5f; /* brushed rows */
-                g += (float)((int)(((uint32_t)(j * 2654435761u) >> 28)) - 8) * 0.25f;
-                if (depth < (float)bw) { /* steel rim */
-                    art_chrome(v, 0, &cr, &cg, &cb);
-                    if (state == 3) {
-                        cr *= 0.35f;
-                        cg *= 0.35f;
-                        cb *= 0.38f;
-                    }
-                    r = cr;
-                    g = cg;
-                    b = cb;
-                } else if (depth < (float)bw + 1.5f) {
-                    r *= 0.35f;
-                    g *= 0.35f;
-                    b *= 0.35f;
-                }
-                blend_px(i, j, ((rgb_t)clampf(r, 0, 255) << 16) | ((rgb_t)clampf(g, 0, 255) << 8) |
-                                   (rgb_t)clampf(b, 0, 255),
-                         (int)(cov * 255));
-            }
-        }
+
+
+
+
+
+
+/* ------------------------------------------------------------ lacquer widgets ---- */
+
+#define A_SEP 26    /* cream at 10 % */
+#define A_FRAME 72  /* cream at 28 %: inner frame of the primary button */
+#define A_OUTLINE 82 /* cream at 32 %: outline of the secondary button */
+
+static void upper(const wchar_t *s, wchar_t *out, int n) {
+    wcsncpy(out, s, (size_t)n - 1);
+    out[n - 1] = 0;
+    CharUpperBuffW(out, (DWORD)wcslen(out));
 }
 
-void ui_plate(int id, int x, int y, int w, int h, const wchar_t *label, int enabled) {
-    int state = !enabled ? 3 : pressed(id) ? 2 : hot(id) ? 1 : 0;
-    int off = state == 2 ? 1 : 0, font = h >= 48 ? F_PLAY : F_BOLD, space = h >= 48 ? 3 : 1;
-    if (text_w(font, label) + space * (int)wcslen(label) > w - 24) {
-        font = F_BOLD; /* the label does not fit in the big font */
-        space = 1;
+void ui_hair(int x, int y, int w) { fill_rect_a(x, y, w, 1, C_CREAM, A_SEP); }
+void ui_vhair(int x, int y, int h) { fill_rect_a(x, y, 1, h, C_CREAM, A_SEP); }
+
+static void frame_a(int x, int y, int w, int h, rgb_t c, int a) {
+    fill_rect_a(x, y, w, 1, c, a);
+    fill_rect_a(x, y + h - 1, w, 1, c, a);
+    fill_rect_a(x, y + 1, 1, h - 2, c, a);
+    fill_rect_a(x + w - 1, y + 1, 1, h - 2, c, a);
+}
+
+int ui_fit_tracked(int font, float em, const wchar_t *s, int max_w, float *em_out) {
+    float e = em;
+    while (tracked_w(font, e, s) > max_w && e > 0.08f)
+        e -= 0.02f;
+    if (e < 0.08f)
+        e = 0.08f;
+    *em_out = e;
+    return tracked_w(font, e, s) <= max_w;
+}
+
+void ui_label(int x, int y, const wchar_t *s, rgb_t col) {
+    wchar_t u[160];
+    upper(s, u, 160);
+    txt_tracked(F_LABEL, col, x, y, 14, 0.26f, u);
+}
+
+int ui_tab(int id, int x, int y, int h, const wchar_t *label, int active) {
+    wchar_t u[64];
+    int w;
+    upper(label, u, 64);
+    w = tracked_w(F_TAB, 0.24f, u);
+    txt_tracked(F_TAB, active ? C_CREAM : hot(id) ? C_MUTED : C_DIMC, x, y, h, 0.24f, u);
+    if (active)
+        fill_rect(x, y + h - 1, w, 1, C_VERM);
+    add_hit(x - 8, y, w + 16, h, id);
+    return w;
+}
+
+static void centred_label(int font, float em, rgb_t col, int x, int y, int w, int h, const wchar_t *u,
+                          const wchar_t *kanji) {
+    int kw = kanji && kanji[0] && ui_has_kanji() ? text_w(F_KANJI, kanji) + 18 : 0;
+    float e;
+    int lw, tx;
+    if (!ui_fit_tracked(font, em, u, w - 32 - kw, &e) && font == F_BTN) {
+        font = F_TAB; /* still too long: the smaller face */
+        ui_fit_tracked(font, em, u, w - 32 - kw, &e);
     }
-    plate_dev(S(x), S(y), S(w), S(h), S(h >= 48 ? 11 : 6), state);
-    {
-        /* GDI does not count the extra letter spacing when centring, so centre by hand */
-        int tx = x + (w - (text_w(font, label) + space * ((int)wcslen(label) - 1))) / 2;
-        SetTextCharacterExtra(g_mem, S(space));
-        if (enabled)
-            txt(font, 0x2a0408, tx + 1, y + 2 + off, w, h, DT_SINGLELINE | DT_VCENTER, label);
-        txt(font, enabled ? 0xfff4ee : 0x8a6e70, tx, y + 1 + off, w, h, DT_SINGLELINE | DT_VCENTER,
-            label);
-        SetTextCharacterExtra(g_mem, 0);
-    }
+    lw = tracked_w(font, e, u);
+    tx = x + (w - lw - kw) / 2;
+    txt_tracked(font, col, tx, y, h, e, u);
+    if (kw)
+        txt(F_KANJI, lerp_rgb(col, C_VERM, 90), tx + lw + 18, y, kw, h, DT_SINGLELINE | DT_VCENTER, kanji);
+}
+
+void ui_primary(int id, int x, int y, int w, int h, const wchar_t *label, const wchar_t *kanji,
+                int enabled) {
+    wchar_t u[64];
+    rgb_t fill = !enabled ? 0x3a2320 : pressed(id) ? C_VERM_DOWN : hot(id) ? C_VERM_HOT : C_VERM;
+    upper(label, u, 64);
+    fill_rect(x, y, w, h, fill);
+    frame_a(x + 4, y + 4, w - 8, h - 8, 0xfbf4e8, enabled ? A_FRAME : 30);
+    centred_label(F_BTN, 0.52f, enabled ? 0xfbf4e8 : C_DIMC, x, y, w, h, u, kanji);
     if (enabled)
         add_hit(x, y, w, h, id);
 }
 
-void ui_button(int id, int x, int y, int w, int h, const wchar_t *label, int style, int enabled) {
-    int over = enabled && hot(id);
-    if (style == 1) {
-        ui_plate(id, x, y, w, h, label, enabled);
-        return;
-    }
-    if (style == 2) {
-        rgb_t col = !enabled ? C_FAINT : over ? C_RED_HOT : C_STEEL;
-        int tw = text_w(F_BOLD, label);
-        txt(F_BOLD, col, x, y, w, h, DT_SINGLELINE | DT_VCENTER | DT_CENTER, label);
-        if (over)
-            fill_rect(x + (w - tw) / 2, y + h / 2 + 10, tw, 1, C_RED_HOT);
-        if (enabled)
-            add_hit(x, y, w, h, id);
-        return;
-    }
-    if (over)
-        fill_rrect_a(x - 2, y - 2, w + 4, h + 4, 7, C_RED, 70);
-    fill_rrect_grad(x, y, w, h, 5, !enabled ? 0x121216 : over ? 0x26262e : 0x1c1c23,
-                    !enabled ? 0x0e0e12 : over ? 0x18181e : 0x121217);
-    stroke_rrect(x, y, w, h, 5, !enabled ? 0x23232a : over ? 0xb02430 : 0x3a3d48);
-    fill_rect_a(x + 4, y + 1, w - 8, 1, 0xffffff, over ? 40 : 22);
-    txt(F_BOLD, !enabled ? C_FAINT : C_TEXT, x, y, w, h, DT_SINGLELINE | DT_VCENTER | DT_CENTER,
-        label);
+void ui_secondary(int id, int x, int y, int w, int h, const wchar_t *label, int enabled) {
+    wchar_t u[64];
+    upper(label, u, 64);
+    if (enabled && hot(id))
+        fill_rect_a(x, y, w, h, C_CREAM, 10);
+    frame_a(x, y, w, h, C_CREAM, !enabled ? 30 : hot(id) ? 150 : A_OUTLINE);
+    centred_label(F_TAB, 0.3f, enabled ? C_CREAM : C_DIMC, x, y, w, h, u, NULL);
     if (enabled)
         add_hit(x, y, w, h, id);
 }
 
-void ui_progress(int x, int y, int w, int h, int permille, int active) {
-    int fw = w * (permille < 0 ? 0 : permille > 1000 ? 1000 : permille) / 1000, i, j;
-    fill_rrect(x, y, w, h, h / 2, C_FIELD);
-    stroke_rrect(x, y, w, h, h / 2, 0x33333d);
-    if (fw > h / 2) {
-        int X = S(x), Y = S(y), W = S(fw), H = S(h);
-        long phase = active ? (long)(GetTickCount64() / 18) : 0;
-        fill_rrect_a(x - 3, y - 3, fw + 6, h + 6, h / 2 + 3, C_RED, 46);
-        fill_rrect_grad(x, y, fw, h, h / 2, 0xff4a52, 0x8e0f18);
-        gdi_sync();
-        for (j = Y + 1; j < Y + H - 1; j++)
-            for (i = X + H / 2; i < X + W - H / 2; i++)
-                if (((i + j - (int)phase) & 31) < 11)
-                    blend_px(i, j, 0xffffff, 26);
-    }
+int ui_link(int id, int x, int y, const wchar_t *label, int enabled) {
+    wchar_t u[64];
+    int w;
+    upper(label, u, 64);
+    w = tracked_w(F_LABEL, 0.22f, u);
+    txt_tracked(F_LABEL, !enabled ? C_DIMC : hot(id) ? C_VERM_HOT : C_VERM, x, y, 16, 0.22f, u);
+    if (enabled && hot(id))
+        fill_rect(x, y + 14, w, 1, C_VERM_HOT);
+    if (enabled)
+        add_hit(x - 4, y - 4, w + 8, 24, id);
+    return w;
 }
 
-void ui_checkbox(int id, int x, int y, int on) {
-    if (on) {
-        fill_rrect_grad(x, y + 3, 22, 22, 5, 0xe8343c, 0x9a1018);
-        stroke_rrect(x, y + 3, 22, 22, 5, 0xff6a70);
-        capsule((float)x + 5.5f, (float)y + 14.5f, (float)x + 9.5f, (float)y + 18.5f, 2.4f, 0xffffff);
-        capsule((float)x + 9.5f, (float)y + 18.5f, (float)x + 17, (float)y + 9.5f, 2.4f, 0xffffff);
-    } else {
-        fill_rrect(x, y + 3, 22, 22, 5, C_FIELD);
-        stroke_rrect(x, y + 3, 22, 22, 5, hot(id) ? 0x7a7e8c : 0x3c3f4a);
-    }
+void ui_switch(int id, int x, int y, int on, int enabled) {
+    rgb_t edge = !enabled ? C_SEP : on ? C_VERM : hot(id) ? C_MUTED : 0x4a4640;
+    frame_a(x, y, 44, 22, edge, 255);
+    fill_rect(on ? x + 26 : x + 4, y + 4, 14, 14, !enabled ? C_SEP : on ? C_VERM : C_DIMC);
+    if (enabled)
+        add_hit(x - 4, y - 4, 52, 30, id);
 }
 
-void ui_chevron(int x, int y) {
-    capsule((float)x, (float)y, (float)x + 6, (float)y + 6, 2.0f, C_DIM);
-    capsule((float)x + 6, (float)y + 6, (float)x + 12, (float)y, 2.0f, C_DIM);
+void ui_rule_progress(int x, int y, int w, int permille) {
+    int fw = w * (permille < 0 ? 0 : permille > 1000 ? 1000 : permille) / 1000;
+    fill_rect_a(x, y, w, 2, C_CREAM, A_SEP);
+    fill_rect(x, y, fw, 2, C_VERM);
+}
+
+void ui_caret(int x, int y, rgb_t col) {
+    capsule((float)x, (float)y, (float)x + 4, (float)y + 4, 1.4f, col);
+    capsule((float)x + 4, (float)y + 4, (float)x + 8, (float)y, 1.4f, col);
 }

@@ -5,6 +5,15 @@
 1 ICON "ngb.ico"
 1 RT_MANIFEST "launcher.manifest"
 
+/* Josefin Sans, a kanji subset of Shippori Mincho B1 and the brush dragon of Yuji Boku (all SIL OFL
+ * 1.1, see port/res/fonts),
+ * loaded privately by ui.c. */
+101 RCDATA "../res/fonts/JosefinSans-Thin.ttf"
+102 RCDATA "../res/fonts/JosefinSans-Light.ttf"
+103 RCDATA "../res/fonts/JosefinSans-SemiBold.ttf"
+104 RCDATA "../res/fonts/ShipporiMinchoB1-SemiBold-kanji.ttf"
+105 RCDATA "../res/fonts/YujiBoku-Regular-dragon.ttf"
+
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION NGB_VERSION_NUM
 PRODUCTVERSION NGB_VERSION_NUM

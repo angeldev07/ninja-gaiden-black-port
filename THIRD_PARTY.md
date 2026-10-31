@@ -9,6 +9,9 @@ Microsoft XDK**. This file lists everything it uses or learned from that is not 
 | --- | --- | --- | --- |
 | RenderDoc in-application API header, by Baldur Karlsson | `port/third_party/renderdoc/renderdoc_app.h` | MIT (header kept intact) | Optional frame captures (F11) when RenderDoc is installed |
 | Xbox kernel export list from [nxdk](https://github.com/XboxDev/nxdk) (`xboxkrnl.h`), by Stefan Schmidt and contributors | `src/ngb_tools/data/xboxkrnl_exports.tsv`, generated `port/src/kernel/stubs.c` | CC0 | Ordinals, names and signatures of the kernel exports the port reimplements |
+| [Josefin Sans](https://github.com/googlefonts/josefinsans) Thin, Light and SemiBold, by Santiago Orozco | `port/res/fonts/JosefinSans-*.ttf` | SIL OFL 1.1 (`port/res/fonts/OFL-JosefinSans.txt`), unmodified | Latin type of the launcher, embedded in `ngb-launcher.exe` |
+| [Shippori Mincho B1](https://github.com/fontdasu/ShipporiMincho) SemiBold, by FONTDASU, reduced to the 22 kanji the launcher draws | `port/res/fonts/ShipporiMinchoB1-SemiBold-kanji.ttf` | SIL OFL 1.1 (`port/res/fonts/OFL-ShipporiMincho.txt`), subset (no Reserved Font Name) | Kanji ornaments of the launcher, embedded in `ngb-launcher.exe`; how the subset is made is in `port/res/fonts/README.md` |
+| [Yuji Boku](https://github.com/Kinutafontfactory/Yuji) Regular, by the Yuji Project Authors, reduced to the single glyph 龍 | `port/res/fonts/YujiBoku-Regular-dragon.ttf` | SIL OFL 1.1 (`port/res/fonts/OFL-YujiBoku.txt`), subset (no Reserved Font Name) | The launcher's emblem, embedded in `ngb-launcher.exe`, and the app icon `port/res/ngb.ico` rendered from it |
 
 ## Code that follows another project
 

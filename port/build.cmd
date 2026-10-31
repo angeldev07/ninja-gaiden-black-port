@@ -104,11 +104,23 @@ rem 5b) Launcher updater: manifest, versions, SHA-256 and a whole local update (
 rem     Not named *update*.exe: Windows asks for elevation for such names without a manifest.
 cl %CFLAGS% /I"%PORT%res" /I"%PORT%launcher" /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\upd_test.pdb" /Fe"%OUT%\upd_test.exe" "%PORT%tests\update_test.c" "%PORT%launcher\update.c" "%PORT%launcher\import.c" "%PORT%launcher\xdvdfs.c" bcrypt.lib winhttp.lib || exit /b 1
 "%OUT%\upd_test.exe" || exit /b 1
+rem 5c) Launcher ink-wash landscape: deterministic, composed as designed, within the time budget.
+cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\ink_test.pdb" /Fe"%OUT%\ink_test.exe" "%PORT%tests\ink_test.c" "%PORT%launcher\ink.c" || exit /b 1
+"%OUT%\ink_test.exe" || exit /b 1
+rem 5c2) Launcher backdrops without game art: fully written, dark where the title sits.
+cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\art_test.pdb" /Fe"%OUT%\art_test.exe" "%PORT%tests\art_test.c" "%PORT%launcher\art.c" "%PORT%launcher\ink.c" "%PORT%launcher\gameart.c" "%PORT%launcher\gamedata.c" "%SRC%\gl\texconv.c" user32.lib || exit /b 1
+"%OUT%\art_test.exe" || exit /b 1
+rem 5e) Launcher readers of the user's game copy: AFS names, XPR0 textures, sprite tables.
+cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\gamedata_test.pdb" /Fe"%OUT%\gamedata_test.exe" "%PORT%tests\gamedata_test.c" "%PORT%launcher\gamedata.c" || exit /b 1
+"%OUT%\gamedata_test.exe" || exit /b 1
+rem 5f) Launcher game art: the lacquer grade, the logo mask and the loader's fallback (no game data).
+cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\gameart_test.pdb" /Fe"%OUT%\gameart_test.exe" "%PORT%tests\gameart_test.c" "%PORT%launcher\gameart.c" "%PORT%launcher\gamedata.c" "%SRC%\gl\texconv.c" user32.lib || exit /b 1
+"%OUT%\gameart_test.exe" || exit /b 1
 
 rem 5) ngb-launcher.exe: the graphical launcher (Win32 + GDI; bcrypt and winhttp for the updater). See launcher\launcher.c.
 rc /nologo /I"%PORT%res" /I"%PORT%launcher" /fo"%OUT%\obj\launcher.res" "%PORT%launcher\launcher.rc" || exit /b 1
 cl %CFLAGS% /I"%PORT%res" /I"%PORT%launcher" /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\launcher.pdb" /Fe"%OUT%\ngb-launcher.exe" ^
-  "%PORT%launcher\launcher.c" "%PORT%launcher\ui.c" "%PORT%launcher\art.c" "%PORT%launcher\import.c" "%PORT%launcher\xdvdfs.c" "%PORT%launcher\update.c" "%OUT%\obj\launcher.res" ^
+  "%PORT%launcher\launcher.c" "%PORT%launcher\pages.c" "%PORT%launcher\ui.c" "%PORT%launcher\art.c" "%PORT%launcher\ink.c" "%PORT%launcher\gamedata.c" "%PORT%launcher\gameart.c" "%SRC%\gl\texconv.c" "%PORT%launcher\import.c" "%PORT%launcher\xdvdfs.c" "%PORT%launcher\update.c" "%OUT%\obj\launcher.res" ^
   /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib shell32.lib comdlg32.lib advapi32.lib ole32.lib bcrypt.lib winhttp.lib || exit /b 1
 echo build: %OUT%\ngb-loader.exe + ngb-core.dll + ngb-launcher.exe
 endlocal

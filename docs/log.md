@@ -898,3 +898,89 @@ Details in [[gpu-nv2a]].
   without a load before them are still open); the game's own 30 fps hold after loads; the heat haze band; lighting
   details, floor reflections and the sword glow.
 - `version.h` goes to `0.7.0` and then back to `0.8.0-dev`.
+
+## [2026-10-31] decision | Launcher redesign: "lacquer and ink", with optional game art
+- **Why:** the owner found the v2 launcher "very AI": neon glow, chrome lettering, speed lines. Goal: professional,
+  elegant, visibly made with care, with elements of the game.
+- **Direction** (chosen from three mockups, then two polish rounds backed by research): warm lacquer black, one
+  vermilion accent, 1 px hairlines, flat surfaces, square buttons; ultra-thin wide-tracked Latin (Josefin Sans, OFL,
+  embedded) with bold serif kanji (Yu Mincho, ships with Windows); an original kamon (crossed swords in a ring) as
+  the only icon; navigation moves from the sidebar to a top bar. Spec: [[launcher-laca-design]].
+- **Default art:** a procedural ink-wash night landscape. Prototyped in Python: ridged fBm silhouettes, crest ink
+  fading into mist, air perspective, mist bands, paper fibre. The technique follows the open-source `inkwash`
+  renderer's notes, including what did not work there (brush strokes and iso-contours look mechanical).
+- **Legal line:** official art from the internet stays out of the repo and the release (copyright and trademark;
+  a DMCA would take down the repo and the updater with it). Game art is only read at runtime from the user's copy.
+- **Game art survey** (subagent; exports under `%NGB_DATA%\extracted\launcher-art-survey\`, `VERIFIED` by export):
+  - the best 2D art is in `demo.afs`, not `spr.afs`: `demo.spr` holds the Ryu and Ayane key art (P8 1024 x 512),
+    the "NINJA GAIDEN" and "BLACK" logotypes with alpha, and character portraits; `titlebg.spr` holds the title
+    screen's background and ornament rings (A8);
+  - `spr.afs` has 684 named entries, P8 and A8 only, all swizzled, many localized duplicates;
+  - `.spr` = XPR0 whose resource 0 is USERDATA: 24-byte sprite records `{f32 u0,v0,u1,v1; u32 texture ordinal;
+    u16 w,h}` that give each texture's used crop;
+  - full-screen 512 x 512 `.spr` hold two sprites: the main image (511 x 409) and a strip whose placement is
+    `UNVERIFIED`;
+  - `load_img.bin` is not art: it is a preload table of 206 AFS names with sizes and groups;
+  - the movies are CRI Sofdec (`.sfd`) and `ninja.aix` is CRI AIX audio.
+- **Game art prototype:** the Ryu key art graded into the palette (duotone bg to cream, 14 % chroma, reds toward
+  vermilion) and the logotypes used as cream and vermilion masks. The owner's review images are in
+  `%NGB_DATA%\comparisons\launcher-laca-2026-10-31\`.
+- **Out of scope here:** general guards against CPU/GPU wait freezes, a separate piece of work after v0.8.0.
+
+## [2026-10-31] feat | Launcher "lacquer and ink" (v0.8.0)
+- **What:** the launcher redesign of [[launcher-laca-design]], built from [[launcher-laca-plan]] on `feat/launcher-laca`.
+  - Tokens: lacquer black, one vermilion accent, 1 px hairlines, square buttons; top bar instead of the sidebar.
+  - Fonts embedded as `RCDATA` and loaded privately: Josefin Sans (OFL) and a 14.6 KB kanji subset of Shippori
+    Mincho B1 (OFL). **Yu Mincho is not on a stock Windows 11** (it comes with the optional Japanese fonts),
+    `VERIFIED` on the owner's PC, so the kanji are carried by the exe. `tests/port/test_launcher.py` checks the faces
+    with `--fonts FILE`.
+  - `ink.c`: the procedural landscape, threaded on the logical grid: 76 ms for 2480 x 1400 (`ink_test`).
+  - `kamon.c` and `make_icon.py`: the crest and the new icon from one signed-distance shape (`kamon_test`).
+  - `gamedata.c`: bounds-checked AFS / XPR0 / sprite-table readers (`gamedata_test`, synthetic and damaged files).
+  - `gameart.c`: the key art, logotypes, title background and ring decoded with the core's `texconv.c`, graded into
+    the palette (`gameart_test`); checked on the owner's PAL copy and on a variant whose BLACK logotype carries a
+    kanji subtitle glued under the letters (trimmed by `ga_trim_subtitle`).
+  - `music.c`: ADX decoder bit-exact with `ngb_tools.audio.adx` (`music_test`) and a `waveOut` player.
+    `bgm.afs#89 bgm_title.adx`: stereo, 44.1 kHz, version 3, 210.5 s, loop 1,970,880 to 9,276,544 samples; the
+    whole track decodes in 75 ms. `VERIFIED`.
+  - `art.c` + `pages.c`: every page and state; the backdrop moves (parallax, mist, the moon's halo, the ring) at
+    2 ms per frame at 100 % DPI (`--perf-anim`).
+- **Bug found while building it:** the hero's mix toward the lacquer ran in `uint32_t`, so ink or art darker than the
+  lacquer wrapped around into bright blocks. `art_test` pins it (RED with the bug, GREEN with the fix).
+- **New launcher switches:** `--no-game-art` (original art only, for README screenshots), `--fonts FILE`,
+  `--perf-anim FILE`, `--no-embedded-fonts`, `--demo widgets`. New `ngb.ini` keys under `[launcher]`: `game_art`,
+  `music`, `hero_index`.
+- README and [[getting-started]] screenshots are the original art only, from a clean first run.
+
+## [2026-10-31] change | Launcher: no music, no mouse parallax; it can be maximized
+- At the owner's request after trying it: the title theme and the mouse parallax are gone (both felt as a nuisance).
+  `music.c`, its test and the Music switches are removed; the ADX facts of the previous entry stay valid. The mist,
+  the moon and the ring still move, and only while the window is in front.
+- **Maximize:** the window has a maximize box. Maximized (or restored), the frame is redrawn at the largest scale that
+  fits (`art_fit_dpi`), centred, with lacquer margins; the mouse maps through `ui_mouse_lx/ly`. `--maximized` opens it
+  so. On the owner's 1080p screen the maximized frame is 1783 x 1006.
+- Fixes from the whole-branch review: buffers never reached `waveOut` (moot now), the window did not fit at 150 % on
+  1080p, frames cost 8 ms (opaque bars, 20 fps, 15 above 120 dpi, paused in the background: about 4 ms), a stale
+  game-art READY could leave the ink cached.
+
+## [2026-10-31] change | Launcher: the game's emblem as a rotating hero, an original ninja icon
+- **Emblem hero** (game art mode): the game's emblem texture (Ryu's silhouette in its red glow over the logotype,
+  black background) is added as light over the lacquer, 540 px tall at the right of the Play page. It rotates with
+  the Ryu and Ayane key art: 14 s each, 1.2 s crossfade (`art_hero_at`, `art_test`); the typeset logotypes fade out
+  while the emblem shows. Read at runtime from the user's copy, never shipped.
+- **Release layouts differ:** the emblem is texture 7 of the PAL `demo.spr` and texture 9 of a variant's (`VERIFIED`
+  by listing both), so it is found by format and size (the first P8 512 x 512 from texture 4 on), not by ordinal.
+- **Window and taskbar icon:** in game art mode it is cut from the emblem at runtime (`WM_SETICON`); otherwise, and
+  for the exe file, it is the launcher's own icon.
+- **New emblem and app icon:** the crossed-swords kamon is replaced by an original leaping-ninja silhouette (sword
+  raised back over the head, scarf trailing), drawn from scratch as a union of tapered capsules shared by
+  `kamon.c` and `make_icon.py` (black on a vermilion glow in the icon, vermilion in the top bar).
+
+## [2026-10-31] change | Launcher emblem and icon: a brush dragon with a seal
+- The leaping-ninja silhouette made of capsules looked like a stick figure (the owner: "se ve muy chistoso"). A
+  convincing human silhouette is not something primitives draw well, so the emblem is now calligraphy: the brush
+  龍 of Yuji Boku (SIL OFL 1.1, subset to that one glyph, 2.8 KB) in cream with a small vermilion seal, chosen by
+  the owner from three concepts (seal 忍, 忍 with a moon, 龍 with a seal).
+- `emblem_draw` (ui.c) draws it in the top bar and on About; `ngb-launcher.exe --emblem-mask FILE` writes the glyph
+  as a 512 px BMP and `make_icon.py` builds `ngb.ico` from it, so the icon and the window match. `kamon.c` and its
+  test are gone.

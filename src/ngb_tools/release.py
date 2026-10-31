@@ -61,7 +61,8 @@ How to play
 -----------
 1. Unzip this folder anywhere you can write to (not Program Files).
 2. Run ngb-launcher.exe.
-3. Click "Import game" and pick the image of your own disc (the Xbox ISO / XISO).
+3. Click "Disc image (.iso)" and pick the image of your own disc (the Xbox ISO / XISO),
+   or drag the image onto the window.
 4. Click PLAY.
 
 Windows SmartScreen

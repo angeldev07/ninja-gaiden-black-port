@@ -1,688 +1,321 @@
 /*
- * art.c: original procedural artwork of the launcher. See art.h.
+ * art.c: the launcher's backdrops. See art.h.
  *
- * The letters are our own: every glyph is a short list of polygons on a 10-unit-high grid,
- * sheared to lean forward and cut with sharp chamfers. They are rasterised with exact
- * horizontal coverage and 6 sub-rows per pixel, then lit like brushed chrome (a vertical
- * steel ramp with a dark horizon line, bevel shading from the blurred mask, a dark outline
- * and a thin red glow around it).
+ * Play (ART_HERO): the hero image fills the window and is darkened toward the left, where the
+ * title sits, and under the two bars. The game's key art is graded once at its own size, then
+ * sampled bilinearly: scaled to 660 logical pixels tall, top at 40, its subject (52 % across
+ * the crop) at x 870, the crop's left edge softened over 160 pixels.
+ * Inner pages (ART_INNER): flat lacquer; in game art mode the title screen background graded
+ * at 7 % in the left column.
+ * Every frame, art_animate copies the cached backdrop and adds what moves: two drifting mist strips, the ink moon's breathing halo and, in game art mode, the ornament
+ * ring turning at 5 % behind the page number. With t fixed it is a still picture.
  */
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "art.h"
+#include "gameart.h"
+#include "ink.h"
 
-#define PI_F 3.14159265f
-#define SHEAR 0.21f
-#define SUBROWS 6
+#define BG_R 19
+#define BG_G 17
+#define BG_B 15
 
-/* ---------------------------------------------------------------- small helpers ---- */
-
-static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
-
-static void add_px(canvas_t *c, int x, int y, float r, float g, float b) {
-    uint32_t *p;
-    int R, G, B;
-    if ((unsigned)x >= (unsigned)c->w || (unsigned)y >= (unsigned)c->h)
-        return;
-    p = &c->px[(size_t)y * c->w + x];
-    R = (int)((*p >> 16) & 255) + (int)(r + 0.5f);
-    G = (int)((*p >> 8) & 255) + (int)(g + 0.5f);
-    B = (int)(*p & 255) + (int)(b + 0.5f);
-    *p = ((uint32_t)(R > 255 ? 255 : R) << 16) | ((uint32_t)(G > 255 ? 255 : G) << 8) |
-         (uint32_t)(B > 255 ? 255 : B);
+static float smoothstepf(float e0, float e1, float x) {
+    float t = (x - e0) / (e1 - e0);
+    t = t < 0.0f ? 0.0f : t > 1.0f ? 1.0f : t;
+    return t * t * (3.0f - 2.0f * t);
 }
 
-static void mix_px(canvas_t *c, int x, int y, float r, float g, float b, float a) {
-    uint32_t *p;
-    float R, G, B;
-    if ((unsigned)x >= (unsigned)c->w || (unsigned)y >= (unsigned)c->h || a <= 0.0f)
-        return;
-    if (a > 1.0f)
-        a = 1.0f;
-    p = &c->px[(size_t)y * c->w + x];
-    R = ((*p >> 16) & 255) * (1 - a) + r * a;
-    G = ((*p >> 8) & 255) * (1 - a) + g * a;
-    B = (*p & 255) * (1 - a) + b * a;
-    *p = ((uint32_t)(R + 0.5f) << 16) | ((uint32_t)(G + 0.5f) << 8) | (uint32_t)(B + 0.5f);
+static uint32_t mix_bg(uint32_t p, float k) {
+    /* int, not uint32_t: a channel darker than the lacquer must not wrap around */
+    int r = (int)((float)BG_R + (float)((int)((p >> 16) & 255) - BG_R) * k + 0.5f);
+    int g = (int)((float)BG_G + (float)((int)((p >> 8) & 255) - BG_G) * k + 0.5f);
+    int b = (int)((float)BG_B + (float)((int)(p & 255) - BG_B) * k + 0.5f);
+    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
 }
 
-static void fill_dev(canvas_t *c, int x0, int y0, int x1, int y1, float r, float g, float b) {
-    int x, y;
-    uint32_t v = ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
-    if (x0 < 0)
-        x0 = 0;
-    if (y0 < 0)
-        y0 = 0;
-    if (x1 > c->w)
-        x1 = c->w;
-    if (y1 > c->h)
-        y1 = c->h;
-    for (y = y0; y < y1; y++)
-        for (x = x0; x < x1; x++)
-            c->px[(size_t)y * c->w + x] = v;
+static uint32_t mix(uint32_t a, uint32_t b, float t) {
+    int r = (int)(((a >> 16) & 255) + ((int)((b >> 16) & 255) - (int)((a >> 16) & 255)) * t + 0.5f);
+    int g = (int)(((a >> 8) & 255) + ((int)((b >> 8) & 255) - (int)((a >> 8) & 255)) * t + 0.5f);
+    int bl = (int)((a & 255) + ((int)(b & 255) - (int)(a & 255)) * t + 0.5f);
+    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)bl;
 }
 
-static uint32_t g_rng = 12345u;
-static float frand(void) {
-    g_rng = g_rng * 1664525u + 1013904223u;
-    return (float)(g_rng >> 8) / 16777216.0f;
+/* Bilinear sample of an 0xRRGGBB image (clamped). */
+static uint32_t sample_rgb(const uint32_t *px, int w, int h, float u, float v) {
+    int x0, y0, x1, y1;
+    float fx, fy;
+    if (u < 0.0f)
+        u = 0.0f;
+    if (v < 0.0f)
+        v = 0.0f;
+    if (u > (float)w - 1.001f)
+        u = (float)w - 1.001f;
+    if (v > (float)h - 1.001f)
+        v = (float)h - 1.001f;
+    x0 = (int)u;
+    y0 = (int)v;
+    x1 = x0 + 1 < w ? x0 + 1 : x0;
+    y1 = y0 + 1 < h ? y0 + 1 : y0;
+    fx = u - (float)x0;
+    fy = v - (float)y0;
+    return mix(mix(px[(size_t)y0 * w + x0], px[(size_t)y0 * w + x1], fx),
+               mix(px[(size_t)y1 * w + x0], px[(size_t)y1 * w + x1], fx), fy);
 }
 
-static float hash2(int x, int y) {
-    uint32_t h = (uint32_t)x * 374761393u + (uint32_t)y * 668265263u;
-    h = (h ^ (h >> 13)) * 1274126177u;
-    h ^= h >> 16;
-    return (float)(h & 0xffff) / 65535.0f;
+static float sample_a(const uint8_t *a, int w, int h, float u, float v) {
+    int x0, y0, x1, y1;
+    float fx, fy, t, b;
+    if (u < 0.0f || v < 0.0f || u > (float)w - 1.001f || v > (float)h - 1.001f)
+        return 0.0f;
+    x0 = (int)u;
+    y0 = (int)v;
+    x1 = x0 + 1;
+    y1 = y0 + 1;
+    fx = u - (float)x0;
+    fy = v - (float)y0;
+    t = a[(size_t)y0 * w + x0] + (a[(size_t)y0 * w + x1] - a[(size_t)y0 * w + x0]) * fx;
+    b = a[(size_t)y1 * w + x0] + (a[(size_t)y1 * w + x1] - a[(size_t)y1 * w + x0]) * fx;
+    return (t + (b - t) * fy) / 255.0f;
 }
 
-static float vnoise(float x, float y) {
-    int ix = (int)floorf(x), iy = (int)floorf(y);
-    float fx = x - ix, fy = y - iy, a, b, c, d;
-    fx = fx * fx * (3 - 2 * fx);
-    fy = fy * fy * (3 - 2 * fy);
-    a = hash2(ix, iy);
-    b = hash2(ix + 1, iy);
-    c = hash2(ix, iy + 1);
-    d = hash2(ix + 1, iy + 1);
-    return (a + (b - a) * fx) * (1 - fy) + (c + (d - c) * fx) * fy;
-}
-
-static float fbm(float x, float y) {
-    return 0.5f * vnoise(x, y) + 0.3f * vnoise(2 * x + 7.1f, 2 * y + 3.7f) +
-           0.2f * vnoise(4 * x + 1.3f, 4 * y + 9.2f);
-}
-
-/* ------------------------------------------------------------------------ mist ---- */
-
-/* Additive elliptical mist with a ragged edge. Logical centre and radii; the clip box is
- * logical too. */
-static void haze(canvas_t *c, float cx, float cy, float rx, float ry, float cr, float cg, float cb,
-                 float strength, float clip_x0, float clip_y0, float clip_x1, float clip_y1) {
-    float k = c->k;
-    int x0 = (int)floorf((cx - rx) * k), x1 = (int)ceilf((cx + rx) * k);
-    int y0 = (int)floorf((cy - ry) * k), y1 = (int)ceilf((cy + ry) * k), x, y;
-    if (x0 < (int)(clip_x0 * k))
-        x0 = (int)(clip_x0 * k);
-    if (y0 < (int)(clip_y0 * k))
-        y0 = (int)(clip_y0 * k);
-    if (x1 > (int)(clip_x1 * k))
-        x1 = (int)(clip_x1 * k);
-    if (y1 > (int)(clip_y1 * k))
-        y1 = (int)(clip_y1 * k);
-    for (y = y0; y < y1; y++)
-        for (x = x0; x < x1; x++) {
-            float lx = x / k, ly = y / k, dx = (lx - cx) / rx, dy = (ly - cy) / ry;
-            float d2 = dx * dx + dy * dy, f, n;
-            if (d2 >= 1.0f)
-                continue;
-            f = 1.0f - d2;
-            f = f * f;
-            n = 0.45f + 1.1f * fbm(lx / 70.0f + cx * 0.013f, ly / 55.0f + cy * 0.017f);
-            f *= strength * n;
-            add_px(c, x, y, cr * f, cg * f, cb * f);
-        }
-}
-
-/* A horizontal speed line that swells in the middle and fades at both ends. */
-static void speed_line(canvas_t *c, float x0, float x1, float y, float half, float inten, float r,
-                       float g, float b) {
-    float k = c->k;
-    int px0 = (int)(x0 * k), px1 = (int)(x1 * k), x, dy;
-    int rows = (int)ceilf(half * k + 2.0f);
-    for (x = px0; x < px1; x++) {
-        float u = (float)(x - px0) / (float)(px1 - px0 > 1 ? px1 - px0 : 1);
-        float prof = powf(sinf(PI_F * u), 0.8f);
-        float ht = half * k * prof;
-        for (dy = -rows; dy <= rows; dy++) {
-            float cov = clampf(ht + 0.5f - fabsf((float)dy), 0.0f, 1.0f) * prof * inten;
-            if (cov > 0.002f)
-                add_px(c, x, (int)(y * k) + dy, r * cov, g * cov, b * cov);
-        }
+/* The image graded into the palette, at its own size (malloc'd). */
+static uint32_t *graded(const ga_image_t *im) {
+    size_t i, n = (size_t)im->w * im->h;
+    uint32_t *g = (uint32_t *)malloc(n * sizeof(uint32_t));
+    if (!g)
+        return NULL;
+    for (i = 0; i < n; i++) {
+        uint32_t p = im->px[i];
+        g[i] = ga_grade((uint8_t)(p >> 16), (uint8_t)(p >> 8), (uint8_t)p);
     }
+    return g;
 }
 
-/* ---------------------------------------------------------------------- shapes ---- */
-
-/* Triangle with colours interpolated from its vertices (4x4 supersampled edge). */
-static void tri_grad(canvas_t *c, const float *p, const float (*col)[3], float alpha) {
-    float ax = p[0], ay = p[1], bx = p[2], by = p[3], cx = p[4], cy = p[5];
-    float den = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
-    int x0 = (int)floorf(fminf(ax, fminf(bx, cx))), x1 = (int)ceilf(fmaxf(ax, fmaxf(bx, cx)));
-    int y0 = (int)floorf(fminf(ay, fminf(by, cy))), y1 = (int)ceilf(fmaxf(ay, fmaxf(by, cy))), x, y;
-    int sx, sy;
-    if (fabsf(den) < 1e-6f)
-        return;
-    for (y = y0; y <= y1; y++)
-        for (x = x0; x <= x1; x++) {
-            int hits = 0;
-            float w0, w1, w2, px = x + 0.5f, py = y + 0.5f;
-            for (sy = 0; sy < 4; sy++)
-                for (sx = 0; sx < 4; sx++) {
-                    float qx = x + (sx + 0.5f) / 4, qy = y + (sy + 0.5f) / 4;
-                    float u = ((by - cy) * (qx - cx) + (cx - bx) * (qy - cy)) / den;
-                    float v = ((cy - ay) * (qx - cx) + (ax - cx) * (qy - cy)) / den;
-                    hits += (u >= 0 && v >= 0 && u + v <= 1);
-                }
-            if (!hits)
-                continue;
-            w0 = clampf(((by - cy) * (px - cx) + (cx - bx) * (py - cy)) / den, 0.0f, 1.0f);
-            w1 = clampf(((cy - ay) * (px - cx) + (ax - cx) * (py - cy)) / den, 0.0f, 1.0f);
-            w2 = clampf(1.0f - w0 - w1, 0.0f, 1.0f);
-            mix_px(c, x, y, col[0][0] * w0 + col[1][0] * w1 + col[2][0] * w2,
-                   col[0][1] * w0 + col[1][1] * w1 + col[2][1] * w2,
-                   col[0][2] * w0 + col[1][2] * w1 + col[2][2] * w2, alpha * hits / 16.0f);
-        }
-}
-
-static void line_aa(canvas_t *c, float ax, float ay, float bx, float by, float w, float r, float g,
-                    float b, float alpha) {
-    float dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy, rad = w * 0.5f;
-    int x0 = (int)floorf(fminf(ax, bx) - rad - 1), x1 = (int)ceilf(fmaxf(ax, bx) + rad + 1);
-    int y0 = (int)floorf(fminf(ay, by) - rad - 1), y1 = (int)ceilf(fmaxf(ay, by) + rad + 1), x, y;
-    for (y = y0; y <= y1; y++)
-        for (x = x0; x <= x1; x++) {
-            float px = x + 0.5f - ax, py = y + 0.5f - ay;
-            float t = l2 > 0 ? clampf((px * dx + py * dy) / l2, 0, 1) : 0;
-            float qx = px - dx * t, qy = py - dy * t;
-            float d = sqrtf(qx * qx + qy * qy) - rad;
-            mix_px(c, x, y, r, g, b, clampf(0.5f - d, 0, 1) * alpha);
-        }
-}
-
-static void disc(canvas_t *c, float cx, float cy, float r, float cr, float cg, float cb, float a) {
-    int x, y;
-    for (y = (int)floorf(cy - r - 1); y <= (int)ceilf(cy + r + 1); y++)
-        for (x = (int)floorf(cx - r - 1); x <= (int)ceilf(cx + r + 1); x++) {
-            float d = hypotf(x + 0.5f - cx, y + 0.5f - cy) - r;
-            mix_px(c, x, y, cr, cg, cb, clampf(0.5f - d, 0, 1) * a);
-        }
-}
-
-static void ring(canvas_t *c, float cx, float cy, float r, float w, float cr, float cg, float cb,
-                 float a) {
-    int x, y;
-    float out = r + w * 0.5f;
-    for (y = (int)floorf(cy - out - 1); y <= (int)ceilf(cy + out + 1); y++)
-        for (x = (int)floorf(cx - out - 1); x <= (int)ceilf(cx + out + 1); x++) {
-            float d = fabsf(hypotf(x + 0.5f - cx, y + 0.5f - cy) - r) - w * 0.5f;
-            mix_px(c, x, y, cr, cg, cb, clampf(0.5f - d, 0, 1) * a);
-        }
-}
-
-/* A katana-like slash: razor thin at both ends, swelling in the middle, white-hot core,
- * red halo. Device coordinates. */
-static void slash(canvas_t *c, float ax, float ay, float bx, float by, float maxw, float k) {
-    float dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy, halo = 16.0f * k;
-    int x0 = (int)floorf(fminf(ax, bx) - halo), x1 = (int)ceilf(fmaxf(ax, bx) + halo);
-    int y0 = (int)floorf(fminf(ay, by) - halo), y1 = (int)ceilf(fmaxf(ay, by) + halo), x, y;
-    for (y = y0; y <= y1; y++)
-        for (x = x0; x <= x1; x++) {
-            float px = x + 0.5f - ax, py = y + 0.5f - ay;
-            float t = clampf((px * dx + py * dy) / l2, 0, 1);
-            float qx = px - dx * t, qy = py - dy * t, d = sqrtf(qx * qx + qy * qy);
-            float w = 0.5f * maxw * k * powf(sinf(PI_F * t), 0.55f);
-            float cov = clampf(0.5f + w - d, 0, 1), hot;
-            float gl = expf(-(d / (halo * 0.5f)) * (d / (halo * 0.5f))) * powf(sinf(PI_F * t), 0.5f);
-            if (gl > 0.01f)
-                add_px(c, x, y, 220 * gl * 0.55f, 18 * gl * 0.55f, 26 * gl * 0.55f);
-            if (cov > 0.0f) {
-                hot = clampf(1.0f - d / (w + 0.01f), 0, 1);
-                mix_px(c, x, y, 255 * hot + 235 * (1 - hot), 245 * hot + 40 * (1 - hot),
-                       235 * hot + 40 * (1 - hot), cov);
+/* The game's emblem (the silhouette in its red glow over the logotype; black background) as
+ * light added to the lacquer: 540 px tall, centred at x 910, top at 44. */
+static void emblem_hero(canvas_t *c, const ga_image_t *im) {
+    float s = 540.0f / (float)im->h, ox = 910.0f - 0.5f * (float)im->w * s, oy = 44.0f;
+    int X, Y;
+    for (Y = 0; Y < c->h; Y++) {
+        float y = ((float)Y + 0.5f) / c->k, v = (y - oy) / s;
+        for (X = 0; X < c->w; X++) {
+            float x = ((float)X + 0.5f) / c->k, u = (x - ox) / s;
+            int r = BG_R, g = BG_G, b = BG_B;
+            if (u >= 0.0f && v >= 0.0f && u < (float)im->w && v < (float)im->h) {
+                uint32_t p = sample_rgb(im->px, im->w, im->h, u, v);
+                r += (int)((p >> 16) & 255);
+                g += (int)((p >> 8) & 255);
+                b += (int)(p & 255);
             }
+            c->px[(size_t)Y * c->w + X] = ((uint32_t)(r > 255 ? 255 : r) << 16) |
+                                          ((uint32_t)(g > 255 ? 255 : g) << 8) | (uint32_t)(b > 255 ? 255 : b);
         }
+    }
 }
 
-void art_emblem(canvas_t *c, float lcx, float lcy, float lR, int with_slash) {
-    float k = c->k, cx = lcx * k, cy = lcy * k, R = lR * k;
-    int i, side;
-    ring(c, cx, cy, R * 1.16f, 1.4f * k, 200, 28, 36, 0.55f);
-    ring(c, cx, cy, R * 1.24f, 1.0f * k, 150, 18, 26, 0.35f);
-    for (i = 0; i < 4; i++) {
-        float tip = (45.0f + 90.0f * i) * PI_F / 180.0f;
-        float tx = cx + R * cosf(tip), ty = cy - R * sinf(tip);
-        for (side = -1; side <= 1; side += 2) {
-            float ang = tip + side * (side > 0 ? 0.80f : 0.72f);
-            float ir = R * (side > 0 ? 0.30f : 0.40f);
-            float ix = cx + ir * cosf(ang), iy = cy - ir * sinf(ang);
-            float pts[6] = {cx, cy, tx, ty, ix, iy};
-            float col[3][3];
-            static const float lit_tip[3] = {246, 249, 253}, lit_in[3] = {176, 184, 200},
-                               lit_c[3] = {24, 26, 34};
-            static const float dk_tip[3] = {196, 204, 216}, dk_in[3] = {52, 56, 70},
-                               dk_c[3] = {8, 8, 12};
-            int j;
-            for (j = 0; j < 3; j++) {
-                col[0][j] = side > 0 ? lit_c[j] : dk_c[j];
-                col[1][j] = side > 0 ? lit_tip[j] : dk_tip[j];
-                col[2][j] = side > 0 ? lit_in[j] : dk_in[j];
+static void hero(canvas_t *c, int game_art, int which) {
+    const ga_image_t *im = !game_art                  ? NULL
+                           : which == ART_HERO_RYU    ? gameart_get(GA_HERO_RYU)
+                           : which == ART_HERO_AYANE  ? gameart_get(GA_HERO_AYANE)
+                                                      : NULL;
+    uint32_t *g = im ? graded(im) : NULL;
+    float s = 660.0f / (im ? (float)im->h : 1.0f), ox = 0.0f, oy = 40.0f;
+    int X, Y;
+    if (g)
+        ox = 870.0f - 0.52f * (float)im->w * s;
+    else
+        ink_landscape(c, INK_SEED);
+    for (Y = 0; Y < c->h; Y++) {
+        float y = ((float)Y + 0.5f) / c->k, t = y / ART_H;
+        float ft = smoothstepf(0.0f, 0.16f, t) * (1.0f - 0.65f * smoothstepf(0.80f, 1.0f, t));
+        for (X = 0; X < c->w; X++) {
+            float x = ((float)X + 0.5f) / c->k, fl, k;
+            uint32_t p;
+            if (g) {
+                float u = (x - ox) / s, v = (y - oy) / s;
+                float fe = smoothstepf(ox, ox + 160.0f, x);
+                p = (u >= 0.0f && u < (float)im->w && v >= 0.0f && v < (float)im->h)
+                        ? sample_rgb(g, im->w, im->h, u, v)
+                        : ((uint32_t)BG_R << 16) | ((uint32_t)BG_G << 8) | BG_B;
+                fl = smoothstepf(0.30f, 0.66f, x / ART_W);
+                k = fl * fe * ft;
+            } else {
+                p = c->px[(size_t)Y * c->w + X];
+                fl = 0.12f + 0.88f * smoothstepf(0.18f, 0.62f, x / ART_W); /* ink keeps a trace */
+                k = fl;
             }
-            tri_grad(c, pts, (const float(*)[3])col, 1.0f);
-            line_aa(c, tx, ty, ix, iy, 1.3f * k, 255, 70, 70, 0.75f);
+            c->px[(size_t)Y * c->w + X] = mix_bg(p, k);
         }
     }
-    disc(c, cx, cy, R * 0.15f, 190, 24, 32, 1.0f);
-    disc(c, cx, cy, R * 0.10f, 6, 4, 6, 1.0f);
-    ring(c, cx, cy, R * 0.15f, 1.2f * k, 255, 150, 150, 0.8f);
-    if (with_slash)
-        slash(c, cx - R * 1.55f, cy + R * 0.85f, cx + R * 1.55f, cy - R * 0.85f, 5.0f, k);
+    free(g);
 }
 
-/* ---------------------------------------------------------------------- glyphs ---- */
-
-/* Pairs of floats on a grid 10 units high. (-1,-1) starts another contour of the same shape
- * (even-odd, used for counters), (-2,-2) starts another shape (union), (-3,-3) ends. */
-#define NEXT_CONTOUR -1, -1
-#define NEXT_SHAPE -2, -2
-#define END_GLYPH -3, -3
-
-static const float G_N[] = {0, 0, 2.4f, 0, 2.4f, 10, 0, 10, NEXT_SHAPE, 5.2f, 0, 7.6f, 0, 7.6f,
-                            10, 5.2f, 10, NEXT_SHAPE, 0, 0, 2.9f, 0, 7.6f, 10, 4.7f, 10, END_GLYPH};
-static const float G_I[] = {0, 0, 2.7f, 0, 2.7f, 10, 0, 10, END_GLYPH};
-static const float G_J[] = {4.4f, 0, 7.0f, 0, 7.0f, 8.2f, 5.2f, 10, 0, 10, 0, 7.8f, 4.4f, 7.8f,
-                            END_GLYPH};
-static const float G_A[] = {3.1f, 0, 5.3f, 0, 2.3f, 10, 0, 10, NEXT_SHAPE, 3.1f, 0, 5.3f, 0, 8.4f,
-                            10, 6.1f, 10, NEXT_SHAPE, 1.3f, 6.4f, 7.1f, 6.4f, 7.6f, 8.2f, 0.8f,
-                            8.2f, END_GLYPH};
-static const float G_G[] = {1.7f, 0, 7.6f, 0, 7.2f, 2.1f, 2.4f, 2.1f, 2.4f, 7.9f, 5.2f, 7.9f,
-                            5.2f, 5.9f, 7.6f, 5.9f, 7.6f, 8.3f, 5.9f, 10, 1.7f, 10, 0, 8.3f,
-                            0, 1.7f, END_GLYPH};
-static const float G_D[] = {0, 0, 5.4f, 0, 7.8f, 2.4f, 7.8f, 7.6f, 5.4f, 10, 0, 10, NEXT_CONTOUR,
-                            2.4f, 2.2f, 4.7f, 2.2f, 5.4f, 2.9f, 5.4f, 7.1f, 4.7f, 7.8f, 2.4f,
-                            7.8f, END_GLYPH};
-static const float G_E[] = {0, 0, 6.6f, 0, 6.2f, 2.1f, 2.4f, 2.1f, 2.4f, 4.0f, 5.6f, 4.0f,
-                            5.2f, 6.0f, 2.4f, 6.0f, 2.4f, 7.9f, 6.9f, 7.9f, 6.6f, 10, 0, 10,
-                            END_GLYPH};
-static const float G_B[] = {0, 0, 5.4f, 0, 7.4f, 1.8f, 7.4f, 4.1f, 6.4f, 5.0f, 7.6f, 5.9f, 7.6f,
-                            8.2f, 5.6f, 10, 0, 10, NEXT_CONTOUR, 2.4f, 2.1f, 4.6f, 2.1f, 5.0f,
-                            2.5f, 5.0f, 3.6f, 4.6f, 3.9f, 2.4f, 3.9f, NEXT_CONTOUR, 2.4f, 6.1f,
-                            4.8f, 6.1f, 5.2f, 6.5f, 5.2f, 7.6f, 4.8f, 7.9f, 2.4f, 7.9f, END_GLYPH};
-static const float G_L[] = {0, 0, 2.4f, 0, 2.4f, 7.9f, 6.2f, 7.9f, 6.2f, 10, 0, 10, END_GLYPH};
-static const float G_C[] = {1.7f, 0, 7.2f, 0, 6.8f, 2.1f, 2.4f, 2.1f, 2.4f, 7.9f, 6.8f, 7.9f,
-                            7.2f, 10, 1.7f, 10, 0, 8.3f, 0, 1.7f, END_GLYPH};
-static const float G_K[] = {0, 0, 2.4f, 0, 2.4f, 10, 0, 10, NEXT_SHAPE, 2.4f, 3.7f, 5.0f, 0, 7.8f,
-                            0, 3.8f, 5.0f, 2.4f, 6.4f, NEXT_SHAPE, 2.4f, 5.3f, 3.9f, 4.2f, 7.9f,
-                            10, 5.2f, 10, END_GLYPH};
-
-typedef struct glyph {
-    char ch;
-    float w;
-    const float *d;
-} glyph_t;
-
-static const glyph_t k_glyphs[] = {
-    {'N', 7.6f, G_N}, {'I', 2.7f, G_I}, {'J', 7.0f, G_J}, {'A', 8.4f, G_A}, {'G', 7.6f, G_G},
-    {'D', 7.8f, G_D}, {'E', 6.9f, G_E}, {'B', 7.6f, G_B}, {'L', 6.2f, G_L}, {'C', 7.2f, G_C},
-    {'K', 7.9f, G_K},
-};
-#define SPACE_UNITS 4.0f
-
-static const glyph_t *find_glyph(char ch) {
-    size_t i;
-    for (i = 0; i < sizeof k_glyphs / sizeof k_glyphs[0]; i++)
-        if (k_glyphs[i].ch == ch)
-            return &k_glyphs[i];
-    return NULL;
-}
-
-float art_wordmark_width(const char *text, float height, float tracking) {
-    float s = height / 10.0f, w = 0;
-    for (; *text; text++) {
-        const glyph_t *g = find_glyph(*text);
-        w += (g ? g->w : SPACE_UNITS) * s + tracking * s;
-    }
-    return w + 10.0f * SHEAR * s;
-}
-
-typedef struct edge {
-    float x0, y0, x1, y1;
-    int shape;
-} edge_t;
-
-#define MAX_EDGES 96
-
-/* Turns one glyph into edges in mask pixels. (ox, oy) is the glyph's top-left in the mask. */
-static int glyph_edges(const glyph_t *g, float ox, float oy, float s, edge_t *e) {
-    const float *p = g->d;
-    int n = 0, shape = 0;
-    float sx[24], sy[24];
-    int np = 0, i;
-    for (;; p += 2) {
-        int end = p[0] == -3.0f, split = p[0] == -1.0f || p[0] == -2.0f || end;
-        if (!split) {
-            sx[np] = ox + (p[0] + (10.0f - p[1]) * SHEAR) * s;
-            sy[np] = oy + p[1] * s;
-            np++;
-            continue;
+static void inner(canvas_t *c, int game_art) {
+    const ga_image_t *bg = game_art ? gameart_get(GA_TITLEBG) : NULL;
+    uint32_t *g = bg ? graded(bg) : NULL;
+    const uint32_t lacquer = ((uint32_t)BG_R << 16) | ((uint32_t)BG_G << 8) | BG_B;
+    int X, Y;
+    for (Y = 0; Y < c->h; Y++) {
+        float y = ((float)Y + 0.5f) / c->k;
+        for (X = 0; X < c->w; X++) {
+            float x = ((float)X + 0.5f) / c->k;
+            uint32_t p = lacquer;
+            /* A very soft warm glow behind the list, so the page is not dead flat. */
+            float dx = (x - 760.0f) / 700.0f, dy = (y - 300.0f) / 420.0f;
+            float glow = 1.0f - (dx * dx + dy * dy);
+            if (glow > 0.0f)
+                p = mix(p, 0x1a1714, glow * 0.8f);
+            if (g && x < ART_SIDE_W && y > ART_TOP_H) {
+                /* cover the column with the 511 x 409 crop, keeping its aspect */
+                float sc = (float)(ART_H - ART_TOP_H) / (float)bg->h;
+                float u = x / sc, v = (y - ART_TOP_H) / sc;
+                float fade = 1.0f - smoothstepf(ART_SIDE_W - 80.0f, (float)ART_SIDE_W, x);
+                p = mix(p, sample_rgb(g, bg->w, bg->h, u, v), 0.07f * fade);
+            }
+            c->px[(size_t)Y * c->w + X] = p;
         }
-        for (i = 0; i < np && n < MAX_EDGES; i++) {
-            int j = (i + 1) % np;
-            e[n].x0 = sx[i];
-            e[n].y0 = sy[i];
-            e[n].x1 = sx[j];
-            e[n].y1 = sy[j];
-            e[n].shape = shape;
-            n++;
-        }
-        np = 0;
-        if (p[0] == -2.0f)
-            shape++;
-        if (end)
-            break;
     }
+    free(g);
+}
+
+void art_backdrop(canvas_t *c, int kind, int game_art, int which) {
+    const ga_image_t *em = game_art && which == ART_HERO_EMBLEM ? gameart_get(GA_EMBLEM) : NULL;
+    if (!c->px)
+        return;
+    if (kind != ART_HERO)
+        inner(c, game_art);
+    else if (em)
+        emblem_hero(c, em);
+    else
+        hero(c, game_art, which);
+}
+
+int art_heroes(int game_art, int *list) {
+    static const int asset[ART_HERO_COUNT] = {GA_EMBLEM, GA_HERO_RYU, GA_HERO_AYANE};
+    int i, n = 0;
+    for (i = 0; game_art && i < ART_HERO_COUNT; i++)
+        if (gameart_get(asset[i]))
+            list[n++] = i;
     return n;
 }
 
-static int cmp_float(const void *a, const void *b) {
-    float x = *(const float *)a, y = *(const float *)b;
-    return x < y ? -1 : x > y;
-}
-
-/* Rasterises one glyph into the 8-bit mask (max-combined with what is already there). */
-static void raster_glyph(uint8_t *mask, int mw, int mh, const edge_t *e, int ne, float gx0,
-                         float gx1, float gy0, float gy1) {
-    int r, s, sh, x, nshape = 0, i;
-    float *cov = (float *)calloc((size_t)mw, sizeof(float));
-    float *tmp = (float *)calloc((size_t)mw, sizeof(float));
-    int ya = (int)floorf(gy0), yb = (int)ceilf(gy1);
-    if (!cov || !tmp) {
-        free(cov);
-        free(tmp);
+void art_hero_at(double t, int n, double hold, double fade, int *cur, int *next, float *mix) {
+    double period = hold + fade, in;
+    long k;
+    *cur = *next = 0;
+    *mix = 0.0f;
+    if (n <= 1 || period <= 0.0 || t < 0.0)
         return;
+    k = (long)(t / period);
+    in = t - (double)k * period;
+    *cur = (int)(k % n);
+    *next = (*cur + 1) % n;
+    if (in > hold) {
+        double m = (in - hold) / fade;
+        *mix = (float)(m * m * (3.0 - 2.0 * m)); /* eased */
     }
-    for (i = 0; i < ne; i++)
-        if (e[i].shape + 1 > nshape)
-            nshape = e[i].shape + 1;
-    if (ya < 0)
-        ya = 0;
-    if (yb > mh)
-        yb = mh;
-    for (r = ya; r < yb; r++) {
-        memset(cov, 0, (size_t)mw * sizeof(float));
-        for (s = 0; s < SUBROWS; s++) {
-            float y = r + (s + 0.5f) / SUBROWS;
-            memset(tmp, 0, (size_t)mw * sizeof(float));
-            for (sh = 0; sh < nshape; sh++) {
-                float xs[64];
-                int nx = 0, k;
-                for (i = 0; i < ne; i++) {
-                    if (e[i].shape != sh)
-                        continue;
-                    if ((e[i].y0 <= y && e[i].y1 > y) || (e[i].y1 <= y && e[i].y0 > y)) {
-                        float t = (y - e[i].y0) / (e[i].y1 - e[i].y0);
-                        if (nx < 64)
-                            xs[nx++] = e[i].x0 + t * (e[i].x1 - e[i].x0);
-                    }
-                }
-                qsort(xs, (size_t)nx, sizeof(float), cmp_float);
-                for (k = 0; k + 1 < nx; k += 2) {
-                    float xa = clampf(xs[k], 0, (float)mw), xb = clampf(xs[k + 1], 0, (float)mw);
-                    int p0 = (int)floorf(xa), p1 = (int)floorf(xb);
-                    for (x = p0; x <= p1 && x < mw; x++) {
-                        float lo = xa > x ? xa : (float)x, hi = xb < x + 1 ? xb : (float)(x + 1);
-                        if (hi > lo)
-                            tmp[x] += hi - lo;
-                    }
-                }
-            }
-            for (x = (int)gx0 < 0 ? 0 : (int)gx0; x < mw && x <= (int)ceilf(gx1); x++)
-                cov[x] += (tmp[x] > 1.0f ? 1.0f : tmp[x]) / SUBROWS;
-        }
-        for (x = (int)gx0 < 0 ? 0 : (int)gx0; x < mw && x <= (int)ceilf(gx1); x++) {
-            int v = (int)(cov[x] * 255.0f + 0.5f);
-            uint8_t *m = &mask[(size_t)r * mw + x];
-            if (v > 255)
-                v = 255;
-            if (v > *m)
-                *m = (uint8_t)v;
-        }
-    }
-    free(cov);
-    free(tmp);
 }
 
-/* One pass of a box blur on both axes (a, tmp: w * h bytes). */
-static void blur_u8(uint8_t *a, uint8_t *tmp, int w, int h, int r) {
-    int x, y, d;
-    if (r < 1)
+/* ------------------------------------------------------------------ motion ---- */
+
+#define PI_F 3.14159265f
+
+static uint32_t towards(uint32_t p, int r, int g, int b, int a256) {
+    int pr = (int)((p >> 16) & 255), pg = (int)((p >> 8) & 255), pb = (int)(p & 255);
+    pr += ((r - pr) * a256) >> 8;
+    pg += ((g - pg) * a256) >> 8;
+    pb += ((b - pb) * a256) >> 8;
+    return ((uint32_t)pr << 16) | ((uint32_t)pg << 8) | (uint32_t)pb;
+}
+
+/* A soft horizontal band of mist drifting at `speed` logical px/s. The horizontal density is
+ * computed once per frame (two sines per column), the vertical profile once per row. */
+static void mist_strip(canvas_t *c, float y0, float y1, float speed, float phase, double t) {
+    int Y, X, Y0 = (int)(y0 * c->k), Y1 = (int)(y1 * c->k);
+    float off = (float)fmod(t * speed, 100000.0);
+    float *dens = (float *)malloc(sizeof(float) * (size_t)c->w);
+    if (!dens)
         return;
-    for (y = 0; y < h; y++)
-        for (x = 0; x < w; x++) {
-            int sum = 0;
-            for (d = -r; d <= r; d++) {
-                int xx = x + d;
-                if (xx >= 0 && xx < w)
-                    sum += a[(size_t)y * w + xx];
-            }
-            tmp[(size_t)y * w + x] = (uint8_t)(sum / (2 * r + 1));
-        }
-    for (y = 0; y < h; y++)
-        for (x = 0; x < w; x++) {
-            int sum = 0;
-            for (d = -r; d <= r; d++) {
-                int yy = y + d;
-                if (yy >= 0 && yy < h)
-                    sum += tmp[(size_t)yy * w + x];
-            }
-            a[(size_t)y * w + x] = (uint8_t)(sum / (2 * r + 1));
-        }
-}
-
-typedef struct stop {
-    float t, r, g, b;
-} stop_t;
-
-/* Brushed chrome: bright sky, dark horizon, bright ground reflection. */
-static const stop_t k_chrome[] = {{0.00f, 252, 253, 255}, {0.26f, 178, 186, 200}, {0.45f, 92, 99, 114},
-                                  {0.50f, 18, 20, 28},    {0.53f, 140, 150, 168}, {0.78f, 214, 220, 230},
-                                  {1.00f, 120, 128, 144}};
-/* The same shape in red steel for the secondary word. */
-static const stop_t k_red[] = {{0.00f, 255, 150, 130}, {0.26f, 230, 56, 48},  {0.45f, 138, 10, 18},
-                               {0.50f, 34, 0, 6},      {0.53f, 200, 40, 40},  {0.78f, 255, 98, 78},
-                               {1.00f, 160, 20, 26}};
-
-static void ramp(const stop_t *s, int n, float t, float *r, float *g, float *b) {
-    int i;
-    t = clampf(t, 0, 1);
-    for (i = 0; i + 1 < n; i++)
-        if (t <= s[i + 1].t) {
-            float u = (t - s[i].t) / (s[i + 1].t - s[i].t);
-            *r = s[i].r + (s[i + 1].r - s[i].r) * u;
-            *g = s[i].g + (s[i + 1].g - s[i].g) * u;
-            *b = s[i].b + (s[i + 1].b - s[i].b) * u;
-            return;
-        }
-    *r = s[n - 1].r;
-    *g = s[n - 1].g;
-    *b = s[n - 1].b;
-}
-
-void art_chrome(float t, int red_style, float *r, float *g, float *b) {
-    ramp(red_style ? k_red : k_chrome, 7, t, r, g, b);
-}
-
-void art_wordmark(canvas_t *c, const char *text, float lx, float ly, float lheight, float tracking,
-                  int red_style) {
-    float k = c->k, s = lheight * k / 10.0f, track = tracking * s;
-    int pad = (int)(lheight * k * 0.45f) + 8;
-    int mw = (int)ceilf(art_wordmark_width(text, lheight, tracking) * k) + 2 * pad;
-    int mh = (int)ceilf(lheight * k) + 2 * pad, x, y, rg;
-    uint8_t *mask = (uint8_t *)calloc((size_t)mw * mh, 1);
-    uint8_t *glow = (uint8_t *)malloc((size_t)mw * mh);
-    uint8_t *tight = (uint8_t *)malloc((size_t)mw * mh);
-    uint8_t *soft = (uint8_t *)malloc((size_t)mw * mh);
-    uint8_t *tmp = (uint8_t *)malloc((size_t)mw * mh);
-    float pen = (float)pad;
-    const char *p;
-    int bx = (int)floorf(lx * k) - pad, by = (int)floorf(ly * k) - pad;
-    if (!mask || !glow || !tight || !soft || !tmp)
-        goto done;
-    for (p = text; *p; p++) {
-        const glyph_t *g = find_glyph(*p);
-        edge_t e[MAX_EDGES];
-        if (!g) {
-            pen += SPACE_UNITS * s + track;
-            continue;
-        }
-        {
-            int ne = glyph_edges(g, pen, (float)pad, s, e);
-            raster_glyph(mask, mw, mh, e, ne, pen - 1.0f, pen + (g->w + 10 * SHEAR) * s + 2.0f,
-                         (float)pad - 1.0f, (float)pad + 10.0f * s + 1.0f);
-        }
-        pen += g->w * s + track;
+    for (X = 0; X < c->w; X++) {
+        float x = (float)X / c->k + off;
+        dens[X] = 0.5f + 0.3f * sinf(x * 0.0061f + phase) + 0.2f * sinf(x * 0.0173f + phase * 2.1f);
     }
-    memcpy(glow, mask, (size_t)mw * mh);
-    memcpy(soft, mask, (size_t)mw * mh);
-    memcpy(tight, mask, (size_t)mw * mh);
-    {
-        int r1 = (int)(lheight * k * 0.14f) + 2;
-        blur_u8(glow, tmp, mw, mh, r1);
-        blur_u8(glow, tmp, mw, mh, r1);
-    }
-    blur_u8(soft, tmp, mw, mh, (int)(1.6f * k) + 1);
-    blur_u8(tight, tmp, mw, mh, (int)(0.9f * k) + 1);
-    for (y = 0; y < mh; y++)
-        for (x = 0; x < mw; x++) {
-            size_t i = (size_t)y * mw + x;
-            float m = mask[i] / 255.0f, g1 = fminf(1.0f, glow[i] / 255.0f * 2.6f);
-            float gs = soft[i] / 255.0f, gt = tight[i] / 255.0f;
-            float cr = 0, cg = 0, cb = 0, t, bev, dx, dy;
-            int X = bx + x, Y = by + y;
-            if (red_style)
-                g1 *= 1.15f;
-            add_px(c, X, Y, 200 * g1 * g1 * 0.75f, 10 * g1 * g1, 18 * g1 * g1);
-            add_px(c, X, Y, 255 * gs * (1 - m) * 0.9f, 48 * gs * (1 - m), 52 * gs * (1 - m));
-            mix_px(c, X, Y, 6, 3, 5, fminf(1.0f, gt * 2.2f) * (1 - m) * 0.85f);
-            if (mask[i] == 0)
-                continue;
-            t = ((float)y - pad) / (10.0f * s);
-            ramp(red_style ? k_red : k_chrome, 7, t, &cr, &cg, &cb);
-            dx = (float)((x + 1 < mw ? soft[i + 1] : 0) - (x > 0 ? soft[i - 1] : 0));
-            dy = (float)((y + 1 < mh ? soft[i + mw] : 0) - (y > 0 ? soft[i - mw] : 0));
-            bev = (dx + dy) * 0.5f;
-            cr += bev * 0.55f;
-            cg += bev * 0.55f;
-            cb += bev * 0.6f;
-            rg = (int)(hash2(0, y + by) * 8.0f) - 4; /* brushed streaks: one value per row */
-            cr += (float)rg;
-            cg += (float)rg;
-            cb += (float)rg;
-            mix_px(c, X, Y, clampf(cr, 0, 255), clampf(cg, 0, 255), clampf(cb, 0, 255), m);
-        }
-done:
-    free(mask);
-    free(glow);
-    free(tight);
-    free(soft);
-    free(tmp);
-}
-
-/* ------------------------------------------------------------------ backdrops ---- */
-
-static void shade_rows(canvas_t *c, float ly0, float ly1, float x0, float x1, float f0, float f1) {
-    int y, x, ya = (int)(ly0 * c->k), yb = (int)(ly1 * c->k);
-    int xa = (int)(x0 * c->k), xb = (int)(x1 * c->k);
-    for (y = ya; y < yb && y < c->h; y++) {
-        float f = f0 + (f1 - f0) * (float)(y - ya) / (float)(yb - ya > 0 ? yb - ya : 1);
-        int ff = (int)(f * 256.0f);
-        for (x = xa; x < xb && x < c->w; x++) {
-            uint32_t v = c->px[(size_t)y * c->w + x];
-            uint32_t r = (((v >> 16) & 255) * ff) >> 8, g = (((v >> 8) & 255) * ff) >> 8,
-                     b = ((v & 255) * ff) >> 8;
-            c->px[(size_t)y * c->w + x] = (r << 16) | (g << 8) | b;
+    if (Y0 < 0)
+        Y0 = 0;
+    if (Y1 > c->h)
+        Y1 = c->h;
+    for (Y = Y0; Y < Y1; Y++) {
+        float v = ((float)Y / c->k - y0) / (y1 - y0), prof = sinf(PI_F * v);
+        uint32_t *row = c->px + (size_t)Y * c->w;
+        int scale = (int)(prof * prof * 0.10f * 256.0f * 256.0f); /* at most 10 %, x256 fixed point */
+        for (X = 0; X < c->w; X++) {
+            int a256 = (int)(dens[X] * (float)scale) >> 8;
+            if (a256 > 0)
+                row[X] = towards(row[X], 54, 49, 43, a256);
         }
     }
+    free(dens);
 }
 
-static void hero_lines(canvas_t *c, int inner) {
-    int i, n = inner ? 9 : 44;
-    g_rng = 20041u + (uint32_t)inner;
-    for (i = 0; i < n; i++) {
-        float y = inner ? 8.0f + frand() * 60.0f : 18.0f + frand() * 300.0f;
-        float x0 = (float)ART_SIDE_W + (inner ? 330.0f : 10.0f) + frand() * (inner ? 420.0f : 560.0f);
-        float len = (inner ? 160.0f : 130.0f) + frand() * (inner ? 380.0f : 560.0f);
-        float half = 0.3f + frand() * (inner ? 0.6f : 1.1f);
-        float inten = 0.22f + frand() * (inner ? 0.35f : 0.65f);
-        speed_line(c, x0, x0 + len, y, half, inten, 235, 22, 30);
-        if (frand() > 0.78f)
-            speed_line(c, x0 + len * 0.2f, x0 + len * 0.8f, y, half * 0.4f, inten, 255, 170, 160);
-    }
-}
-
-static void sidebar_art(canvas_t *c) {
-    float k = c->k;
-    fill_dev(c, 0, 0, (int)(ART_SIDE_W * k), c->h, 5, 5, 8);
-    haze(c, 40, 700, 300, 230, 130, 6, 10, 0.42f, 0, 0, ART_SIDE_W, ART_H);
-    haze(c, 130, 0, 230, 170, 100, 4, 8, 0.30f, 0, 0, ART_SIDE_W, ART_H);
-    /* glowing red edge */
-    {
-        int y;
-        int xe = (int)((ART_SIDE_W - 1) * k);
-        for (y = 0; y < c->h; y++) {
-            float f = 0.45f + 0.55f * sinf(PI_F * (float)y / (float)c->h);
-            int d;
-            for (d = 0; d < (int)(7 * k) + 1; d++) {
-                float a = f * expf(-d / (2.4f * k));
-                add_px(c, xe - d, y, 150 * a * 0.35f, 8 * a * 0.35f, 14 * a * 0.35f);
-            }
-            mix_px(c, xe, y, 120, 14, 20, 0.7f * f);
-            mix_px(c, xe + 1, y, 18, 18, 24, 1.0f);
-        }
-    }
-    art_emblem(c, 50.0f, 50.0f, 24.0f, 1);
-    art_wordmark(c, "NINJA GAIDEN", 90.0f, 26.0f, 17.0f, 0.9f, 0);
-    art_wordmark(c, "BLACK", 90.0f, 52.0f, 15.0f, 3.2f, 1);
-}
-
-static void footer_art(canvas_t *c) {
-    float k = c->k;
-    int fy = (int)((ART_H - ART_FOOT_H) * k), x, d;
-    fill_dev(c, (int)(ART_SIDE_W * k), fy, c->w, c->h, 6, 6, 9);
-    haze(c, 760, 760, 620, 160, 120, 6, 10, 0.30f, ART_SIDE_W, ART_H - ART_FOOT_H, ART_W, ART_H);
-    for (x = (int)(ART_SIDE_W * k); x < c->w; x++) {
-        float u = (float)(x - (int)(ART_SIDE_W * k)) / (float)(c->w - (int)(ART_SIDE_W * k));
-        float f = powf(sinf(PI_F * u), 0.6f);
-        for (d = 0; d < (int)(9 * k); d++) {
-            float a = f * expf(-d / (2.8f * k)) * 0.22f;
-            add_px(c, x, fy - 1 - d, 200 * a, 12 * a, 20 * a);
-        }
-        mix_px(c, x, fy, 190, 22, 30, 0.8f * f);
-    }
-}
-
-void art_backdrop(canvas_t *c, int kind) {
-    float k = c->k;
-    int x, y;
-    for (y = 0; y < c->h; y++) {
-        uint32_t v;
-        float t = (float)y / (float)c->h;
-        int base = (int)(11 - 4 * t);
-        v = ((uint32_t)base << 16) | ((uint32_t)base << 8) | (uint32_t)(base + 3);
-        for (x = 0; x < c->w; x++)
-            c->px[(size_t)y * c->w + x] = v;
+void art_animate(canvas_t *frame, const canvas_t *a, const canvas_t *b, float mix, int kind, int game_art,
+                 int ink, double t) {
+    size_t i, n = (size_t)frame->w * frame->h;
+    if (b && mix > 0.0f) { /* crossfade between two heroes */
+        int m = (int)(mix * 256.0f);
+        for (i = 0; i < n; i++)
+            frame->px[i] = towards(a->px[i], (int)((b->px[i] >> 16) & 255), (int)((b->px[i] >> 8) & 255),
+                                   (int)(b->px[i] & 255), m);
+    } else {
+        memcpy(frame->px, a->px, sizeof(uint32_t) * n);
     }
     if (kind == ART_HERO) {
-        haze(c, 780, 150, 640, 290, 105, 5, 9, 0.55f, ART_SIDE_W, 0, ART_W, ART_H);
-        haze(c, 1060, 150, 330, 250, 255, 30, 34, 0.55f, ART_SIDE_W, 0, ART_W, ART_H);
-        haze(c, 520, 110, 420, 90, 150, 6, 12, 0.36f, ART_SIDE_W, 0, ART_W, ART_H);
-        hero_lines(c, 0);
-        shade_rows(c, 190, 372, ART_SIDE_W, ART_W, 1.0f, 0.38f);
-        shade_rows(c, 372, ART_H, ART_SIDE_W, ART_W, 0.38f, 0.38f);
-        art_emblem(c, 1062.0f, 150.0f, 108.0f, 1);
-        art_wordmark(c, "NINJA GAIDEN", 316.0f, 56.0f, 70.0f, 1.0f, 0);
-        art_wordmark(c, "BLACK", 320.0f, 150.0f, 50.0f, 4.0f, 1);
-        speed_line(c, 640.0f, 960.0f, 176.0f, 1.1f, 0.9f, 255, 36, 44);
-        speed_line(c, 700.0f, 900.0f, 181.0f, 0.5f, 0.8f, 255, 190, 180);
-    } else {
-        haze(c, 1130, 20, 560, 250, 105, 5, 9, 0.78f, ART_SIDE_W, 0, ART_W, ART_H);
-        haze(c, 1180, 0, 300, 150, 240, 24, 30, 0.34f, ART_SIDE_W, 0, ART_W, ART_H);
-        hero_lines(c, 1);
-        shade_rows(c, 100, 330, ART_SIDE_W, ART_W, 1.0f, 0.5f);
-        shade_rows(c, 330, ART_H, ART_SIDE_W, ART_W, 0.5f, 0.5f);
+        mist_strip(frame, ART_H * 0.58f, ART_H * 0.74f, 6.0f, 0.7f, t);
+        mist_strip(frame, ART_H * 0.70f, ART_H * 0.86f, 10.0f, 2.3f, t);
+        if (ink) { /* the moon's halo breathes: +-3 % over 8 s */
+            float cx = ART_W * 0.76f * frame->k, cy = ART_H * 0.25f * frame->k;
+            float r = ART_H * 0.062f * 5.5f * frame->k, f = 0.03f * sinf((float)t * 2.0f * PI_F / 8.0f);
+            int X0 = (int)(cx - r), X1 = (int)(cx + r), Y0 = (int)(cy - r), Y1 = (int)(cy + r), X, Y;
+            for (Y = Y0 < 0 ? 0 : Y0; Y < Y1 && Y < frame->h; Y++)
+                for (X = X0 < 0 ? 0 : X0; X < X1 && X < frame->w; X++) {
+                    float ddx = (float)X - cx, ddy = (float)Y - cy, d = sqrtf(ddx * ddx + ddy * ddy) / r;
+                    if (d < 1.0f) {
+                        uint32_t *p = &frame->px[(size_t)Y * frame->w + X];
+                        int a256 = (int)(fabsf(f) * (1.0f - d) * 256.0f * 4.0f);
+                        *p = f > 0 ? towards(*p, 239, 231, 214, a256 / 4) : towards(*p, BG_R, BG_G, BG_B, a256 / 4);
+                    }
+                }
+        }
+        return;
     }
-    (void)k;
-    sidebar_art(c);
-    footer_art(c);
+    if (game_art) { /* the ornament ring, 200 px, one turn every 120 s */
+        const ga_image_t *ring = gameart_get(GA_RING);
+        float ang = (float)fmod(t, 120.0) / 120.0f * 2.0f * PI_F, ca = cosf(ang), sa = sinf(ang);
+        float cx = 152.0f * frame->k, cy = 170.0f * frame->k, half = 100.0f * frame->k;
+        int X, Y;
+        if (!ring)
+            return;
+        for (Y = (int)(cy - half); Y < (int)(cy + half); Y++)
+            for (X = (int)(cx - half); X < (int)(cx + half); X++) {
+                float ux = ((float)X - cx) / half, uy = ((float)Y - cy) / half;
+                float u = (ux * ca + uy * sa + 1.0f) * 0.5f * (float)(ring->w - 1);
+                float v = (-ux * sa + uy * ca + 1.0f) * 0.5f * (float)(ring->h - 1);
+                float cov = sample_a(ring->alpha, ring->w, ring->h, u, v);
+                if (cov > 0.0f && X >= 0 && Y >= 0 && X < frame->w && Y < frame->h) {
+                    uint32_t *p = &frame->px[(size_t)Y * frame->w + X];
+                    *p = towards(*p, 239, 231, 214, (int)(cov * 0.05f * 256.0f));
+                }
+            }
+    }
+}
+
+int art_fit_dpi(int dpi, int avail_w, int avail_h, int frame_w, int frame_h) {
+    /* S() is MulDiv(v, dpi, 96): the same rounding as the window size the launcher asks for */
+    while (dpi > 72 && (ART_W * dpi + 48) / 96 + frame_w > avail_w)
+        dpi--;
+    while (dpi > 72 && (ART_H * dpi + 48) / 96 + frame_h > avail_h)
+        dpi--;
+    return dpi;
 }

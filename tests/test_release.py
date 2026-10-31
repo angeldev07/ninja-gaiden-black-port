@@ -122,7 +122,7 @@ class PackageTest(Workspace):
         for needle in (
             "v0.3.0",
             "ngb-launcher.exe",
-            "Import game",
+            "Disc image (.iso)",
             "PLAY",
             "SmartScreen",
             "Run anyway",
