@@ -1177,7 +1177,7 @@ static void update_hero(double t) {
     ui_set_hero(list[cur], list[next], mix);
 }
 
-/* A square icon cut from the game's emblem (the silhouette in its red glow), scaled to size x size. */
+/* A square icon cut from the game's emblem: Ryu's silhouette in its red glow, without the logotype. */
 static HICON emblem_icon(const ga_image_t *em, int size) {
     BITMAPINFO bi;
     void *bits = NULL;
@@ -1185,7 +1185,9 @@ static HICON emblem_icon(const ga_image_t *em, int size) {
     HBITMAP color, mask;
     ICONINFO ii;
     HICON icon;
-    int x, y, cx = em->w * 215 / 512, cy = em->h * 172 / 512, half = em->w * 150 / 512;
+    /* Ryu's silhouette alone: in the 512 x 512 emblem it spans x 105..323, y 68..260 (measured on
+     * the PAL texture; the logotype starts at y 294), so a square of 252 around its centre. */
+    int x, y, cx = em->w * 214 / 512, cy = em->h * 164 / 512, half = em->w * 126 / 512;
     memset(&bi, 0, sizeof bi);
     bi.bmiHeader.biSize = sizeof bi.bmiHeader;
     bi.bmiHeader.biWidth = size;
@@ -1211,8 +1213,13 @@ static HICON emblem_icon(const ga_image_t *em, int size) {
                         b += p & 255;
                         n++;
                     }
+            if (n) { /* a little brighter: the glow is dim at taskbar sizes */
+                r = r * 5 / (4 * n);
+                g = g * 5 / (4 * n);
+                b = b * 5 / (4 * n);
+            }
             ((uint32_t *)bits)[(size_t)y * size + x] =
-                0xFF000000u | (n ? ((r / n) << 16) | ((g / n) << 8) | (b / n) : 0);
+                0xFF000000u | ((r > 255 ? 255 : r) << 16) | ((g > 255 ? 255 : g) << 8) | (b > 255 ? 255 : b);
         }
     mask = CreateBitmap(size, size, 1, 1, NULL);
     memset(&ii, 0, sizeof ii);
