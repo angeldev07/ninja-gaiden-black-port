@@ -1,9 +1,10 @@
-"""Generates port/res/ngb.ico: a chrome shuriken crossed by a red slash, on black.
+"""Generates port/res/ngb.ico: the launcher's crest in vermilion on lacquer black.
 
 Original artwork drawn by code (no fonts, images or game data). Stdlib only: a small
 supersampling rasteriser renders every size and the ICO is assembled by hand (32-bit BMP
 entries with an AND mask up to 128 px, a PNG entry for 256 px, as Windows does since Vista).
-The emblem uses the same geometry as the launcher's artwork (launcher/art.c).
+The crest (a ring with two straight swords crossed at +-45 degrees) uses the same geometry as
+the launcher (launcher/kamon.c); keep both in step.
 
     python port/res/make_icon.py                    # writes port/res/ngb.ico
     python port/res/make_icon.py --png preview.png  # also a 256 px preview
@@ -12,7 +13,6 @@ The emblem uses the same geometry as the launcher's artwork (launcher/art.c).
 from __future__ import annotations
 
 import argparse
-import itertools
 import math
 import struct
 import zlib
@@ -20,43 +20,16 @@ from pathlib import Path
 
 SIZES = (16, 24, 32, 48, 64, 128, 256)
 
-Vec = tuple[float, float]
 RGB = tuple[float, float, float]
 RGBA = tuple[float, float, float, float]
-Tri = tuple[Vec, Vec, Vec]
 
-# Palette (0..255)
-BLACK: RGB = (5.0, 5.0, 9.0)
-RED_GLOW: RGB = (225.0, 22.0, 32.0)
-RED_EDGE: RGB = (255.0, 70.0, 70.0)
-HOLE: RGB = (6.0, 4.0, 6.0)
-HOLE_RING: RGB = (190.0, 24.0, 32.0)
+LACQUER: RGB = (19.0, 17.0, 15.0)
+LACQUER_EDGE: RGB = (42.0, 39.0, 36.0)
+VERMILION: RGB = (210.0, 63.0, 47.0)
 
-# Facet colours as (tip, inner vertex, centre): lit and shadowed side of every blade.
-LIT: tuple[RGB, RGB, RGB] = ((246, 249, 253), (176, 184, 200), (24, 26, 34))
-SHADE: tuple[RGB, RGB, RGB] = ((196, 204, 216), (52, 56, 70), (8, 8, 12))
-
-TIP_RADIUS = 0.40  # shuriken tips (the canvas is 1 x 1)
 CORNER = 0.21  # corner radius of the square
 MARGIN = 0.02
-RIM = 0.03  # width of the chrome rim
-
-
-def _facets() -> list[tuple[Tri, bool]]:
-    """The 8 triangles (centre, tip, inner vertex) of the star; True for the lit side."""
-    out: list[tuple[Tri, bool]] = []
-    for k in range(4):
-        tip = math.radians(45 + 90 * k)
-        tip_pt = (0.5 + TIP_RADIUS * math.cos(tip), 0.5 - TIP_RADIUS * math.sin(tip))
-        for side in (1, -1):
-            ang = tip + (0.80 if side > 0 else -0.72)
-            ir = TIP_RADIUS * (0.30 if side > 0 else 0.40)
-            inner = (0.5 + ir * math.cos(ang), 0.5 - ir * math.sin(ang))
-            out.append((((0.5, 0.5), tip_pt, inner), side > 0))
-    return out
-
-
-FACETS = _facets()
+CREST_RADIUS = 0.36  # of the unit canvas
 
 
 def _lerp(a: RGB, b: RGB, t: float) -> RGB:
@@ -75,44 +48,24 @@ def _square_sdf(x: float, y: float) -> float:
     return math.hypot(max(qx, 0.0), max(qy, 0.0)) + min(max(qx, qy), 0.0) - CORNER
 
 
-def _bary(p: Vec, tri: Tri) -> tuple[float, float, float] | None:
-    """Barycentric weights of p in the triangle, or None when p is outside."""
-    (ax, ay), (bx, by), (cx, cy) = tri
-    den = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy)
-    if abs(den) < 1e-12:
-        return None
-    w0 = ((by - cy) * (p[0] - cx) + (cx - bx) * (p[1] - cy)) / den
-    w1 = ((cy - ay) * (p[0] - cx) + (ax - cx) * (p[1] - cy)) / den
-    w2 = 1.0 - w0 - w1
-    if w0 < 0 or w1 < 0 or w2 < 0:
-        return None
-    return w0, w1, w2
+def _box(a: float, b: float, a0: float, a1: float, hw: float) -> float:
+    return max(abs(b) - hw, max(a0 - a, a - a1))
 
 
-def _chrome(t: float) -> RGB:
-    """Vertical brushed-chrome ramp: bright sky, dark horizon, bright ground."""
-    stops = (
-        (0.00, (252.0, 253.0, 255.0)),
-        (0.26, (178.0, 186.0, 200.0)),
-        (0.45, (92.0, 99.0, 114.0)),
-        (0.50, (18.0, 20.0, 28.0)),
-        (0.53, (140.0, 150.0, 168.0)),
-        (0.78, (214.0, 220.0, 230.0)),
-        (1.00, (120.0, 128.0, 144.0)),
-    )
-    t = _clamp(t)
-    for (t0, c0), (t1, c1) in itertools.pairwise(stops):
-        if t <= t1:
-            return _lerp(c0, c1, (t - t0) / (t1 - t0))
-    return stops[-1][1]
+def _sword(u: float, v: float, s: float, c: float, thick: float) -> float:
+    a, b = -u * s + v * c, u * c + v * s
+    tip_hw = 0.048 * thick * (a + 0.84) / 0.12
+    d = max(abs(b) - tip_hw, max(-0.84 - a, a + 0.72))
+    d = min(d, _box(a, b, -0.72, 0.32, 0.048 * thick))
+    d = min(d, _box(a, b, 0.32, 0.32 + 0.09 * thick, 0.18))
+    return min(d, _box(a, b, 0.32 + 0.09 * thick, 0.75, 0.044 * thick))
 
 
-def _add(base: RGB, extra: RGB, k: float) -> RGB:
-    return (
-        min(255.0, base[0] + extra[0] * k),
-        min(255.0, base[1] + extra[1] * k),
-        min(255.0, base[2] + extra[2] * k),
-    )
+def crest_sdf(u: float, v: float, thick: float) -> float:
+    """Signed distance to the crest on the unit disc (kamon.c: kamon_coverage)."""
+    s45 = math.sqrt(0.5)
+    d = abs(math.hypot(u, v) - 0.90) - 0.05 * thick
+    return min(d, _sword(u, v, s45, s45, thick), _sword(u, v, -s45, s45, thick))
 
 
 def sample(x: float, y: float, size: int) -> RGBA:
@@ -120,55 +73,16 @@ def sample(x: float, y: float, size: int) -> RGBA:
     d = _square_sdf(x, y)
     if d > 0:
         return (0.0, 0.0, 0.0, 0.0)
-    # Black background with a deep red mist behind the emblem.
-    r = math.hypot(x - 0.5, y - 0.5)
-    mist = max(0.0, 1.0 - r / 0.62) ** 2
-    color = _add(BLACK, RED_GLOW, 0.85 * mist)
-    # Horizontal speed lines (they only show from 48 px up).
-    if size >= 48:
-        for ly, half, strength in ((0.30, 0.004, 0.30), (0.69, 0.006, 0.25), (0.80, 0.003, 0.2)):
-            edge = max(0.0, 1.0 - abs(y - ly) / half)
-            fade = math.sin(math.pi * _clamp((x - 0.02) / 0.96)) ** 0.8
-            color = _add(color, RED_GLOW, edge * strength * fade)
-    # Slash behind the star: thin at both ends, white-hot core, red halo.
-    ax, ay, bx, by = -0.12, 0.84, 1.12, 0.16
-    dx, dy = bx - ax, by - ay
-    t = _clamp(((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy))
-    dist = math.hypot(x - (ax + dx * t), y - (ay + dy * t))
-    width = 0.5 * 0.036 * math.sin(math.pi * t) ** 0.55
-    halo = math.exp(-((dist / 0.05) ** 2)) * math.sin(math.pi * t) ** 0.5
-    color = _add(color, RED_GLOW, 0.55 * halo)
-    # Facets of the shuriken, lit like chrome.
-    for tri, lit in FACETS:
-        w = _bary((x, y), tri)
-        if w is None:
-            continue
-        tip, inner, centre = LIT if lit else SHADE
-        color = (
-            centre[0] * w[0] + tip[0] * w[1] + inner[0] * w[2],
-            centre[1] * w[0] + tip[1] * w[1] + inner[1] * w[2],
-            centre[2] * w[0] + tip[2] * w[1] + inner[2] * w[2],
-        )
-        # thin red edge along the blade outline (the side opposite the centre vertex)
-        if w[0] < 0.03:
-            color = _lerp(color, RED_EDGE, 0.7)
-        break
-    # The slash cuts across the star.
-    cover = _clamp(0.5 + (width - dist) * size) if width > 0 else 0.0
+    color = LACQUER
+    if d > -0.02:  # a faint lighter edge so the tile reads on dark taskbars
+        color = _lerp(color, LACQUER_EDGE, _clamp((d + 0.02) / 0.02))
+    thick = 1.9 if size <= 16 else 1.6 if size <= 32 else 1.0
+    radius = 0.43 if size <= 24 else CREST_RADIUS  # fill tiny icons
+    u, v = (x - 0.5) / radius, (y - 0.5) / radius
+    aa = 1.0 / (size * radius)
+    cover = _clamp(0.5 - crest_sdf(u, v, thick) / aa)
     if cover > 0:
-        hot = _clamp(1.0 - dist / (width + 1e-6))
-        core = _lerp((255.0, 50.0, 50.0), (255.0, 250.0, 240.0), hot**0.6)
-        color = _lerp(color, core, cover)
-    # Centre hole with a red ring.
-    if r < 0.060:
-        color = HOLE if r < 0.040 else _lerp(HOLE_RING, RED_EDGE, 0.5)
-    # Chrome rim around the square.
-    if d > -RIM:
-        k = _clamp((d + RIM) / RIM)
-        rim = _chrome(y)
-        color = _lerp(color, rim, 0.9 if k > 0.25 else 0.9 * k / 0.25)
-        if d > -0.006:
-            color = _lerp(color, (10.0, 6.0, 8.0), 0.6)
+        color = _lerp(color, VERMILION, cover)
     return (color[0], color[1], color[2], 1.0)
 
 

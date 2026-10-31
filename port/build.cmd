@@ -107,11 +107,14 @@ cl %CFLAGS% /I"%PORT%res" /I"%PORT%launcher" /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\upd_
 rem 5c) Launcher ink-wash landscape: deterministic, composed as designed, within the time budget.
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\ink_test.pdb" /Fe"%OUT%\ink_test.exe" "%PORT%tests\ink_test.c" "%PORT%launcher\ink.c" || exit /b 1
 "%OUT%\ink_test.exe" || exit /b 1
+rem 5d) Launcher crest geometry (coverage on the unit disc).
+cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\kamon_test.pdb" /Fe"%OUT%\kamon_test.exe" "%PORT%tests\kamon_test.c" "%PORT%launcher\kamon.c" || exit /b 1
+"%OUT%\kamon_test.exe" || exit /b 1
 
 rem 5) ngb-launcher.exe: the graphical launcher (Win32 + GDI; bcrypt and winhttp for the updater). See launcher\launcher.c.
 rc /nologo /I"%PORT%res" /I"%PORT%launcher" /fo"%OUT%\obj\launcher.res" "%PORT%launcher\launcher.rc" || exit /b 1
 cl %CFLAGS% /I"%PORT%res" /I"%PORT%launcher" /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\launcher.pdb" /Fe"%OUT%\ngb-launcher.exe" ^
-  "%PORT%launcher\launcher.c" "%PORT%launcher\ui.c" "%PORT%launcher\art.c" "%PORT%launcher\import.c" "%PORT%launcher\xdvdfs.c" "%PORT%launcher\update.c" "%OUT%\obj\launcher.res" ^
+  "%PORT%launcher\launcher.c" "%PORT%launcher\ui.c" "%PORT%launcher\art.c" "%PORT%launcher\ink.c" "%PORT%launcher\kamon.c" "%PORT%launcher\import.c" "%PORT%launcher\xdvdfs.c" "%PORT%launcher\update.c" "%OUT%\obj\launcher.res" ^
   /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib shell32.lib comdlg32.lib advapi32.lib ole32.lib bcrypt.lib winhttp.lib || exit /b 1
 echo build: %OUT%\ngb-loader.exe + ngb-core.dll + ngb-launcher.exe
 endlocal

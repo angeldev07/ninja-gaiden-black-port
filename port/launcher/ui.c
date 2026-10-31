@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "ui.h"
+#include "kamon.h"
 
 int g_dpi = 96;
 int g_hover = 0, g_down = 0;
@@ -379,6 +380,22 @@ void status_dot(int x, int y, rgb_t c) {
             }
         }
     fill_circle(x, y, 4, c);
+}
+
+void kamon_draw(int cx, int cy, int r, rgb_t col) {
+    int X = S(cx), Y = S(cy), R = S(r), i, j;
+    float aa, thick;
+    if (R < 2)
+        return;
+    aa = 1.0f / (float)R;
+    thick = R < 16 ? 1.6f : 1.0f; /* hairlines vanish at tiny sizes */
+    gdi_sync();
+    for (j = Y - R; j <= Y + R; j++)
+        for (i = X - R; i <= X + R; i++) {
+            float c = kamon_coverage((i + 0.5f - X) / R, (j + 0.5f - Y) / R, aa, thick);
+            if (c > 0.0f)
+                blend_px(i, j, col, (int)(c * 255.0f + 0.5f));
+        }
 }
 
 void ui_clip(int x, int y, int w, int h) {
