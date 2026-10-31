@@ -110,6 +110,9 @@ cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\ink_test.pdb" /Fe"%OUT%\ink_test.exe"
 rem 5d) Launcher crest geometry (coverage on the unit disc).
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\kamon_test.pdb" /Fe"%OUT%\kamon_test.exe" "%PORT%tests\kamon_test.c" "%PORT%launcher\kamon.c" || exit /b 1
 "%OUT%\kamon_test.exe" || exit /b 1
+rem 5e) Launcher readers of the user's game copy: AFS names, XPR0 textures, sprite tables.
+cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\gamedata_test.pdb" /Fe"%OUT%\gamedata_test.exe" "%PORT%tests\gamedata_test.c" "%PORT%launcher\gamedata.c" || exit /b 1
+"%OUT%\gamedata_test.exe" || exit /b 1
 
 rem 5) ngb-launcher.exe: the graphical launcher (Win32 + GDI; bcrypt and winhttp for the updater). See launcher\launcher.c.
 rc /nologo /I"%PORT%res" /I"%PORT%launcher" /fo"%OUT%\obj\launcher.res" "%PORT%launcher\launcher.rc" || exit /b 1
