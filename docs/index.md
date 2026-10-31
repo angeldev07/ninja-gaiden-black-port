@@ -61,6 +61,8 @@ _(still empty)_
 - [[launcher-laca-design]]: launcher redesign "lacquer and ink" for v0.8.0: tokens, layout, procedural ink landscape, kamon, optional game art read at runtime from the user's copy (draft).
 - [[launcher-laca-plan]]: task-by-task implementation plan of the launcher redesign (draft).
 - [[achievements-brief]]: achievements (owner's list, in-game toast drawn by the port, launcher page); brief and feasibility spike for the design session (draft).
+- [[achievements-design]]: the 27 achievements, their detectors, the toast (seal and rare variants), the file and the launcher page (draft).
+- [[achievements-plan]]: phase 1 tasks and checks (draft).
 - [[adr-04-version-control]]: trunk-based, Conventional Commits, squash PRs, review, CI gates and a tag per milestone.
 
 ## Team (`team/`)
