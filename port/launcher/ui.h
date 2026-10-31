@@ -31,8 +31,35 @@ typedef uint32_t rgb_t;
 #define C_WARN 0xe0a840
 #define C_BAD 0xe0584e
 
+/* "Lacquer and ink" tokens (docs/target/launcher-laca-design.md). One accent: vermilion.
+ * muted, dim and sep are cream at 56 %, 36 % and 10 % pre-blended over bg. */
+#define C_BG 0x13110f
+#define C_CREAM 0xefe7d6
+#define C_MUTED 0x8f8a80
+#define C_DIMC 0x625d56
+#define C_SEP 0x2a2724
+#define C_VERM 0xd23f2f
+#define C_VERM_HOT 0xdc4a3a
+#define C_VERM_DOWN 0xb8362a
+#define C_OKC 0x8fb08a
+#define C_WARNC 0xd9a648
+#define C_BADC 0xd8584c
+
 enum font_id {
-    F_BODY, F_SMALL, F_BOLD, F_TINY, F_H1, F_H2, F_PLAY, F_MONO, F_TAG, F_COUNT
+    F_BODY, F_SMALL, F_BOLD, F_TINY, F_H1, F_H2, F_PLAY, F_MONO, F_TAG,
+    /* lacquer set: Josefin Sans (embedded) and Yu Mincho for kanji */
+    F_LBODY,   /* Josefin 300, 14 */
+    F_LSMALL,  /* Josefin 300, 12.5 */
+    F_LABEL,   /* Josefin 600, 10.5 (tracked uppercase micro labels) */
+    F_TAB,     /* Josefin 600, 11 */
+    F_VALUE,   /* Josefin 300, 16 */
+    F_DISPLAY, /* Josefin 100, 88 (Play title) */
+    F_PAGE,    /* Josefin 100, 46 (inner page titles) */
+    F_HEAD,    /* Josefin 100, 54 (first-run headline) */
+    F_BTN,     /* Josefin 600, 15 */
+    F_GHOST,   /* Josefin 100, 128 (ghost page number) */
+    F_KANJI,   /* Yu Mincho 600, 16 */
+    F_COUNT
 };
 
 #define T_LINE (DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS)
@@ -70,6 +97,16 @@ void ui_card(int x, int y, int w, int h);
 /* Text. */
 void txt(int font, rgb_t col, int x, int y, int w, int h, UINT fmt, const wchar_t *s);
 int text_w(int font, const wchar_t *s);
+/* Text with letter-spacing of `em` times the font size (GDI character extra). */
+void txt_tracked(int font, rgb_t col, int x, int y, int h, float em, const wchar_t *s);
+int tracked_w(int font, float em, const wchar_t *s);
+/* 1 if a Mincho face is available for the kanji ornaments (they are skipped otherwise). */
+int ui_has_kanji(void);
+/* Face actually selected for a font (for diagnostics). */
+void ui_font_face(int font, wchar_t *out, int n);
+/* Set before ui_init: skip loading the embedded fonts (tests the fallback). */
+extern int g_no_embedded_fonts;
+
 /* Text filled with a vertical chrome gradient and a red halo (headings). */
 void txt_chrome(int font, int x, int y, int w, int h, UINT fmt, int red_style, int spacing,
                 const wchar_t *s);

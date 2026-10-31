@@ -1790,6 +1790,29 @@ static void set_hover(int id) {
     }
 }
 
+/* --fonts FILE: the face GDI selected for the lacquer fonts, one "key=face" per line (UTF-8). */
+static int write_fonts_and_quit(const wchar_t *path) {
+    static const struct {
+        const char *key;
+        int font;
+    } list[] = {{"body", F_LBODY}, {"label", F_LABEL}, {"display", F_DISPLAY}, {"kanji", F_KANJI}};
+    FILE *f = _wfopen(path, L"wb");
+    size_t i;
+    if (!f)
+        return 1;
+    for (i = 0; i < sizeof list / sizeof list[0]; i++) {
+        wchar_t face[LF_FACESIZE];
+        char u8[LF_FACESIZE * 3];
+        ui_font_face(list[i].font, face, LF_FACESIZE);
+        if (list[i].font == F_KANJI && !ui_has_kanji())
+            wcscpy(face, L"none");
+        WideCharToMultiByte(CP_UTF8, 0, face, -1, u8, (int)sizeof u8, NULL, NULL);
+        fprintf(f, "%s=%s\n", list[i].key, u8);
+    }
+    fclose(f);
+    return 0;
+}
+
 static void write_shot_and_quit(void) {
     imp_status_t st;
     paint_all();
@@ -2054,7 +2077,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show) {
     MSG msg;
     HDC dc;
     int x, y, ow, oh, argc = 0, i, dpi, forced_lang = -1;
-    wchar_t iso[MAX_PATH];
+    wchar_t iso[MAX_PATH], fonts_path[MAX_PATH] = L"";
     LPWSTR *argv;
     DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
     (void)prev;
@@ -2079,6 +2102,10 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show) {
             g_log_view = 1;
             continue;
         }
+        if (!wcscmp(a, L"--no-embedded-fonts")) {
+            g_no_embedded_fonts = 1;
+            continue;
+        }
         if (!wcscmp(a, L"--page")) {
             int pg = _wtoi(v);
             if (pg >= 0 && pg < PG_COUNT)
@@ -2098,6 +2125,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show) {
             wfmt(g_updated_to, 32, L"%ls", v);
         } else if (!wcscmp(a, L"--dpi")) {
             dpi = _wtoi(v); /* review aid: render as if the system DPI were this */
+        } else if (!wcscmp(a, L"--fonts")) {
+            wfmt(fonts_path, MAX_PATH, L"%ls", v);
         } else if (!wcscmp(a, L"--demo")) {
             g_demo = !wcscmp(v, L"progress") ? 1 : 2;
         } else {
@@ -2112,6 +2141,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show) {
     if (g_demo == 2)
         note_error(IMPE_NOT_NGB, L"Halo: Combat Evolved", 0);
     ui_init(dpi);
+    if (fonts_path[0])
+        return write_fonts_and_quit(fonts_path);
     if (g_updated_to[0] && g_data[0]) { /* the update is in place: its zip and staging can go */
         wchar_t upd[MAX_PATH];
         wfmt(upd, MAX_PATH, L"%ls\\updates", g_data);

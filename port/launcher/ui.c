@@ -83,44 +83,111 @@ static void add_px(int x, int y, int r, int g, int b) {
 
 /* ------------------------------------------------------------------- lifecycle ---- */
 
+int g_no_embedded_fonts;
+static int g_kanji_ok;
+static int g_fonts_loaded;
+
+/* The embedded fonts are RCDATA 101..104 of the exe (launcher.rc); private to the process. */
+static void load_embedded_fonts(void) {
+    int id;
+    if (g_fonts_loaded || g_no_embedded_fonts)
+        return;
+    g_fonts_loaded = 1;
+    for (id = 101; id <= 104; id++) {
+        HRSRC r = FindResourceW(NULL, MAKEINTRESOURCEW(id), MAKEINTRESOURCEW(10) /* RT_RCDATA */);
+        HGLOBAL g = r ? LoadResource(NULL, r) : NULL;
+        void *p = g ? LockResource(g) : NULL;
+        DWORD n = 0;
+        if (p)
+            AddFontMemResourceEx(p, SizeofResource(NULL, r), NULL, &n);
+    }
+}
+
+static HFONT font_try(int px, int weight, BYTE quality, const wchar_t *face, wchar_t *got) {
+    HFONT f = CreateFontW(-px, 0, 0, 0, weight, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                          OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, quality,
+                          DEFAULT_PITCH | FF_DONTCARE, face);
+    HGDIOBJ old = SelectObject(g_mem, f);
+    got[0] = 0;
+    GetTextFaceW(g_mem, LF_FACESIZE, got);
+    SelectObject(g_mem, old);
+    return f;
+}
+
 static void make_fonts(void) {
     static const struct {
         const wchar_t *face;
-        int px, weight;
+        int px10, weight; /* px10: size in tenths of a logical pixel */
         BYTE quality;
+        const wchar_t *fallback;
     } spec[F_COUNT] = {
-        {L"Segoe UI", 15, FW_NORMAL, CLEARTYPE_QUALITY},
-        {L"Segoe UI", 12, FW_NORMAL, CLEARTYPE_QUALITY},
-        {L"Segoe UI", 15, FW_SEMIBOLD, CLEARTYPE_QUALITY},
-        {L"Segoe UI", 11, FW_SEMIBOLD, CLEARTYPE_QUALITY},
-        {L"Bahnschrift", 34, FW_SEMIBOLD, ANTIALIASED_QUALITY},
-        {L"Bahnschrift", 21, FW_SEMIBOLD, ANTIALIASED_QUALITY},
-        {L"Bahnschrift", 22, FW_BOLD, ANTIALIASED_QUALITY},
-        {L"Consolas", 12, FW_NORMAL, CLEARTYPE_QUALITY},
-        {L"Bahnschrift", 15, FW_SEMIBOLD, ANTIALIASED_QUALITY},
+        {L"Segoe UI", 150, FW_NORMAL, CLEARTYPE_QUALITY, NULL},
+        {L"Segoe UI", 120, FW_NORMAL, CLEARTYPE_QUALITY, NULL},
+        {L"Segoe UI", 150, FW_SEMIBOLD, CLEARTYPE_QUALITY, NULL},
+        {L"Segoe UI", 110, FW_SEMIBOLD, CLEARTYPE_QUALITY, NULL},
+        {L"Bahnschrift", 340, FW_SEMIBOLD, ANTIALIASED_QUALITY, L"Segoe UI"},
+        {L"Bahnschrift", 210, FW_SEMIBOLD, ANTIALIASED_QUALITY, L"Segoe UI"},
+        {L"Bahnschrift", 220, FW_BOLD, ANTIALIASED_QUALITY, L"Segoe UI"},
+        {L"Consolas", 120, FW_NORMAL, CLEARTYPE_QUALITY, NULL},
+        {L"Bahnschrift", 150, FW_SEMIBOLD, ANTIALIASED_QUALITY, L"Segoe UI"},
+        {L"Josefin Sans", 140, FW_LIGHT, CLEARTYPE_QUALITY, L"Segoe UI Light"},
+        {L"Josefin Sans", 125, FW_LIGHT, CLEARTYPE_QUALITY, L"Segoe UI Light"},
+        {L"Josefin Sans", 105, FW_SEMIBOLD, CLEARTYPE_QUALITY, L"Segoe UI Semibold"},
+        {L"Josefin Sans", 110, FW_SEMIBOLD, CLEARTYPE_QUALITY, L"Segoe UI Semibold"},
+        {L"Josefin Sans", 160, FW_LIGHT, CLEARTYPE_QUALITY, L"Segoe UI Light"},
+        {L"Josefin Sans", 880, FW_THIN, ANTIALIASED_QUALITY, L"Segoe UI Light"},
+        {L"Josefin Sans", 460, FW_THIN, ANTIALIASED_QUALITY, L"Segoe UI Light"},
+        {L"Josefin Sans", 540, FW_THIN, ANTIALIASED_QUALITY, L"Segoe UI Light"},
+        {L"Josefin Sans", 150, FW_SEMIBOLD, ANTIALIASED_QUALITY, L"Segoe UI Semibold"},
+        {L"Josefin Sans", 1280, FW_THIN, ANTIALIASED_QUALITY, L"Segoe UI Light"},
+        {L"Shippori Mincho B1", 160, FW_SEMIBOLD, ANTIALIASED_QUALITY, L"Yu Mincho"},
     };
     int i;
+    load_embedded_fonts();
+    g_kanji_ok = 1;
     for (i = 0; i < F_COUNT; i++) {
-        const wchar_t *face = spec[i].face;
         wchar_t got[LF_FACESIZE];
-        HGDIOBJ old;
+        int px = MulDiv(spec[i].px10, g_dpi, 960);
         if (g_fonts[i])
             DeleteObject(g_fonts[i]);
-        g_fonts[i] = CreateFontW(-S(spec[i].px), 0, 0, 0, spec[i].weight, FALSE, FALSE, FALSE,
-                                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                 spec[i].quality, DEFAULT_PITCH | FF_DONTCARE, face);
-        old = SelectObject(g_mem, g_fonts[i]);
-        got[0] = 0;
-        GetTextFaceW(g_mem, LF_FACESIZE, got);
-        SelectObject(g_mem, old);
-        if (!_wcsicmp(face, L"Bahnschrift") && _wcsicmp(got, L"Bahnschrift")) { /* older Windows */
+        g_fonts[i] = font_try(px, spec[i].weight, spec[i].quality, spec[i].face, got);
+        if (_wcsicmp(got, spec[i].face) && spec[i].weight != FW_NORMAL && spec[i].weight != FW_BOLD) {
+            /* Static weights outside regular/bold register their legacy family name. */
+            wchar_t legacy[LF_FACESIZE];
+            _snwprintf(legacy, LF_FACESIZE, L"%ls %ls", spec[i].face,
+                       spec[i].weight == FW_SEMIBOLD ? L"SemiBold"
+                       : spec[i].weight == FW_THIN   ? L"Thin"
+                                                     : L"Light");
+            legacy[LF_FACESIZE - 1] = 0;
             DeleteObject(g_fonts[i]);
-            g_fonts[i] = CreateFontW(-S(spec[i].px), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-                                     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                     ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
-                                     L"Segoe UI");
+            g_fonts[i] = font_try(px, FW_NORMAL, spec[i].quality, legacy, got);
+            if (!_wcsicmp(got, legacy))
+                continue;
+            DeleteObject(g_fonts[i]);
+            g_fonts[i] = font_try(px, spec[i].weight, spec[i].quality, spec[i].face, got);
+        }
+        if (_wcsicmp(got, spec[i].face) && spec[i].fallback) { /* face missing: GDI substituted */
+            int w = spec[i].weight == FW_BOLD && !_wcsicmp(spec[i].face, L"Bahnschrift")
+                        ? FW_BOLD
+                        : spec[i].weight;
+            DeleteObject(g_fonts[i]);
+            g_fonts[i] = font_try(px, w, spec[i].quality, spec[i].fallback, got);
+            if (i == F_KANJI && _wcsicmp(got, spec[i].fallback)) {
+                DeleteObject(g_fonts[i]);
+                g_fonts[i] = font_try(px, spec[i].weight, spec[i].quality, L"MS Mincho", got);
+                g_kanji_ok = !_wcsicmp(got, L"MS Mincho");
+            }
         }
     }
+}
+
+int ui_has_kanji(void) { return g_kanji_ok; }
+
+void ui_font_face(int font, wchar_t *out, int n) {
+    HGDIOBJ old = SelectObject(g_mem, g_fonts[font]);
+    out[0] = 0;
+    GetTextFaceW(g_mem, n, out);
+    SelectObject(g_mem, old);
 }
 
 void ui_init(int dpi) {
@@ -348,6 +415,40 @@ int text_w(int font, const wchar_t *s) {
     GetTextExtentPoint32W(g_mem, s, (int)wcslen(s), &sz);
     SelectObject(g_mem, old);
     return MulDiv(sz.cx, 96, g_dpi);
+}
+
+static int font_em_px(int font) {
+    TEXTMETRICW tm;
+    HGDIOBJ old = SelectObject(g_mem, g_fonts[font]);
+    GetTextMetricsW(g_mem, &tm);
+    SelectObject(g_mem, old);
+    return tm.tmHeight - tm.tmInternalLeading; /* em height in device pixels */
+}
+
+void txt_tracked(int font, rgb_t col, int x, int y, int h, float em, const wchar_t *s) {
+    RECT r;
+    HGDIOBJ old = SelectObject(g_mem, g_fonts[font]);
+    SetBkMode(g_mem, TRANSPARENT);
+    SetTextColor(g_mem, cref(col));
+    SetTextCharacterExtra(g_mem, (int)(em * (float)font_em_px(font) + 0.5f));
+    r.left = S(x);
+    r.top = S(y);
+    r.right = S(x + 4000);
+    r.bottom = S(y + h);
+    DrawTextW(g_mem, s, -1, &r, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    SetTextCharacterExtra(g_mem, 0);
+    SelectObject(g_mem, old);
+}
+
+int tracked_w(int font, float em, const wchar_t *s) {
+    SIZE sz;
+    int n = (int)wcslen(s);
+    HGDIOBJ old = SelectObject(g_mem, g_fonts[font]);
+    int extra = (int)(em * (float)font_em_px(font) + 0.5f);
+    GetTextExtentPoint32W(g_mem, s, n, &sz);
+    SelectObject(g_mem, old);
+    /* the last glyph's spacing is trailing; do not count it */
+    return MulDiv(sz.cx + extra * (n > 0 ? n - 1 : 0), 96, g_dpi);
 }
 
 static void blur_box(uint8_t *a, uint8_t *tmp, int w, int h, int r) {
