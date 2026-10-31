@@ -1,0 +1,84 @@
+---
+tags: [ngb, target, achievements, brief]
+updated: 2026-10-31
+status: draft
+---
+
+# Achievements: brief for the design session
+
+> PROPOSAL. Nothing here exists yet. This page carries the owner's decisions and the open questions into the
+> session that designs and builds the feature. Next step: the feasibility spike below, then a spec.
+
+## Goal
+
+Port-side achievements for Ninja Gaiden Black, in the spirit of the Xbox 360 ones: unlocked while playing, shown
+with a well-made toast in the game, and listed in the launcher. They add replay value. **The game itself is never
+patched**: no file of the user's copy changes, and nothing of the game ships ([[adr-03-game-data-outside-repo]]).
+
+## The achievement list (owner, 2026-10-31)
+
+**Story mode**
+- Complete the story mode on each difficulty: Ninja Dog, Normal, Hard, Very Hard, Master Ninja.
+- One per chapter of the story mode.
+- **Master Ninja rank at the end of each chapter, on each difficulty** (the end-of-chapter rank; replaces an idea
+  about the Karma maximum, which the owner rejected), plus one per difficulty for every chapter at that rank.
+- **The True Ultimate Master Ninja:** finish the game on Master Ninja without healing items, ninpo or taking a hit,
+  and without life or ninpo upgrades.
+
+**Mission mode**
+- Complete "Eternal Legend"; complete it on Master Ninja.
+- Complete the stadium challenge on Master Ninja; and again with no healing and without taking a hit.
+- Complete every mission on Master Ninja.
+
+**Counters**
+- Kills with each weapon (tiers), Izuna Drop kills, kills with each ninpo.
+
+**Ideas the owner did not object to** (to confirm in the spec)
+- Each boss without taking damage; a chapter on Master Ninja without items; the story with the Dragon Sword only;
+  "Eternal Legend" without dying.
+- Collection: the 50 Golden Scarabs, every weapon, every weapon at its top level, every ninpo, maximum life and ki,
+  every costume, one of each item from Muramasa.
+- Use counters: Flying Swallow, Guillotine Throw, Ultimate Technique; total kills; total ninpo cast.
+- Light-hearted ones (100 deaths, choosing Ninja Dog…) and port ones (first session, 10 and 100 hours, an F12 shot).
+
+## Decisions
+
+- **Toast in the game, drawn by the port:** every frame goes through the port's presenter (`port/src/gfx/present.c`,
+  the GL flip in `port/src/gpu/pgraph_gl.c`) before it reaches the window, so an overlay can be composited there,
+  like the Steam overlay. No game patch. Look: Xbox 360-like (slides in at the bottom centre, about 5 s, a short
+  sound), framed in the launcher's "lacquer and ink" language ([[launcher-laca-design]]): the brush 龍 emblem,
+  vermilion accent, Josefin Sans. It can be switched off.
+- **Launcher page "Achievements"** in the same style: unlocked (with date), locked, hidden, and progress bars for
+  counters ("Izuna Drop: 412 / 1000").
+- **Storage:** a file in the data folder, apart from the game's saves (which are the user's and stay read-only).
+
+## How the game state could be read (to research)
+
+- **RAM:** the game runs natively in our process, so its memory can be read every frame. `--dump-ram FRAMES` and F10
+  dump the writable RAM to compare states ([[mods]]): difficulty, current chapter, end-of-chapter rank, inventory,
+  life and ki upgrades.
+- **Hooks:** for events (an enemy killed and by what, the player hit, an item or ninpo used) the port can hook guest
+  functions, as it already does for XAPI and D3D ([[xbe-default]], [[native-boot]]; `port/src/libaddr.c` handles
+  addresses that move between builds).
+- **Saves:** `UDATA/.../save000.dat` (95,400 bytes) may already hold chapter completion and ranks; `system.dat` is
+  encrypted ([[mods]]). Read-only either way.
+- **Releases differ:** PAL and other releases order some data differently (the launcher found a texture at another
+  index on a variant). Anything located by address needs a check per release, or a signature search; releases are
+  told apart by title id.
+
+## Feasibility spike (first task of the session)
+
+1. Find in RAM: the difficulty, the current chapter and the rank shown at the end of a chapter (`--dump-ram` around
+   the end of chapter 1; the owner may need to play it, since the route there is not deterministic).
+2. Detect one event, "chapter 1 complete", and record it in an achievements file in the data folder.
+3. Draw a placeholder toast through the presenter, and read the file from the launcher.
+
+The spike says what each kind of detector costs; then a spec (brainstorming, design sections, plan) covers the full
+list, the toast and the launcher page.
+
+## Open questions
+
+- Which events need hooks rather than RAM polling (kills per weapon, hits taken, items and ninpo used)?
+- How to stop a reload of a save from "cheating" a no-damage run (track per chapter attempt?).
+- Hidden achievements: which ones, and what the launcher shows for them.
+- Sound for the toast: original, generated by us (no game audio).

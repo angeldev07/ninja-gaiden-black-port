@@ -59,6 +59,7 @@ _(still empty)_
 - [[adr-07-releases-and-updater]]: tag-driven draft releases with an update manifest, and a launcher updater (check, SHA-256, rename-and-replace).
 - [[launcher-laca-design]]: launcher redesign "lacquer and ink" for v0.8.0: tokens, layout, procedural ink landscape, kamon, optional game art read at runtime from the user's copy (draft).
 - [[launcher-laca-plan]]: task-by-task implementation plan of the launcher redesign (draft).
+- [[achievements-brief]]: achievements (owner's list, in-game toast drawn by the port, launcher page); brief and feasibility spike for the design session (draft).
 - [[adr-04-version-control]]: trunk-based, Conventional Commits, squash PRs, review, CI gates and a tag per milestone.
 
 ## Team (`team/`)
