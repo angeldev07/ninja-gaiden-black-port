@@ -26,6 +26,7 @@ in [[CLAUDE]] and the timeline in [[log]].
 - [[native-boot]]: what `default.xbe` does when it boots natively (H6): threads, XAPI, drives, hard-disk cache, D3D init up to the first NV2A MMIO.
 - [[characters]]: gallery of the 62 `chr_*`: 49 export to GLB, 20 with idle; failures grouped by cause.
 - [[mods]]: hidden costumes and Intercept; `--dump-ram` to compare RAM states (draft)
+- [[game-state]]: chapter, difficulty and mode variables, the save block and the profile block (`system.dat`) the achievements read (draft).
 - [[audio-apu]]: MCPX APU: voice processor, mixing to waveOut, free-voice interrupts and CRI music (thread priorities and 60 Hz vblank).
 - [[xapi-input]]: HLE gamepad for the 8 XAPI functions. The hang after the warning screens is not the input (hypothesis: Sofdec video without audio).
 - [[gpu-nv2a]]: H7a. Emulated NV2A registers, vblank and push buffer: the game reaches the warnings screen and submits 808k primitives (not yet rasterized).

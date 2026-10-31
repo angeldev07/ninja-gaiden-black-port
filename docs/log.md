@@ -1016,3 +1016,17 @@ Details in [[gpu-nv2a]].
   the decisions are in [[achievements-brief]].
 - **Toast in the game without patching it:** the port's presenter draws it over the frame, like the Steam overlay;
   the launcher gets an Achievements page. Work starts in a fresh session with the feasibility spike of the brief.
+
+## [2026-10-31] ingest | Achievements: the game state, a detector, the toast and the launcher
+- **Found** ([[game-state]]): the current chapter (`0x00E130D4`, from the save-name format string), the difficulty
+  (`0x005B4975`), the game mode (`0x005B497A`), the save block (`0x0059E160`) and the profile block that becomes
+  `system.dat` (`0x00E12980`), with the game's own "story completed" and "mission cleared" routines.
+- **Method:** Ghidra cross-references from a string, then `--watch` and `--dump-ram` while loading the owner's saves in
+  a copy of the data folder (`ngb-data-achtest*`). No owner play was needed for these.
+- **Spike** (branch `spike/achievements`): `port/src/ach/` polls the variables from the main thread every 5 ms and
+  writes `%NGB_DATA%\achievements.json`; `port/src/gfx/toast.c` composites a placeholder toast in `pgl_flip` (window
+  only: captures read the game's surface); the launcher's Play page counts the unlocks. `--ach-demo` fires a test
+  unlock. Tried: the toast shows, the file is written, the launcher reads it, and loading a chapter 2 or chapter 10
+  save does not unlock anything.
+- **Open:** a real chapter end (the owner plays chapter 1 to the end with the spike build) to check the detector and
+  to find the end-of-chapter rank.

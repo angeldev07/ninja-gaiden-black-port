@@ -115,8 +115,35 @@ static int spec_col(int x, const wchar_t *label, const wchar_t *value, const wch
     return x + w + 80;
 }
 
+/* Unlocked achievements in %NGB_DATA%\achievements.json (written by the port, ach/ach.c): one
+ * {"id": ...} per line. Read again only when the file changes. */
+static int achievements_unlocked(void) {
+    static FILETIME seen;
+    static int count;
+    wchar_t path[MAX_PATH];
+    WIN32_FILE_ATTRIBUTE_DATA fa;
+    char line[256];
+    FILE *f;
+    wfmt(path, MAX_PATH, L"%ls\\achievements.json", g_data);
+    if (!GetFileAttributesExW(path, GetFileExInfoStandard, &fa)) {
+        seen.dwLowDateTime = seen.dwHighDateTime = 0;
+        return count = 0;
+    }
+    if (!CompareFileTime(&fa.ftLastWriteTime, &seen))
+        return count;
+    seen = fa.ftLastWriteTime;
+    count = 0;
+    if (_wfopen_s(&f, path, L"r") || !f)
+        return 0;
+    while (fgets(line, sizeof line, f))
+        if (strstr(line, "{\"id\": \""))
+            count++;
+    fclose(f);
+    return count;
+}
+
 static void play_specs(void) {
-    wchar_t res[48], ar[16];
+    wchar_t res[48], ar[16], ach[16];
     int w, h, x = TX;
     const wchar_t *rend = g_set.renderer == 1 ? L"OpenGL 4.x" : g_set.renderer == 2 ? L"Software" : tr(S_SPEC_AUTO);
     scaled_size(&w, &h);
@@ -125,6 +152,8 @@ static void play_specs(void) {
     x = spec_col(x, tr(S_SPEC_RENDER), rend, NULL, 0);
     x = spec_col(x, tr(S_SPEC_RES), res, ar, 0);
     x = spec_col(x, tr(S_SPEC_PACE), g_set.pacing ? L"60 fps" : tr(S_PACE_FREE), NULL, 0);
+    wfmt(ach, 16, L"%d", achievements_unlocked());
+    x = spec_col(x, tr(S_SPEC_ACH), ach, NULL, 0);
     (void)spec_col(x, tr(S_SPEC_VERSION), L"" NGB_VERSION_STR, NULL, 1);
 }
 

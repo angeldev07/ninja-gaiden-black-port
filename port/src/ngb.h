@@ -55,6 +55,7 @@ typedef struct ngb_options {
     int renderer;            /* NGB_RENDERER_*: --renderer gl|soft (H7c) */
     const char *input_script; /* automatic presses (input/input.h), optional */
     int no_host_input;        /* 1: neither PC gamepad nor keyboard, only the script */
+    int ach_demo;             /* --ach-demo: a test achievement 5 s after start (ach/ach.c) */
     const char *watch;        /* --watch: game addresses to watch (watch.c) */
     int mute;                 /* --mute: no audio output (the VP keeps advancing) */
     int audio_wav;            /* --audio-wav: saves the mix to <log>-audio.wav */

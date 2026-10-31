@@ -238,6 +238,7 @@
     X(SPEC_RES, L"Resolution", L"Resolución") \
     X(SPEC_PACE, L"Pace", L"Ritmo") \
     X(SPEC_VERSION, L"Version", L"Versión") \
+    X(SPEC_ACH, L"Achievements", L"Logros") \
     X(SPEC_AUTO, L"Automatic", L"Automático") \
     X(PACE_FREE, L"Unlimited", L"Sin límite") \
     X(LAST_LINE, L"Last session  ·  %ls  ·  %ls  ·  %ls", L"Última sesión  ·  %ls  ·  %ls  ·  %ls") \
