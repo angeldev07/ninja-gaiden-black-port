@@ -25,7 +25,11 @@ static HBITMAP g_bmp, g_bmp_old;
 static uint32_t *g_px;
 static int g_pw, g_ph;
 static HFONT g_fonts[F_COUNT];
-static uint32_t *g_bg[2];
+/* Cached backdrops: [0] the inner pages, [1] the ink hero, [2 + ART_HERO_*] the game's heroes. */
+#define NBG (2 + ART_HERO_COUNT)
+static uint32_t *g_bg[NBG];
+static int g_hero_cur = -1, g_hero_next = -1;
+static float g_hero_mix;
 static int g_ox, g_oy, g_cw, g_ch; /* frame offset in a larger (maximized) client */
 static int g_bg_game_art;
 static double g_motion_t;
@@ -212,34 +216,63 @@ void ui_init(int dpi) {
     make_fonts();
 }
 
-void ui_begin(int kind) {
+static canvas_t canvas_of(uint32_t *px) {
     canvas_t c;
+    c.px = px;
+    c.w = g_pw;
+    c.h = g_ph;
+    c.k = (float)g_dpi / 96.0f;
+    return c;
+}
+
+/* The cached backdrop for a page kind and hero (-1: the ink), built on first use. */
+static uint32_t *backdrop(int kind, int hero) {
+    int slot = kind != ART_HERO ? 0 : hero < 0 ? 1 : 2 + hero;
+    if (slot >= NBG)
+        slot = 1;
+    if (!g_bg[slot]) {
+        g_bg[slot] = (uint32_t *)malloc((size_t)g_pw * g_ph * sizeof(uint32_t));
+        if (g_bg[slot]) {
+            canvas_t c = canvas_of(g_bg[slot]);
+            art_backdrop(&c, kind, g_bg_game_art, slot >= 2 ? slot - 2 : -1);
+        }
+    }
+    return g_bg[slot];
+}
+
+void ui_begin(int kind) {
     size_t bytes = (size_t)g_pw * g_ph * sizeof(uint32_t);
+    uint32_t *a, *b = NULL;
     g_nhits = 0;
     if (kind < 0 || kind > 1)
         kind = 0;
-    if (!g_bg[kind]) {
-        g_bg[kind] = (uint32_t *)malloc(bytes);
-        if (g_bg[kind]) {
-            c.px = g_bg[kind];
-            c.w = g_pw;
-            c.h = g_ph;
-            c.k = (float)g_dpi / 96.0f;
-            art_backdrop(&c, kind, g_bg_game_art);
-        }
-    }
+    a = backdrop(kind, kind == ART_HERO ? g_hero_cur : -1);
+    if (kind == ART_HERO && g_hero_mix > 0.0f && g_hero_next != g_hero_cur)
+        b = backdrop(kind, g_hero_next);
     gdi_sync();
-    if (g_bg[kind]) {
-        canvas_t frame, cached;
-        frame.px = g_px;
-        cached.px = g_bg[kind];
-        frame.w = cached.w = g_pw;
-        frame.h = cached.h = g_ph;
-        frame.k = cached.k = (float)g_dpi / 96.0f;
-        art_animate(&frame, &cached, kind, g_bg_game_art, g_motion_t);
+    if (a) {
+        canvas_t frame = canvas_of(g_px), ca = canvas_of(a), cb = canvas_of(b);
+        art_animate(&frame, &ca, b ? &cb : NULL, g_hero_mix, kind, g_bg_game_art,
+                    kind == ART_HERO && g_hero_cur < 0, g_motion_t);
     } else {
         memset(g_px, 0, bytes);
     }
+}
+
+void ui_set_hero(int cur, int next, float mix) {
+    g_hero_cur = cur;
+    g_hero_next = next;
+    g_hero_mix = mix;
+}
+
+float ui_hero_weight(int hero) {
+    if (g_hero_cur == hero && g_hero_next == hero)
+        return 1.0f;
+    if (g_hero_cur == hero)
+        return 1.0f - g_hero_mix;
+    if (g_hero_next == hero)
+        return g_hero_mix;
+    return 0.0f;
 }
 
 void ui_set_motion(double t) { g_motion_t = t; }
@@ -248,7 +281,7 @@ void ui_end(void) { gdi_sync(); }
 
 void ui_invalidate_backdrop(void) {
     int i;
-    for (i = 0; i < 2; i++) {
+    for (i = 0; i < NBG; i++) {
         free(g_bg[i]);
         g_bg[i] = NULL;
     }
@@ -438,19 +471,19 @@ void capsule(float ax, float ay, float bx, float by, float thick, rgb_t col) {
 }
 
 
-void kamon_draw(int cx, int cy, int r, rgb_t col) {
-    int X = S(cx), Y = S(cy), R = S(r), i, j;
+void kamon_draw(int x, int y, int size, rgb_t col) {
+    int X = S(x), Y = S(y), N = S(size), i, j;
     float aa, thick;
-    if (R < 2)
+    if (N < 4)
         return;
-    aa = 1.0f / (float)R;
-    thick = R < 16 ? 1.6f : 1.0f; /* hairlines vanish at tiny sizes */
+    aa = 1.0f / (float)N;
+    thick = N < 24 ? 1.5f : 1.0f; /* thin parts vanish at tiny sizes */
     gdi_sync();
-    for (j = Y - R; j <= Y + R; j++)
-        for (i = X - R; i <= X + R; i++) {
-            float c = kamon_coverage((i + 0.5f - X) / R, (j + 0.5f - Y) / R, aa, thick);
+    for (j = 0; j < N; j++)
+        for (i = 0; i < N; i++) {
+            float c = kamon_coverage((i + 0.5f) / N, (j + 0.5f) / N, aa, thick);
             if (c > 0.0f)
-                blend_px(i, j, col, (int)(c * 255.0f + 0.5f));
+                blend_px(X + i, Y + j, col, (int)(c * 255.0f + 0.5f));
         }
 }
 

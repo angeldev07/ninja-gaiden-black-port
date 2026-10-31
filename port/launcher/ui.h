@@ -71,6 +71,10 @@ void ui_invalidate_backdrop(void);
 void ui_set_game_art(int on);
 /* What the next frames show of the moving backdrop (art_animate): time in seconds. */
 void ui_set_motion(double t);
+/* The Play hero: cur crossfading into next by mix (ART_HERO_* or -1 for the ink). */
+void ui_set_hero(int cur, int next, float mix);
+/* How much of a hero is on screen now, 0..1 (the page fades its own title against it). */
+float ui_hero_weight(int hero);
 /* An alpha mask (aw x ah, 0..255) scaled to (x, y, w, h) and painted in one colour. */
 void ui_mask(int x, int y, int w, int h, const uint8_t *a, int aw, int ah, rgb_t col, int opacity);
 int ui_save_bmp(const wchar_t *path);

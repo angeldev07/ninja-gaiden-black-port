@@ -87,15 +87,14 @@ int main(void) {
 
     /* Loader: no game, a restart while loading, and stop. Everything stays NULL. */
     GetTempPathW(MAX_PATH, dir);
-    gameart_start(dir, 0);
-    gameart_start(L"C:\\definitely\\not\\here", 1);
+    gameart_start(dir);
+    gameart_start(L"C:\\definitely\\not\\here");
     wait_ready();
     CHECK(gameart_ready());
     for (i = 0; i < GA_COUNT; i++)
         CHECK(gameart_get(i) == NULL);
-    CHECK(gameart_hero_count() == 0);
     gameart_stop();
-    CHECK(gameart_get(GA_HERO) == NULL);
+    CHECK(gameart_get(GA_EMBLEM) == NULL);
 
     printf("gameart_test: %s\n", g_fail ? "FAILED" : "ok");
     return g_fail ? 1 : 0;

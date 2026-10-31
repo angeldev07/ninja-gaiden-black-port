@@ -962,3 +962,16 @@ Details in [[gpu-nv2a]].
 - Fixes from the whole-branch review: buffers never reached `waveOut` (moot now), the window did not fit at 150 % on
   1080p, frames cost 8 ms (opaque bars, 20 fps, 15 above 120 dpi, paused in the background: about 4 ms), a stale
   game-art READY could leave the ink cached.
+
+## [2026-10-31] change | Launcher: the game's emblem as a rotating hero, an original ninja icon
+- **Emblem hero** (game art mode): the game's emblem texture (Ryu's silhouette in its red glow over the logotype,
+  black background) is added as light over the lacquer, 540 px tall at the right of the Play page. It rotates with
+  the Ryu and Ayane key art: 14 s each, 1.2 s crossfade (`art_hero_at`, `art_test`); the typeset logotypes fade out
+  while the emblem shows. Read at runtime from the user's copy, never shipped.
+- **Release layouts differ:** the emblem is texture 7 of the PAL `demo.spr` and texture 9 of a variant's (`VERIFIED`
+  by listing both), so it is found by format and size (the first P8 512 x 512 from texture 4 on), not by ordinal.
+- **Window and taskbar icon:** in game art mode it is cut from the emblem at runtime (`WM_SETICON`); otherwise, and
+  for the exe file, it is the launcher's own icon.
+- **New emblem and app icon:** the crossed-swords kamon is replaced by an original leaping-ninja silhouette (sword
+  raised back over the head, scarf trailing), drawn from scratch as a union of tapered capsules shared by
+  `kamon.c` and `make_icon.py` (black on a vermilion glow in the icon, vermilion in the top bar).

@@ -50,11 +50,11 @@ int main(void) {
     if (!c.px)
         return 1;
     memset(c.px, 0xAB, sizeof(uint32_t) * ART_W * ART_H);
-    art_backdrop(&c, ART_HERO, 0);
+    art_backdrop(&c, ART_HERO, 0, -1);
     CHECK(unwritten(&c) == 0);
     CHECK(max_channel(&c, 0, ART_W / 3) < 48); /* the title side is dark lacquer with a trace of ink */
     memset(c.px, 0xAB, sizeof(uint32_t) * ART_W * ART_H);
-    art_backdrop(&c, ART_INNER, 0);
+    art_backdrop(&c, ART_INNER, 0, -1);
     CHECK(unwritten(&c) == 0);
     CHECK(max_channel(&c, 0, ART_W) < 48);
     free(c.px);
@@ -72,6 +72,30 @@ int main(void) {
     }
     CHECK(art_fit_dpi(192, 3840, 2100, 16, 39) == 192); /* 4K at 200 %: fits */
     CHECK(art_fit_dpi(96, 400, 300, 16, 31) == 72);     /* absurdly small: floor */
+    /* Hero rotation: each hero holds 14 s, then a 1.2 s crossfade into the next, round and round. */
+    {
+        int cur, next;
+        float mix;
+        art_hero_at(0.0, 3, 14.0, 1.2, &cur, &next, &mix);
+        CHECK(cur == 0 && next == 1 && mix == 0.0f);
+        art_hero_at(14.6, 3, 14.0, 1.2, &cur, &next, &mix);
+        CHECK(cur == 0 && next == 1 && mix > 0.45f && mix < 0.55f);
+        art_hero_at(15.2 + 0.1, 3, 14.0, 1.2, &cur, &next, &mix);
+        CHECK(cur == 1 && next == 2 && mix == 0.0f);
+        art_hero_at(2 * 15.2 + 14.6, 3, 14.0, 1.2, &cur, &next, &mix);
+        CHECK(cur == 2 && next == 0 && mix > 0.45f && mix < 0.55f); /* wraps to the first */
+        art_hero_at(3 * 15.2 + 1.0, 3, 14.0, 1.2, &cur, &next, &mix);
+        CHECK(cur == 0 && mix == 0.0f);
+        art_hero_at(100.0, 1, 14.0, 1.2, &cur, &next, &mix); /* one hero: no fade */
+        CHECK(cur == 0 && next == 0 && mix == 0.0f);
+        art_hero_at(100.0, 0, 14.0, 1.2, &cur, &next, &mix); /* none: the ink */
+        CHECK(cur == 0 && next == 0 && mix == 0.0f);
+    }
+    /* Without game art there is no hero to rotate. */
+    {
+        int list[ART_HERO_COUNT];
+        CHECK(art_heroes(0, list) == 0);
+    }
     printf("art_test: %s\n", g_fail ? "FAILED" : "ok");
     return g_fail ? 1 : 0;
 }

@@ -94,8 +94,33 @@ static uint32_t *graded(const ga_image_t *im) {
     return g;
 }
 
-static void hero(canvas_t *c, int game_art) {
-    const ga_image_t *im = game_art ? gameart_get(GA_HERO) : NULL;
+/* The game's emblem (the silhouette in its red glow over the logotype; black background) as
+ * light added to the lacquer: 540 px tall, centred at x 910, top at 44. */
+static void emblem_hero(canvas_t *c, const ga_image_t *im) {
+    float s = 540.0f / (float)im->h, ox = 910.0f - 0.5f * (float)im->w * s, oy = 44.0f;
+    int X, Y;
+    for (Y = 0; Y < c->h; Y++) {
+        float y = ((float)Y + 0.5f) / c->k, v = (y - oy) / s;
+        for (X = 0; X < c->w; X++) {
+            float x = ((float)X + 0.5f) / c->k, u = (x - ox) / s;
+            int r = BG_R, g = BG_G, b = BG_B;
+            if (u >= 0.0f && v >= 0.0f && u < (float)im->w && v < (float)im->h) {
+                uint32_t p = sample_rgb(im->px, im->w, im->h, u, v);
+                r += (int)((p >> 16) & 255);
+                g += (int)((p >> 8) & 255);
+                b += (int)(p & 255);
+            }
+            c->px[(size_t)Y * c->w + X] = ((uint32_t)(r > 255 ? 255 : r) << 16) |
+                                          ((uint32_t)(g > 255 ? 255 : g) << 8) | (uint32_t)(b > 255 ? 255 : b);
+        }
+    }
+}
+
+static void hero(canvas_t *c, int game_art, int which) {
+    const ga_image_t *im = !game_art                  ? NULL
+                           : which == ART_HERO_RYU    ? gameart_get(GA_HERO_RYU)
+                           : which == ART_HERO_AYANE  ? gameart_get(GA_HERO_AYANE)
+                                                      : NULL;
     uint32_t *g = im ? graded(im) : NULL;
     float s = 660.0f / (im ? (float)im->h : 1.0f), ox = 0.0f, oy = 40.0f;
     int X, Y;
@@ -156,13 +181,42 @@ static void inner(canvas_t *c, int game_art) {
     free(g);
 }
 
-void art_backdrop(canvas_t *c, int kind, int game_art) {
+void art_backdrop(canvas_t *c, int kind, int game_art, int which) {
+    const ga_image_t *em = game_art && which == ART_HERO_EMBLEM ? gameart_get(GA_EMBLEM) : NULL;
     if (!c->px)
         return;
-    if (kind == ART_HERO)
-        hero(c, game_art);
-    else
+    if (kind != ART_HERO)
         inner(c, game_art);
+    else if (em)
+        emblem_hero(c, em);
+    else
+        hero(c, game_art, which);
+}
+
+int art_heroes(int game_art, int *list) {
+    static const int asset[ART_HERO_COUNT] = {GA_EMBLEM, GA_HERO_RYU, GA_HERO_AYANE};
+    int i, n = 0;
+    for (i = 0; game_art && i < ART_HERO_COUNT; i++)
+        if (gameart_get(asset[i]))
+            list[n++] = i;
+    return n;
+}
+
+void art_hero_at(double t, int n, double hold, double fade, int *cur, int *next, float *mix) {
+    double period = hold + fade, in;
+    long k;
+    *cur = *next = 0;
+    *mix = 0.0f;
+    if (n <= 1 || period <= 0.0 || t < 0.0)
+        return;
+    k = (long)(t / period);
+    in = t - (double)k * period;
+    *cur = (int)(k % n);
+    *next = (*cur + 1) % n;
+    if (in > hold) {
+        double m = (in - hold) / fade;
+        *mix = (float)(m * m * (3.0 - 2.0 * m)); /* eased */
+    }
 }
 
 /* ------------------------------------------------------------------ motion ---- */
@@ -206,10 +260,18 @@ static void mist_strip(canvas_t *c, float y0, float y1, float speed, float phase
     free(dens);
 }
 
-void art_animate(canvas_t *frame, const canvas_t *cached, int kind, int game_art, double t) {
-    memcpy(frame->px, cached->px, sizeof(uint32_t) * (size_t)frame->w * frame->h);
+void art_animate(canvas_t *frame, const canvas_t *a, const canvas_t *b, float mix, int kind, int game_art,
+                 int ink, double t) {
+    size_t i, n = (size_t)frame->w * frame->h;
+    if (b && mix > 0.0f) { /* crossfade between two heroes */
+        int m = (int)(mix * 256.0f);
+        for (i = 0; i < n; i++)
+            frame->px[i] = towards(a->px[i], (int)((b->px[i] >> 16) & 255), (int)((b->px[i] >> 8) & 255),
+                                   (int)(b->px[i] & 255), m);
+    } else {
+        memcpy(frame->px, a->px, sizeof(uint32_t) * n);
+    }
     if (kind == ART_HERO) {
-        int ink = !(game_art && gameart_get(GA_HERO));
         mist_strip(frame, ART_H * 0.58f, ART_H * 0.74f, 6.0f, 0.7f, t);
         mist_strip(frame, ART_H * 0.70f, ART_H * 0.86f, 10.0f, 2.3f, t);
         if (ink) { /* the moon's halo breathes: +-3 % over 8 s */
@@ -240,10 +302,10 @@ void art_animate(canvas_t *frame, const canvas_t *cached, int kind, int game_art
                 float ux = ((float)X - cx) / half, uy = ((float)Y - cy) / half;
                 float u = (ux * ca + uy * sa + 1.0f) * 0.5f * (float)(ring->w - 1);
                 float v = (-ux * sa + uy * ca + 1.0f) * 0.5f * (float)(ring->h - 1);
-                float a = sample_a(ring->alpha, ring->w, ring->h, u, v);
-                if (a > 0.0f && X >= 0 && Y >= 0 && X < frame->w && Y < frame->h) {
+                float cov = sample_a(ring->alpha, ring->w, ring->h, u, v);
+                if (cov > 0.0f && X >= 0 && Y >= 0 && X < frame->w && Y < frame->h) {
                     uint32_t *p = &frame->px[(size_t)Y * frame->w + X];
-                    *p = towards(*p, 239, 231, 214, (int)(a * 0.05f * 256.0f));
+                    *p = towards(*p, 239, 231, 214, (int)(cov * 0.05f * 256.0f));
                 }
             }
     }

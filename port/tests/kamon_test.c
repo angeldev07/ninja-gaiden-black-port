@@ -1,6 +1,6 @@
 /*
- * kamon_test.c: the launcher's crest (launcher\kamon.c) as a coverage function on the unit disc.
- * A ring of radius 0.90 and two straight swords crossed at +-45 degrees, tips up.
+ * kamon_test.c: the launcher's emblem (launcher\kamon.c), an original leaping-ninja silhouette,
+ * as a coverage function on the unit square.
  */
 #include <stdio.h>
 
@@ -16,23 +16,17 @@ static int g_fail;
     } while (0)
 
 int main(void) {
-    const float aa = 0.01f; /* antialiasing width in unit coordinates */
-    /* The swords cross at the centre. */
-    CHECK(kamon_coverage(0.0f, 0.0f, aa, 1.0f) > 0.99f);
-    /* The ring, on the axes. */
-    CHECK(kamon_coverage(0.90f, 0.0f, aa, 1.0f) > 0.99f);
-    CHECK(kamon_coverage(0.0f, -0.90f, aa, 1.0f) > 0.99f);
-    /* Empty between ring and blades, and outside the ring. */
-    CHECK(kamon_coverage(0.60f, 0.0f, aa, 1.0f) < 0.01f);
-    CHECK(kamon_coverage(0.0f, 0.60f, aa, 1.0f) < 0.01f);
-    CHECK(kamon_coverage(0.99f, 0.0f, aa, 1.0f) < 0.01f);
-    /* A blade near its tip: rotated 45 degrees from "up" toward +x, so up-right (y grows down). */
-    CHECK(kamon_coverage(0.50f, -0.50f, aa, 1.0f) > 0.99f);
-    CHECK(kamon_coverage(-0.50f, -0.50f, aa, 1.0f) > 0.99f);
-    /* The guards sit below the centre on both diagonals. */
-    CHECK(kamon_coverage(-0.26f, 0.26f, aa, 1.0f) > 0.99f);
+    const float aa = 0.004f;
+    CHECK(kamon_coverage(0.60f, 0.29f, aa, 1.0f) > 0.99f); /* head */
+    CHECK(kamon_coverage(0.55f, 0.46f, aa, 1.0f) > 0.99f); /* torso */
+    CHECK(kamon_coverage(0.475f, 0.14f, aa, 1.0f) > 0.99f); /* the raised blade */
+    CHECK(kamon_coverage(0.685f, 0.72f, aa, 1.0f) > 0.99f); /* front shin */
+    CHECK(kamon_coverage(0.275f, 0.758f, aa, 1.0f) > 0.99f); /* back shin */
+    CHECK(kamon_coverage(0.10f, 0.40f, aa, 1.0f) < 0.01f); /* empty sky */
+    CHECK(kamon_coverage(0.85f, 0.60f, aa, 1.0f) < 0.01f);
+    CHECK(kamon_coverage(0.50f, 0.95f, aa, 1.0f) < 0.01f); /* under the feet */
     /* Thicker strokes for tiny sizes cover more. */
-    CHECK(kamon_coverage(0.0f, -0.96f, aa, 1.8f) > kamon_coverage(0.0f, -0.96f, aa, 1.0f));
+    CHECK(kamon_coverage(0.475f, 0.17f, aa, 2.0f) >= kamon_coverage(0.475f, 0.17f, aa, 1.0f));
     printf("kamon_test: %s\n", g_fail ? "FAILED" : "ok");
     return g_fail ? 1 : 0;
 }

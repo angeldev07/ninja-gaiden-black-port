@@ -105,7 +105,7 @@ them. Uninstalling the launcher does not touch it.
   with bars at the sides.
 - **Limit to 60 fps:** the game's speed. Leave it on.
 - **Game art in the launcher:** once your game is imported, the launcher can show the game's own key art and
-  logotype, read from your copy while it runs. Nothing is copied or shared. It is on by default; turn it off for the
+  logotype, the emblem with Ryu's silhouette (also as the window icon), read from your copy while it runs. Nothing is copied or shared. It is on by default; turn it off for the
   launcher's own ink-wash art.
 
 The launcher window can be maximized: everything is redrawn larger.

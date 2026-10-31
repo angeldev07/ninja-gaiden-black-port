@@ -48,7 +48,6 @@ typedef struct settings {
     int check_updates; /* look for a new release once a day (update.h) */
     int update_day;    /* day number of the last check */
     int game_art;   /* [launcher] game_art: art from the user's copy */
-    int hero_index; /* [launcher] hero_index: which key art this launch shows */
 } settings_t;
 
 typedef struct session {

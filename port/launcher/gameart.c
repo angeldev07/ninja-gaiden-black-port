@@ -4,6 +4,8 @@
  * Assets (docs/target/launcher-laca-design.md, "Game art: assets"), all in demo.afs:
  *
  *   asset          entry         texture  format  size        crop
+ *   emblem         demo.spr      first P8 512x512 from texture 4 on (7 in PAL, 9 in a variant):
+ *                                         whole texture (the silhouette, red glow and logotype)
  *   hero (Ryu)     demo.spr      0        P8      1024x512    its sprite
  *   hero (Ayane)   demo.spr      1        P8      1024x512    its sprite
  *   logo           demo.spr      2        P8      512x256     whole texture, as a mask
@@ -73,13 +75,11 @@ static INIT_ONCE g_once = INIT_ONCE_STATIC_INIT;
 static HANDLE g_thread;
 static volatile LONG g_cancel, g_ready = 1;
 static ga_image_t g_img[GA_COUNT];
-static int g_hero_count;
 static HWND g_notify;
 static UINT g_notify_msg;
 
 typedef struct job {
     wchar_t dir[MAX_PATH];
-    int hero_index;
 } job_t;
 
 static BOOL CALLBACK init_lock(PINIT_ONCE o, PVOID p, PVOID *c) {
@@ -111,6 +111,18 @@ static uint8_t *decode(const uint8_t *xpr, size_t len, int ordinal, int fmt, int
         rgba = NULL;
     }
     return rgba;
+}
+
+/* The ordinal of the first texture from `start` on with that format and size, or -1. Releases do
+ * not keep the same order (the emblem is texture 7 of the PAL demo.spr and 9 of a variant's). */
+static int find_texture(const uint8_t *xpr, size_t len, int start, int fmt, int w, int h) {
+    xpr_tex_t t;
+    int i;
+    for (i = start; i < 64 && xpr_texture(xpr, len, i, &t); i++)
+        if ((int)((t.format >> 8) & 0xFF) == fmt && 1 << ((t.format >> 20) & 15) == w &&
+            1 << ((t.format >> 24) & 15) == h)
+            return i;
+    return -1;
 }
 
 /* The sprite rectangle drawn from texture `ordinal`, or the whole texture. */
@@ -197,28 +209,34 @@ static DWORD WINAPI load_thread(LPVOID p) {
     ga_image_t img[GA_COUNT];
     uint8_t *demo = NULL, *title = NULL, *rgba;
     size_t demo_len = 0, title_len = 0;
-    int heroes[2], nheroes = 0, i;
+    int i;
     spr_rect_t r;
     memset(img, 0, sizeof img);
     _snwprintf(afs, MAX_PATH, L"%ls\\demo.afs", job->dir);
     afs[MAX_PATH - 1] = 0;
     demo = gamedata_load(afs, "demo.spr", &demo_len);
     if (demo && !g_cancel) {
-        for (i = 0; i < 2; i++) {
+        for (i = 0; i < 2; i++) { /* the Ryu and Ayane key art */
+            int slot = i == 0 ? GA_HERO_RYU : GA_HERO_AYANE;
             if ((rgba = decode(demo, demo_len, i, FMT_P8, 1024, 512)) != NULL) {
-                heroes[nheroes++] = i;
+                crop_for(demo, demo_len, i, 1024, 512, &r);
+                if (!make_rgb(&img[slot], rgba, 1024, &r))
+                    free_image(&img[slot]);
                 free(rgba);
+            } else {
+                log_line(job->dir, "key art");
             }
         }
-        if (nheroes > 0) {
-            int ord = heroes[(job->hero_index % nheroes + nheroes) % nheroes];
-            rgba = decode(demo, demo_len, ord, FMT_P8, 1024, 512);
-            crop_for(demo, demo_len, ord, 1024, 512, &r);
-            if (rgba && !make_rgb(&img[GA_HERO], rgba, 1024, &r))
-                free_image(&img[GA_HERO]);
+        if ((rgba = decode(demo, demo_len, find_texture(demo, demo_len, 4, FMT_P8, 512, 512), FMT_P8, 512,
+                           512)) != NULL) {
+            r.tex = 7;
+            r.x0 = r.y0 = 0;
+            r.x1 = r.y1 = 512;
+            if (!make_rgb(&img[GA_EMBLEM], rgba, 512, &r))
+                free_image(&img[GA_EMBLEM]);
             free(rgba);
         } else {
-            log_line(job->dir, "key art");
+            log_line(job->dir, "emblem");
         }
         if ((rgba = decode(demo, demo_len, 2, FMT_P8, 512, 256)) != NULL) {
             make_mask(&img[GA_LOGO], rgba, 512, 256, 1);
@@ -255,7 +273,6 @@ static DWORD WINAPI load_thread(LPVOID p) {
     EnterCriticalSection(&g_lock);
     if (!g_cancel) {
         memcpy(g_img, img, sizeof img);
-        g_hero_count = nheroes;
     } else {
         for (i = 0; i < GA_COUNT; i++)
             free_image(&img[i]);
@@ -285,13 +302,12 @@ void gameart_stop(void) {
     EnterCriticalSection(&g_lock);
     for (i = 0; i < GA_COUNT; i++)
         free_image(&g_img[i]);
-    g_hero_count = 0;
     LeaveCriticalSection(&g_lock);
     InterlockedExchange(&g_cancel, 0);
     InterlockedExchange(&g_ready, 1);
 }
 
-void gameart_start(const wchar_t *game_dir, int hero_index) {
+void gameart_start(const wchar_t *game_dir) {
     job_t *job;
     gameart_stop();
     job = (job_t *)calloc(1, sizeof *job);
@@ -299,7 +315,6 @@ void gameart_start(const wchar_t *game_dir, int hero_index) {
         return;
     _snwprintf(job->dir, MAX_PATH, L"%ls", game_dir);
     job->dir[MAX_PATH - 1] = 0;
-    job->hero_index = hero_index;
     InterlockedExchange(&g_ready, 0);
     g_thread = CreateThread(NULL, 0, load_thread, job, 0, NULL);
     if (!g_thread) {
@@ -318,4 +333,3 @@ const ga_image_t *gameart_get(int which) {
     return im->px || im->alpha ? im : NULL;
 }
 
-int gameart_hero_count(void) { return g_ready ? g_hero_count : 0; }

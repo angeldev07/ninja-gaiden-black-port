@@ -60,6 +60,8 @@
 #define WM_GAMEART_READY (WM_APP + 1)
 #define TIMER_ANIM 2
 #define ANIM_MS 50 /* 20 fps: the motion is slow, the CPU stays low */
+#define HERO_HOLD_S 14.0 /* each game art hero stays this long... */
+#define HERO_FADE_S 1.2  /* ...then crossfades into the next */
 
 #define URL_REPO L"https://github.com/angeldev07/ninja-gaiden-black-port"
 #define URL_CONTRIB URL_REPO L"/graphs/contributors"
@@ -263,7 +265,6 @@ static void save_settings(void) {
     ini_put_int(L"update", L"check", g_set.check_updates);
     ini_put_int(L"update", L"last_day", g_set.update_day);
     ini_put_int(L"launcher", L"game_art", g_set.game_art);
-    ini_put_int(L"launcher", L"hero_index", g_set.hero_index);
 }
 
 static void game_refresh(void) {
@@ -315,7 +316,6 @@ static void load_settings(void) {
     g_set.check_updates = ini_int(L"update", L"check", 1) != 0;
     g_set.update_day = ini_int(L"update", L"last_day", 0);
     g_set.game_art = ini_int(L"launcher", L"game_art", 1) != 0;
-    g_set.hero_index = ini_int(L"launcher", L"hero_index", 0);
     for (i = 0; i < (int)(sizeof k_logcap_vals / sizeof k_logcap_vals[0]); i++)
         ok |= k_logcap_vals[i] == g_set.log_cap;
     if (!ok)
@@ -368,16 +368,21 @@ static void game_dir(wchar_t *dir) {
         *wcsrchr(dir, L'\\') = 0;
 }
 
+static void update_window_icon(void);
+
 static void refresh_game_art(void) {
     wchar_t dir[MAX_PATH];
     ui_set_game_art(0);
+    ui_set_hero(-1, -1, 0.0f);
+    if (g_hwnd)
+        update_window_icon();
     if (!game_art_on()) {
         gameart_stop();
         return;
     }
     game_dir(dir);
     gameart_notify(g_hwnd, WM_GAMEART_READY);
-    gameart_start(dir, g_set.hero_index);
+    gameart_start(dir);
 }
 
 
@@ -1156,6 +1161,82 @@ static void write_shot_and_quit(void) {
 
 static ULONGLONG g_anim_t0;
 static int g_anim_on;
+static HICON g_icon_big, g_icon_small;       /* the exe's own icons */
+static HICON g_game_icon_big, g_game_icon_small; /* made from the user's copy, game art mode */
+
+/* Which hero the Play page shows at time t: the game's emblem, Ryu and Ayane in turn when the
+ * copy has them, else the ink landscape. */
+static void update_hero(double t) {
+    int list[ART_HERO_COUNT], n = art_heroes(game_art_on(), list), cur, next;
+    float mix;
+    if (!n) {
+        ui_set_hero(-1, -1, 0.0f);
+        return;
+    }
+    art_hero_at(t, n, HERO_HOLD_S, HERO_FADE_S, &cur, &next, &mix);
+    ui_set_hero(list[cur], list[next], mix);
+}
+
+/* A square icon cut from the game's emblem (the silhouette in its red glow), scaled to size x size. */
+static HICON emblem_icon(const ga_image_t *em, int size) {
+    BITMAPINFO bi;
+    void *bits = NULL;
+    HDC dc = GetDC(NULL);
+    HBITMAP color, mask;
+    ICONINFO ii;
+    HICON icon;
+    int x, y, cx = em->w * 215 / 512, cy = em->h * 172 / 512, half = em->w * 150 / 512;
+    memset(&bi, 0, sizeof bi);
+    bi.bmiHeader.biSize = sizeof bi.bmiHeader;
+    bi.bmiHeader.biWidth = size;
+    bi.bmiHeader.biHeight = -size;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    color = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
+    ReleaseDC(NULL, dc);
+    if (!color || !bits)
+        return NULL;
+    for (y = 0; y < size; y++) /* box filter over the source pixels each icon pixel covers */
+        for (x = 0; x < size; x++) {
+            int x0 = cx - half + x * 2 * half / size, x1 = cx - half + (x + 1) * 2 * half / size;
+            int y0 = cy - half + y * 2 * half / size, y1 = cy - half + (y + 1) * 2 * half / size;
+            unsigned r = 0, g = 0, b = 0, n = 0;
+            int i, j;
+            for (j = y0; j < (y1 > y0 ? y1 : y0 + 1); j++)
+                for (i = x0; i < (x1 > x0 ? x1 : x0 + 1); i++)
+                    if (i >= 0 && j >= 0 && i < em->w && j < em->h) {
+                        uint32_t p = em->px[(size_t)j * em->w + i];
+                        r += (p >> 16) & 255;
+                        g += (p >> 8) & 255;
+                        b += p & 255;
+                        n++;
+                    }
+            ((uint32_t *)bits)[(size_t)y * size + x] =
+                0xFF000000u | (n ? ((r / n) << 16) | ((g / n) << 8) | (b / n) : 0);
+        }
+    mask = CreateBitmap(size, size, 1, 1, NULL);
+    memset(&ii, 0, sizeof ii);
+    ii.fIcon = TRUE;
+    ii.hbmColor = color;
+    ii.hbmMask = mask;
+    icon = CreateIconIndirect(&ii);
+    DeleteObject(color);
+    DeleteObject(mask);
+    return icon;
+}
+
+/* The window and taskbar icons follow the art: the game's emblem in game art mode, else the exe's. */
+static void update_window_icon(void) {
+    const ga_image_t *em = game_art_on() ? gameart_get(GA_EMBLEM) : NULL;
+    if (g_game_icon_big)
+        DestroyIcon(g_game_icon_big);
+    if (g_game_icon_small)
+        DestroyIcon(g_game_icon_small);
+    g_game_icon_big = em ? emblem_icon(em, GetSystemMetrics(SM_CXICON)) : NULL;
+    g_game_icon_small = em ? emblem_icon(em, GetSystemMetrics(SM_CXSMICON)) : NULL;
+    SendMessageW(g_hwnd, WM_SETICON, ICON_BIG, (LPARAM)(g_game_icon_big ? g_game_icon_big : g_icon_big));
+    SendMessageW(g_hwnd, WM_SETICON, ICON_SMALL, (LPARAM)(g_game_icon_small ? g_game_icon_small : g_icon_small));
+}
 
 /* The backdrop moves only where something moves (the Play hero, the ring of the inner pages
  * in game art mode), while the window is in front, the game is not running and Windows' "Show
@@ -1302,6 +1383,9 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         /* Always rebuild: a READY from a load that was replaced may have cached the ink. */
         ui_set_game_art(1);
         ui_invalidate_backdrop();
+        g_anim_t0 = GetTickCount64(); /* the rotation starts with the emblem */
+        update_hero(0.0);
+        update_window_icon();
         redraw();
         return 0;
     case WM_DROPFILES: {
@@ -1315,6 +1399,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_TIMER:
         if (wp == TIMER_ANIM) {
             ui_set_motion((double)(GetTickCount64() - g_anim_t0) / 1000.0);
+            update_hero((double)(GetTickCount64() - g_anim_t0) / 1000.0);
             InvalidateRect(hwnd, NULL, FALSE);
             return 0;
         }
@@ -1597,6 +1682,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show) {
     wc.hIconSm = (HICON)LoadImageW(inst, MAKEINTRESOURCEW(1), IMAGE_ICON,
                                    GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON),
                                    LR_DEFAULTCOLOR);
+    g_icon_big = wc.hIcon;
+    g_icon_small = wc.hIconSm;
     wc.lpszClassName = L"ngb-launcher";
     RegisterClassExW(&wc);
 
@@ -1630,10 +1717,6 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show) {
     ShowWindow(g_hwnd, g_start_maximized ? SW_SHOWMAXIMIZED : g_shot_path[0] ? SW_SHOWNOACTIVATE : SW_SHOWNORMAL);
     UpdateWindow(g_hwnd);
     refresh_game_art();
-    if (game_art_on() && !g_shot_path[0]) { /* the next launch shows the next key art */
-        g_set.hero_index = (g_set.hero_index + 1) % 64;
-        save_settings();
-    }
     if (iso[0])
         import_from_path(iso, 0);
     while (GetMessageW(&msg, NULL, 0, 0) > 0) {

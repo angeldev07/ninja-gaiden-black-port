@@ -1,10 +1,10 @@
-"""Generates port/res/ngb.ico: the launcher's crest in vermilion on lacquer black.
+"""Generates port/res/ngb.ico: the launcher's emblem, a black leaping ninja on a vermilion glow.
 
 Original artwork drawn by code (no fonts, images or game data). Stdlib only: a small
 supersampling rasteriser renders every size and the ICO is assembled by hand (32-bit BMP
 entries with an AND mask up to 128 px, a PNG entry for 256 px, as Windows does since Vista).
-The crest (a ring with two straight swords crossed at +-45 degrees) uses the same geometry as
-the launcher (launcher/kamon.c); keep both in step.
+The silhouette (an original drawing, a union of tapered capsules) is the same table as the
+launcher's (launcher/kamon.c); keep both in step.
 
     python port/res/make_icon.py                    # writes port/res/ngb.ico
     python port/res/make_icon.py --png preview.png  # also a 256 px preview
@@ -29,7 +29,27 @@ VERMILION: RGB = (210.0, 63.0, 47.0)
 
 CORNER = 0.21  # corner radius of the square
 MARGIN = 0.02
-CREST_RADIUS = 0.36  # of the unit canvas
+GLOW: RGB = (210.0, 40.0, 32.0)
+FIGURE: RGB = (8.0, 7.0, 7.0)
+
+# (ax, ay, ra, bx, by, rb): tapered capsules on the unit square, y down (launcher/kamon.c).
+PARTS = (
+    (0.600, 0.290, 0.066, 0.600, 0.290, 0.066),  # head
+    (0.555, 0.285, 0.024, 0.300, 0.215, 0.006),  # scarf, upper tail
+    (0.555, 0.310, 0.018, 0.330, 0.345, 0.005),  # scarf, lower tail
+    (0.585, 0.370, 0.060, 0.505, 0.555, 0.050),  # torso
+    (0.615, 0.395, 0.032, 0.745, 0.245, 0.026),  # front arm, up to the hands
+    (0.545, 0.405, 0.029, 0.715, 0.265, 0.024),  # back arm
+    (0.745, 0.235, 0.017, 0.815, 0.262, 0.015),  # grip
+    (0.715, 0.195, 0.012, 0.758, 0.282, 0.012),  # guard
+    (0.735, 0.228, 0.013, 0.215, 0.055, 0.004),  # blade, raised back over the head
+    (0.545, 0.565, 0.050, 0.705, 0.615, 0.042),  # front thigh
+    (0.705, 0.615, 0.040, 0.665, 0.815, 0.031),  # front shin
+    (0.665, 0.815, 0.028, 0.755, 0.840, 0.019),  # front foot
+    (0.475, 0.585, 0.048, 0.355, 0.700, 0.039),  # back thigh
+    (0.355, 0.700, 0.037, 0.195, 0.815, 0.028),  # back shin
+    (0.195, 0.815, 0.024, 0.150, 0.770, 0.015),  # back foot
+)
 
 
 def _lerp(a: RGB, b: RGB, t: float) -> RGB:
@@ -48,24 +68,16 @@ def _square_sdf(x: float, y: float) -> float:
     return math.hypot(max(qx, 0.0), max(qy, 0.0)) + min(max(qx, qy), 0.0) - CORNER
 
 
-def _box(a: float, b: float, a0: float, a1: float, hw: float) -> float:
-    return max(abs(b) - hw, max(a0 - a, a - a1))
-
-
-def _sword(u: float, v: float, s: float, c: float, thick: float) -> float:
-    a, b = -u * s + v * c, u * c + v * s
-    tip_hw = 0.048 * thick * (a + 0.84) / 0.12
-    d = max(abs(b) - tip_hw, max(-0.84 - a, a + 0.72))
-    d = min(d, _box(a, b, -0.72, 0.32, 0.048 * thick))
-    d = min(d, _box(a, b, 0.32, 0.32 + 0.09 * thick, 0.18))
-    return min(d, _box(a, b, 0.32 + 0.09 * thick, 0.75, 0.044 * thick))
-
-
-def crest_sdf(u: float, v: float, thick: float) -> float:
-    """Signed distance to the crest on the unit disc (kamon.c: kamon_coverage)."""
-    s45 = math.sqrt(0.5)
-    d = abs(math.hypot(u, v) - 0.90) - 0.05 * thick
-    return min(d, _sword(u, v, s45, s45, thick), _sword(u, v, -s45, s45, thick))
+def figure_sdf(x: float, y: float, thick: float) -> float:
+    """Signed distance to the silhouette (launcher/kamon.c: kamon_coverage)."""
+    d = 9.0
+    for ax, ay, ra, bx, by, rb in PARTS:
+        dx, dy = bx - ax, by - ay
+        length2 = dx * dx + dy * dy
+        t = 0.0 if length2 == 0 else _clamp(((x - ax) * dx + (y - ay) * dy) / length2)
+        px, py = ax + dx * t, ay + dy * t
+        d = min(d, math.hypot(x - px, y - py) - (ra + (rb - ra) * t) * thick)
+    return d
 
 
 def sample(x: float, y: float, size: int) -> RGBA:
@@ -73,16 +85,14 @@ def sample(x: float, y: float, size: int) -> RGBA:
     d = _square_sdf(x, y)
     if d > 0:
         return (0.0, 0.0, 0.0, 0.0)
-    color = LACQUER
+    glow = max(0.0, 1.0 - math.hypot(x - 0.52, y - 0.48) / 0.62) ** 1.5
+    color = _lerp(LACQUER, GLOW, glow)
     if d > -0.02:  # a faint lighter edge so the tile reads on dark taskbars
         color = _lerp(color, LACQUER_EDGE, _clamp((d + 0.02) / 0.02))
-    thick = 1.9 if size <= 16 else 1.6 if size <= 32 else 1.0
-    radius = 0.43 if size <= 24 else CREST_RADIUS  # fill tiny icons
-    u, v = (x - 0.5) / radius, (y - 0.5) / radius
-    aa = 1.0 / (size * radius)
-    cover = _clamp(0.5 - crest_sdf(u, v, thick) / aa)
+    thick = 1.7 if size <= 16 else 1.35 if size <= 32 else 1.0
+    cover = _clamp(0.5 - figure_sdf(x, y, thick) * size)
     if cover > 0:
-        color = _lerp(color, VERMILION, cover)
+        color = _lerp(color, FIGURE, cover)
     return (color[0], color[1], color[2], 1.0)
 
 

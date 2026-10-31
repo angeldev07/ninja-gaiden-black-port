@@ -1,36 +1,51 @@
 /*
- * kamon.c: geometry of the launcher's crest. See kamon.h. kamon_draw lives in ui.c (it writes the
+ * kamon.c: geometry of the launcher's emblem. See kamon.h. kamon_draw lives in ui.c (it writes the
  * back buffer); this file is pure maths so the shape is unit-tested.
  *
- * Each sword, in its own frame (a along the sword from tip to pommel, b across), in units of the
- * radius: a pointed tip from a = -0.84 to -0.72, the blade to 0.32 (half width 0.048), a guard to
- * 0.41 (half width 0.18) and the grip to 0.75 (half width 0.044). The ring is centred on 0.90 with
- * a half width of 0.05. `thick` widens the strokes (not the lengths) for tiny icon sizes.
+ * The silhouette is a union of tapered capsules (segment a-b, radius ra at a and rb at b) on the unit
+ * square. port/res/make_icon.py carries the same table; keep both in step.
  */
 #include "kamon.h"
 
 #include <math.h>
 
-static float box_sd(float a, float b, float a0, float a1, float hw) {
-    return fmaxf(fabsf(b) - hw, fmaxf(a0 - a, a - a1));
-}
+static const float PARTS[][6] = {
+    {0.600f, 0.290f, 0.066f, 0.600f, 0.290f, 0.066f}, /* head */
+    {0.555f, 0.285f, 0.024f, 0.300f, 0.215f, 0.006f}, /* scarf, upper tail */
+    {0.555f, 0.310f, 0.018f, 0.330f, 0.345f, 0.005f}, /* scarf, lower tail */
+    {0.585f, 0.370f, 0.060f, 0.505f, 0.555f, 0.050f}, /* torso */
+    {0.615f, 0.395f, 0.032f, 0.745f, 0.245f, 0.026f}, /* front arm, up to the hands */
+    {0.545f, 0.405f, 0.029f, 0.715f, 0.265f, 0.024f}, /* back arm */
+    {0.745f, 0.235f, 0.017f, 0.815f, 0.262f, 0.015f}, /* grip */
+    {0.715f, 0.195f, 0.012f, 0.758f, 0.282f, 0.012f}, /* guard */
+    {0.735f, 0.228f, 0.013f, 0.215f, 0.055f, 0.004f}, /* blade, raised back over the head */
+    {0.545f, 0.565f, 0.050f, 0.705f, 0.615f, 0.042f}, /* front thigh */
+    {0.705f, 0.615f, 0.040f, 0.665f, 0.815f, 0.031f}, /* front shin */
+    {0.665f, 0.815f, 0.028f, 0.755f, 0.840f, 0.019f}, /* front foot */
+    {0.475f, 0.585f, 0.048f, 0.355f, 0.700f, 0.039f}, /* back thigh */
+    {0.355f, 0.700f, 0.037f, 0.195f, 0.815f, 0.028f}, /* back shin */
+    {0.195f, 0.815f, 0.024f, 0.150f, 0.770f, 0.015f}, /* back foot */
+};
 
-static float sword_sd(float u, float v, float s, float c, float thick) {
-    float a = -u * s + v * c, b = u * c + v * s, d;
-    float tip_hw = 0.048f * thick * (a + 0.84f) / 0.12f;
-    d = fmaxf(fabsf(b) - tip_hw, fmaxf(-0.84f - a, a + 0.72f));             /* tip */
-    d = fminf(d, box_sd(a, b, -0.72f, 0.32f, 0.048f * thick));              /* blade */
-    d = fminf(d, box_sd(a, b, 0.32f, 0.32f + 0.09f * thick, 0.18f));        /* guard */
-    d = fminf(d, box_sd(a, b, 0.32f + 0.09f * thick, 0.75f, 0.044f * thick)); /* grip */
-    return d;
+static float capsule_sd(float x, float y, const float *p, float thick) {
+    float dx = p[3] - p[0], dy = p[4] - p[1], l2 = dx * dx + dy * dy, t = 0.0f, px, py;
+    if (l2 > 0.0f) {
+        t = ((x - p[0]) * dx + (y - p[1]) * dy) / l2;
+        t = t < 0.0f ? 0.0f : t > 1.0f ? 1.0f : t;
+    }
+    px = p[0] + dx * t;
+    py = p[1] + dy * t;
+    return sqrtf((x - px) * (x - px) + (y - py) * (y - py)) - (p[2] + (p[5] - p[2]) * t) * thick;
 }
 
 float kamon_coverage(float u, float v, float aa, float thick) {
-    const float s45 = 0.70710678f;
-    float d = fabsf(sqrtf(u * u + v * v) - 0.90f) - 0.05f * thick;
-    float cov;
-    d = fminf(d, sword_sd(u, v, s45, s45, thick));
-    d = fminf(d, sword_sd(u, v, -s45, s45, thick));
+    float d = 9.0f, cov;
+    size_t i;
+    for (i = 0; i < sizeof PARTS / sizeof PARTS[0]; i++) {
+        float di = capsule_sd(u, v, PARTS[i], thick);
+        if (di < d)
+            d = di;
+    }
     cov = 0.5f - d / aa;
     return cov < 0.0f ? 0.0f : cov > 1.0f ? 1.0f : cov;
 }

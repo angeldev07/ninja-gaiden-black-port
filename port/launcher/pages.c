@@ -75,7 +75,7 @@ static void top_bar(void) {
     int i, x = 330, rx;
     fill_rect(0, 0, LOGICAL_W, TOP_H, 0x151311); /* opaque: no per-pixel blend every frame */
     ui_hair(0, TOP_H - 1, LOGICAL_W);
-    kamon_draw(58, 32, 14, C_VERM);
+    kamon_draw(40, 12, 40, C_VERM);
     txt_tracked(F_TAB, C_CREAM, 86, 18, 28, 0.34f, L"NINJA GAIDEN");
     txt_tracked(F_TAB, C_VERM, 86 + tracked_w(F_TAB, 0.34f, L"NINJA GAIDEN") + 10, 18, 28, 0.34f, L"BLACK");
     for (i = 0; i < PG_COUNT; i++)
@@ -163,10 +163,15 @@ static void play_ready(void) {
     int y;
     vertical_kanji(50, 262, L"忍者外伝");
     if (logo) {
-        /* drawn at 560 and 290 px wide; the heights follow the (trimmed) masks */
-        ui_mask(66, 250, 560, 560 * logo->h / logo->w, logo->alpha, logo->w, logo->h, C_CREAM, 245);
-        if (black)
-            ui_mask(206, 456, 290, 290 * black->h / black->w, black->alpha, black->w, black->h, C_VERM, 255);
+        /* drawn at 560 and 290 px wide; the heights follow the (trimmed) masks. They fade out
+         * while the game's emblem (which carries its own logotype) is the hero. */
+        float shown = 1.0f - ui_hero_weight(ART_HERO_EMBLEM);
+        if (shown > 0.0f) {
+            ui_mask(66, 250, 560, 560 * logo->h / logo->w, logo->alpha, logo->w, logo->h, C_CREAM, (int)(245 * shown));
+            if (black)
+                ui_mask(206, 456, 290, 290 * black->h / black->w, black->alpha, black->w, black->h, C_VERM,
+                        (int)(255 * shown));
+        }
         y = 540;
     } else {
         kicker(TX, 256, tr(S_PLAY_TAGLINE));
@@ -632,7 +637,7 @@ static void page_about(void) {
     int y = 104, x;
     wchar_t buf[96];
     page_side(6, tr(S_NAV_ABOUT), k_page_kanji[PG_ABOUT], tr(S_ABOUT_SUB));
-    kamon_draw(LX + LW - 50, 150, 46, C_VERM);
+    kamon_draw(LX + LW - 110, 92, 110, C_VERM);
     txt(F_SUB, C_CREAM, LX, y, LW - 140, 30, T_LINE, tr(S_ABOUT_PRODUCT));
     wfmt(buf, 96, tr(S_ABOUT_VERSION), L"" NGB_VERSION_STR);
     txt(F_LSMALL, C_DIMC, LX, y + 36, LW - 140, 20, T_LINE, buf);

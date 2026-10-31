@@ -13,7 +13,7 @@
 
 #include <stdint.h>
 
-enum ga_asset { GA_HERO, GA_LOGO, GA_LOGO_BLACK, GA_TITLEBG, GA_RING, GA_COUNT };
+enum ga_asset { GA_EMBLEM, GA_HERO_RYU, GA_HERO_AYANE, GA_LOGO, GA_LOGO_BLACK, GA_TITLEBG, GA_RING, GA_COUNT };
 
 typedef struct ga_image {
     int w, h;
@@ -32,16 +32,13 @@ uint8_t ga_logo_mask(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
  * letters, whose coverage falls under 5 % of the band's fullest row. Unchanged if there is none. */
 void ga_trim_subtitle(ga_image_t *im);
 
-/* Starts (or restarts) loading from `game_dir` (the folder holding demo.afs). hero_index picks
- * the key art (0 Ryu, 1 Ayane, modulo the ones found). Cancels and joins a previous load. When
+/* Starts (or restarts) loading from `game_dir` (the folder holding demo.afs). Cancels and joins a previous load. When
  * done, posts `msg` to `hwnd` if one was given with gameart_notify. */
-void gameart_start(const wchar_t *game_dir, int hero_index);
+void gameart_start(const wchar_t *game_dir);
 void gameart_notify(void *hwnd, unsigned msg);
 /* 1 once the current load has finished (whatever it found). */
 int gameart_ready(void);
 /* The asset, or NULL if it is not available (yet). Valid until the next gameart_start/stop. */
 const ga_image_t *gameart_get(int which);
-/* Number of key arts found in the last load (for rotating hero_index). */
-int gameart_hero_count(void);
 /* Cancels a load and frees everything. */
 void gameart_stop(void);
