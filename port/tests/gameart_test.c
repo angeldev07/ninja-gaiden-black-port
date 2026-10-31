@@ -7,6 +7,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "../launcher/gameart.h"
 
@@ -59,6 +60,30 @@ int main(void) {
     CHECK(ga_logo_mask(10, 10, 10, 120) == 0);
     CHECK(ga_logo_mask(200, 40, 40, 255) < 128);
     CHECK(ga_logo_mask(230, 230, 235, 255) >= 250); /* chrome edge of a letter */
+
+    /* Subtitle trim: letters on rows 1-4, a near-empty row 5 (one stray pixel), a subtitle on
+     * rows 6-8 right under it (one variant's BLACK texture does this): only rows 0-4 stay. */
+    {
+        uint8_t a[8 * 12];
+        ga_image_t im;
+        memset(a, 0, sizeof a);
+        memset(a + 8 * 1, 255, 8 * 4);
+        a[8 * 5 + 7] = 30;
+        memset(a + 8 * 6 + 4, 220, 4);
+        memset(a + 8 * 7 + 4, 220, 4);
+        memset(a + 8 * 8 + 4, 220, 4);
+        im.w = 8;
+        im.h = 12;
+        im.px = NULL;
+        im.alpha = a;
+        ga_trim_subtitle(&im);
+        CHECK(im.h == 5);
+        /* no subtitle: unchanged */
+        memset(a + 8 * 5, 0, 8 * 7);
+        im.h = 12;
+        ga_trim_subtitle(&im);
+        CHECK(im.h == 12);
+    }
 
     /* Loader: no game, a restart while loading, and stop. Everything stays NULL. */
     GetTempPathW(MAX_PATH, dir);

@@ -157,6 +157,31 @@ static int make_mask(ga_image_t *im, const uint8_t *rgba, int w, int h, int logo
     return 1;
 }
 
+/* See gameart.h. Row coverage is the sum of the alpha of the row. */
+void ga_trim_subtitle(ga_image_t *im) {
+    long peak = 0;
+    int y, x, first = -1;
+    for (y = 0; y < im->h; y++) {
+        long sum = 0;
+        for (x = 0; x < im->w; x++)
+            sum += im->alpha[(size_t)y * im->w + x];
+        if (sum > 0 && first < 0)
+            first = y;
+        if (sum > peak)
+            peak = sum;
+        if (first >= 0 && y > first + 2 && sum * 20 < peak) {
+            int z;
+            long rest = 0;
+            for (z = y + 1; z < im->h; z++) /* only a cut if something follows */
+                for (x = 0; x < im->w; x++)
+                    rest += im->alpha[(size_t)z * im->w + x];
+            if (rest > 0)
+                im->h = y;
+            return;
+        }
+    }
+}
+
 /* The launcher keeps no log file of its own: a disabled asset goes to the debugger output. */
 static void log_line(const wchar_t *dir, const char *what) {
     char buf[160];
@@ -202,7 +227,8 @@ static DWORD WINAPI load_thread(LPVOID p) {
             log_line(job->dir, "logo");
         }
         if ((rgba = decode(demo, demo_len, 3, FMT_P8, 512, 128)) != NULL) {
-            make_mask(&img[GA_LOGO_BLACK], rgba, 512, 128, 1);
+            if (make_mask(&img[GA_LOGO_BLACK], rgba, 512, 128, 1))
+                ga_trim_subtitle(&img[GA_LOGO_BLACK]);
             free(rgba);
         } else {
             log_line(job->dir, "logo BLACK");

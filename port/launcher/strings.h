@@ -228,7 +228,26 @@
     X(LEGAL_1, L"Ninja Gaiden is a trademark of Koei Tecmo; Xbox is a trademark of Microsoft.", L"Ninja Gaiden es una marca de Koei Tecmo; Xbox es una marca de Microsoft.") \
     X(LEGAL_2, L"Not affiliated with or endorsed by Koei Tecmo, Team Ninja or Microsoft.", L"Sin afiliación ni aval de Koei Tecmo, Team Ninja ni Microsoft.") \
     X(LEGAL_3, L"No game data is included: you need your own copy of the game.", L"No incluye datos del juego: necesitas tu propia copia.") \
-    X(LEGAL_4, L"Non-commercial project.", L"Proyecto sin fines comerciales.")
+    X(LEGAL_4, L"Non-commercial project.", L"Proyecto sin fines comerciales.") \
+    X(FR_KICKER, L"BEFORE YOU START", L"ANTES DE EMPEZAR") \
+    X(FR_TITLE, L"Import your copy", L"Importa tu copia") \
+    X(IMP_KICKER, L"IMPORTING", L"IMPORTANDO") \
+    X(IMP_HEAD, L"Importing your game", L"Importando tu juego") \
+    X(HINT_ENTER, L"ENTER TO PLAY", L"INTRO PARA JUGAR") \
+    X(SPEC_RENDER, L"Renderer", L"Render") \
+    X(SPEC_RES, L"Resolution", L"Resolución") \
+    X(SPEC_PACE, L"Pace", L"Ritmo") \
+    X(SPEC_VERSION, L"Version", L"Versión") \
+    X(SPEC_AUTO, L"Automatic", L"Automático") \
+    X(PACE_FREE, L"Unlimited", L"Sin límite") \
+    X(LAST_LINE, L"Last session  ·  %ls  ·  %ls  ·  %ls", L"Última sesión  ·  %ls  ·  %ls  ·  %ls") \
+    X(GFX_GAMEART, L"Game art in the launcher", L"Arte del juego en el launcher") \
+    X(GFX_GAMEART_DESC, L"Artwork and the title theme from your imported copy instead of the ink landscape. Read from your files, never distributed.", L"Ilustraciones y el tema del título de tu copia importada en lugar del paisaje de tinta. Se leen de tus archivos y nunca se distribuyen.") \
+    X(GFX_LAUNCHER, L"Launcher", L"Launcher") \
+    X(AUD_MUSIC, L"Title theme in the launcher", L"Tema del título en el launcher") \
+    X(AUD_MUSIC_DESC, L"Plays the game's title theme from your copy while the launcher is open (with game art on).", L"Suena el tema del título de tu copia mientras el launcher está abierto (con el arte del juego activado).") \
+    X(TOP_MUSIC, L"Music", L"Música") \
+    X(PAGE_LOG_KANJI, L"録", L"録")
 
 enum {
 #define X(id, en, es) S_##id,

@@ -28,6 +28,10 @@ uint32_t ga_grade(uint8_t r, uint8_t g, uint8_t b);
 /* Logo letterform mask from a logo pixel: keeps the letters, drops the soft red glow. */
 uint8_t ga_logo_mask(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
 
+/* Cuts a subtitle line glued under a logo's letters: the mask ends at the first row, after the
+ * letters, whose coverage falls under 5 % of the band's fullest row. Unchanged if there is none. */
+void ga_trim_subtitle(ga_image_t *im);
+
 /* Starts (or restarts) loading from `game_dir` (the folder holding demo.afs). hero_index picks
  * the key art (0 Ryu, 1 Ayane, modulo the ones found). Cancels and joins a previous load. When
  * done, posts `msg` to `hwnd` if one was given with gameart_notify. */

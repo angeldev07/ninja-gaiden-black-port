@@ -3,7 +3,7 @@
  *
  * Shapes are drawn pixel by pixel into the back buffer with signed-distance edges, so they
  * are antialiased without GDI+. Text goes through GDI (ClearType for body text, grayscale
- * for the chrome headings, whose glyph mask we recolour ourselves).
+ * antialiasing for the large display type).
  */
 #define UNICODE
 #define WIN32_LEAN_AND_MEAN
@@ -26,6 +26,9 @@ static uint32_t *g_px;
 static int g_pw, g_ph;
 static HFONT g_fonts[F_COUNT];
 static uint32_t *g_bg[2];
+static int g_bg_game_art;
+static double g_motion_t;
+static float g_motion_x, g_motion_y;
 
 typedef struct hit {
     int x, y, w, h, id;
@@ -122,25 +125,18 @@ static void make_fonts(void) {
         BYTE quality;
         const wchar_t *fallback;
     } spec[F_COUNT] = {
-        {L"Segoe UI", 150, FW_NORMAL, CLEARTYPE_QUALITY, NULL},
-        {L"Segoe UI", 120, FW_NORMAL, CLEARTYPE_QUALITY, NULL},
-        {L"Segoe UI", 150, FW_SEMIBOLD, CLEARTYPE_QUALITY, NULL},
-        {L"Segoe UI", 110, FW_SEMIBOLD, CLEARTYPE_QUALITY, NULL},
-        {L"Bahnschrift", 340, FW_SEMIBOLD, ANTIALIASED_QUALITY, L"Segoe UI"},
-        {L"Bahnschrift", 210, FW_SEMIBOLD, ANTIALIASED_QUALITY, L"Segoe UI"},
-        {L"Bahnschrift", 220, FW_BOLD, ANTIALIASED_QUALITY, L"Segoe UI"},
         {L"Consolas", 120, FW_NORMAL, CLEARTYPE_QUALITY, NULL},
-        {L"Bahnschrift", 150, FW_SEMIBOLD, ANTIALIASED_QUALITY, L"Segoe UI"},
         {L"Josefin Sans", 140, FW_LIGHT, CLEARTYPE_QUALITY, L"Segoe UI Light"},
         {L"Josefin Sans", 125, FW_LIGHT, CLEARTYPE_QUALITY, L"Segoe UI Light"},
         {L"Josefin Sans", 105, FW_SEMIBOLD, CLEARTYPE_QUALITY, L"Segoe UI Semibold"},
         {L"Josefin Sans", 110, FW_SEMIBOLD, CLEARTYPE_QUALITY, L"Segoe UI Semibold"},
         {L"Josefin Sans", 160, FW_LIGHT, CLEARTYPE_QUALITY, L"Segoe UI Light"},
         {L"Josefin Sans", 880, FW_THIN, ANTIALIASED_QUALITY, L"Segoe UI Light"},
-        {L"Josefin Sans", 460, FW_THIN, ANTIALIASED_QUALITY, L"Segoe UI Light"},
+        {L"Josefin Sans", 420, FW_THIN, ANTIALIASED_QUALITY, L"Segoe UI Light"},
         {L"Josefin Sans", 540, FW_THIN, ANTIALIASED_QUALITY, L"Segoe UI Light"},
         {L"Josefin Sans", 150, FW_SEMIBOLD, ANTIALIASED_QUALITY, L"Segoe UI Semibold"},
         {L"Josefin Sans", 1280, FW_THIN, ANTIALIASED_QUALITY, L"Segoe UI Light"},
+        {L"Josefin Sans", 210, FW_LIGHT, ANTIALIASED_QUALITY, L"Segoe UI Light"},
         {L"Shippori Mincho B1", 160, FW_SEMIBOLD, ANTIALIASED_QUALITY, L"Yu Mincho"},
     };
     int i;
@@ -168,11 +164,8 @@ static void make_fonts(void) {
             g_fonts[i] = font_try(px, spec[i].weight, spec[i].quality, spec[i].face, got);
         }
         if (_wcsicmp(got, spec[i].face) && spec[i].fallback) { /* face missing: GDI substituted */
-            int w = spec[i].weight == FW_BOLD && !_wcsicmp(spec[i].face, L"Bahnschrift")
-                        ? FW_BOLD
-                        : spec[i].weight;
             DeleteObject(g_fonts[i]);
-            g_fonts[i] = font_try(px, w, spec[i].quality, spec[i].fallback, got);
+            g_fonts[i] = font_try(px, spec[i].weight, spec[i].quality, spec[i].fallback, got);
             if (i == F_KANJI && _wcsicmp(got, spec[i].fallback)) {
                 DeleteObject(g_fonts[i]);
                 g_fonts[i] = font_try(px, spec[i].weight, spec[i].quality, L"MS Mincho", got);
@@ -226,17 +219,67 @@ void ui_begin(int kind) {
             c.w = g_pw;
             c.h = g_ph;
             c.k = (float)g_dpi / 96.0f;
-            art_backdrop(&c, kind);
+            art_backdrop(&c, kind, g_bg_game_art);
         }
     }
     gdi_sync();
-    if (g_bg[kind])
-        memcpy(g_px, g_bg[kind], bytes);
-    else
+    if (g_bg[kind]) {
+        canvas_t frame, cached;
+        frame.px = g_px;
+        cached.px = g_bg[kind];
+        frame.w = cached.w = g_pw;
+        frame.h = cached.h = g_ph;
+        frame.k = cached.k = (float)g_dpi / 96.0f;
+        art_animate(&frame, &cached, kind, g_bg_game_art, g_motion_t, g_motion_x, g_motion_y);
+    } else {
         memset(g_px, 0, bytes);
+    }
+}
+
+void ui_set_motion(double t, float mx, float my) {
+    g_motion_t = t;
+    g_motion_x = mx;
+    g_motion_y = my;
 }
 
 void ui_end(void) { gdi_sync(); }
+
+void ui_invalidate_backdrop(void) {
+    int i;
+    for (i = 0; i < 2; i++) {
+        free(g_bg[i]);
+        g_bg[i] = NULL;
+    }
+}
+
+void ui_set_game_art(int on) {
+    if (on != g_bg_game_art) {
+        g_bg_game_art = on;
+        ui_invalidate_backdrop();
+    }
+}
+
+void ui_mask(int x, int y, int w, int h, const uint8_t *a, int aw, int ah, rgb_t col, int opacity) {
+    int X0 = S(x), Y0 = S(y), W = S(w), H = S(h), i, j;
+    if (!a || W <= 0 || H <= 0)
+        return;
+    gdi_sync();
+    for (j = 0; j < H; j++) {
+        float v = ((float)j + 0.5f) * (float)ah / (float)H - 0.5f;
+        int v0 = v < 0.0f ? 0 : (int)v, v1 = v0 + 1 < ah ? v0 + 1 : ah - 1;
+        float fv = v - (float)v0 < 0.0f ? 0.0f : v - (float)v0;
+        for (i = 0; i < W; i++) {
+            float u = ((float)i + 0.5f) * (float)aw / (float)W - 0.5f;
+            int u0 = u < 0.0f ? 0 : (int)u, u1 = u0 + 1 < aw ? u0 + 1 : aw - 1;
+            float fu = u - (float)u0 < 0.0f ? 0.0f : u - (float)u0;
+            float t = a[(size_t)v0 * aw + u0] + (a[(size_t)v0 * aw + u1] - a[(size_t)v0 * aw + u0]) * fu;
+            float b = a[(size_t)v1 * aw + u0] + (a[(size_t)v1 * aw + u1] - a[(size_t)v1 * aw + u0]) * fu;
+            int al = (int)((t + (b - t) * fv) * (float)opacity / 255.0f + 0.5f);
+            if (al > 0)
+                blend_px(X0 + i, Y0 + j, col, al);
+        }
+    }
+}
 
 void ui_present(HDC dc) { BitBlt(dc, 0, 0, g_pw, g_ph, g_mem, 0, 0, SRCCOPY); }
 
@@ -367,20 +410,6 @@ void capsule(float ax, float ay, float bx, float by, float thick, rgb_t col) {
         }
 }
 
-void status_dot(int x, int y, rgb_t c) {
-    int X = S(x), Y = S(y), R = S(11), i, j;
-    gdi_sync();
-    for (j = Y - R; j <= Y + R; j++)
-        for (i = X - R; i <= X + R; i++) {
-            float d = hypotf(i + 0.5f - X, j + 0.5f - Y);
-            if (d < (float)R) {
-                float a = 1.0f - d / (float)R;
-                add_px(i, j, (int)(((c >> 16) & 255) * a * a * 0.45f),
-                       (int)(((c >> 8) & 255) * a * a * 0.45f), (int)((c & 255) * a * a * 0.45f));
-            }
-        }
-    fill_circle(x, y, 4, c);
-}
 
 void kamon_draw(int cx, int cy, int r, rgb_t col) {
     int X = S(cx), Y = S(cy), R = S(r), i, j;
@@ -404,12 +433,6 @@ void ui_clip(int x, int y, int w, int h) {
 }
 void ui_unclip(void) { SelectClipRgn(g_mem, NULL); }
 
-void ui_card(int x, int y, int w, int h) {
-    fill_rrect_a(x, y, w, h, 5, 0x131318, 232);
-    stroke_rrect(x, y, w, h, 5, 0x2a2a33);
-    fill_rect(x + 16, y, 30, 2, C_RED);
-    fill_rect_a(x + 16, y + 2, 30, 3, C_RED, 70);
-}
 
 /* ------------------------------------------------------------------------- text ---- */
 
@@ -468,115 +491,8 @@ int tracked_w(int font, float em, const wchar_t *s) {
     return MulDiv(sz.cx + extra * (n > 0 ? n - 1 : 0), 96, g_dpi);
 }
 
-static void blur_box(uint8_t *a, uint8_t *tmp, int w, int h, int r) {
-    int x, y, d;
-    if (r < 1)
-        return;
-    for (y = 0; y < h; y++)
-        for (x = 0; x < w; x++) {
-            int sum = 0;
-            for (d = -r; d <= r; d++)
-                if (x + d >= 0 && x + d < w)
-                    sum += a[(size_t)y * w + x + d];
-            tmp[(size_t)y * w + x] = (uint8_t)(sum / (2 * r + 1));
-        }
-    for (y = 0; y < h; y++)
-        for (x = 0; x < w; x++) {
-            int sum = 0;
-            for (d = -r; d <= r; d++)
-                if (y + d >= 0 && y + d < h)
-                    sum += tmp[(size_t)(y + d) * w + x];
-            a[(size_t)y * w + x] = (uint8_t)(sum / (2 * r + 1));
-        }
-}
 
-void txt_chrome(int font, int x, int y, int w, int h, UINT fmt, int red_style, int spacing,
-                const wchar_t *s) {
-    int pad = S(7), pw = S(w), ph = S(h), mw = pw + 2 * pad, mh = ph + 2 * pad, i, j;
-    BITMAPINFO bi;
-    HDC dc = GetDC(NULL), mdc;
-    HBITMAP bmp, old_bmp;
-    HGDIOBJ old_font;
-    void *bits = NULL;
-    uint8_t *mask, *glow, *tmp;
-    RECT r;
-    int top = mh, bot = -1, ox = S(x) - pad, oy = S(y) - pad;
-    memset(&bi, 0, sizeof bi);
-    bi.bmiHeader.biSize = sizeof bi.bmiHeader;
-    bi.bmiHeader.biWidth = mw;
-    bi.bmiHeader.biHeight = -mh;
-    bi.bmiHeader.biPlanes = 1;
-    bi.bmiHeader.biBitCount = 32;
-    bi.bmiHeader.biCompression = BI_RGB;
-    mdc = CreateCompatibleDC(dc);
-    bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
-    ReleaseDC(NULL, dc);
-    if (!bmp || !bits) {
-        DeleteDC(mdc);
-        return;
-    }
-    old_bmp = (HBITMAP)SelectObject(mdc, bmp);
-    old_font = SelectObject(mdc, g_fonts[font]);
-    SetBkMode(mdc, TRANSPARENT);
-    SetTextColor(mdc, RGB(255, 255, 255));
-    SetTextCharacterExtra(mdc, S(spacing));
-    r.left = pad;
-    r.top = pad;
-    r.right = pad + pw;
-    r.bottom = pad + ph;
-    DrawTextW(mdc, s, -1, &r, fmt | DT_NOPREFIX);
-    GdiFlush();
-    mask = (uint8_t *)malloc((size_t)mw * mh);
-    glow = (uint8_t *)malloc((size_t)mw * mh);
-    tmp = (uint8_t *)malloc((size_t)mw * mh);
-    if (mask && glow && tmp) {
-        const uint32_t *src = (const uint32_t *)bits;
-        for (j = 0; j < mh; j++)
-            for (i = 0; i < mw; i++) {
-                uint8_t v = (uint8_t)(src[(size_t)j * mw + i] & 255);
-                mask[(size_t)j * mw + i] = v;
-                if (v > 60) {
-                    if (j < top)
-                        top = j;
-                    if (j > bot)
-                        bot = j;
-                }
-            }
-        memcpy(glow, mask, (size_t)mw * mh);
-        blur_box(glow, tmp, mw, mh, S(2));
-        blur_box(glow, tmp, mw, mh, S(2));
-        gdi_sync();
-        for (j = 0; j < mh; j++)
-            for (i = 0; i < mw; i++) {
-                size_t k = (size_t)j * mw + i;
-                float m = mask[k] / 255.0f, g = fminf(1.0f, glow[k] / 255.0f * 1.9f);
-                float cr, cg, cb, t;
-                add_px(ox + i, oy + j, (int)(190 * g * g), (int)(8 * g * g), (int)(16 * g * g));
-                if (!mask[k] || bot < top)
-                    continue;
-                t = (float)(j - top) / (float)(bot - top + 1);
-                art_chrome(t, red_style, &cr, &cg, &cb);
-                blend_px(ox + i, oy + j,
-                         ((rgb_t)clampf(cr, 0, 255) << 16) | ((rgb_t)clampf(cg, 0, 255) << 8) |
-                             (rgb_t)clampf(cb, 0, 255),
-                         (int)(m * 255));
-            }
-    }
-    free(mask);
-    free(glow);
-    free(tmp);
-    SelectObject(mdc, old_font);
-    SelectObject(mdc, old_bmp);
-    DeleteObject(bmp);
-    DeleteDC(mdc);
-}
 
-void caption_col(int x, int y, int w, rgb_t col, const wchar_t *s) {
-    SetTextCharacterExtra(g_mem, S(2));
-    txt(F_TINY, col, x, y, w, 16, DT_SINGLELINE, s);
-    SetTextCharacterExtra(g_mem, 0);
-}
-void caption(int x, int y, int w, const wchar_t *s) { caption_col(x, y, w, C_DIM, s); }
 
 /* ------------------------------------------------------------------ click zones ---- */
 
@@ -607,155 +523,13 @@ int pressed(int id) { return g_down == id && g_hover == id; }
 /* ---------------------------------------------------------------------- widgets ---- */
 
 /* Chamfered box: signed distance (device pixels) of a point relative to the centre. */
-static float chamfer_sdf(float px, float py, float hw, float hh, float ch) {
-    float qx = fabsf(px) - hw, qy = fabsf(py) - hh;
-    float d_box = fmaxf(qx, qy);
-    float d_cut = (fabsf(px) + fabsf(py) - (hw + hh - ch)) * 0.70710678f;
-    return fmaxf(d_box, d_cut);
-}
 
 /* state: 0 idle, 1 hot, 2 pressed, 3 disabled. */
-static void plate_dev(int X, int Y, int W, int H, int ch, int state) {
-    int M = S(30), i, j;
-    float hw = W * 0.5f, hh = H * 0.5f, cx = X + hw, cy = Y + hh, glow_k = S(11) * 1.0f;
-    float gi = state == 1 ? 0.95f : state == 2 ? 0.5f : state == 3 ? 0.0f : 0.62f;
-    gdi_sync();
-    for (j = Y - M; j < Y + H + M; j++)
-        for (i = X - M; i < X + W + M; i++) {
-            float d = chamfer_sdf(i + 0.5f - cx, j + 0.5f - cy, hw, hh, (float)ch);
-            float v = clampf((j + 0.5f - Y) / (float)H, 0, 1);
-            if (d > 0.5f) {
-                float a = expf(-d / glow_k) * gi;
-                if (a > 0.012f)
-                    add_px(i, j, (int)(255 * a * 0.55f), (int)(24 * a * 0.55f), (int)(34 * a * 0.55f));
-                continue;
-            }
-            {
-                float cov = clampf(0.5f - d, 0, 1), depth = -d, r, g, b, cr, cg, cb;
-                int bw = S(2) < 2 ? 2 : S(2);
-                if (state == 3) {
-                    r = 74 - 36 * v;
-                    g = 40 - 20 * v;
-                    b = 44 - 22 * v;
-                } else {
-                    float s = state == 2 ? 0.72f : state == 1 ? 1.12f : 1.0f;
-                    r = (238 - 140 * v) * s;
-                    g = (52 - 44 * v) * s;
-                    b = (56 - 42 * v) * s;
-                    if (v < 0.5f) { /* gloss on the upper half */
-                        float gl = (1.0f - v / 0.5f) * 40.0f;
-                        r += gl;
-                        g += gl * 0.7f;
-                        b += gl * 0.7f;
-                    }
-                }
-                r += (float)((int)(((uint32_t)(j * 2654435761u) >> 28)) - 8) * 0.5f; /* brushed rows */
-                g += (float)((int)(((uint32_t)(j * 2654435761u) >> 28)) - 8) * 0.25f;
-                if (depth < (float)bw) { /* steel rim */
-                    art_chrome(v, 0, &cr, &cg, &cb);
-                    if (state == 3) {
-                        cr *= 0.35f;
-                        cg *= 0.35f;
-                        cb *= 0.38f;
-                    }
-                    r = cr;
-                    g = cg;
-                    b = cb;
-                } else if (depth < (float)bw + 1.5f) {
-                    r *= 0.35f;
-                    g *= 0.35f;
-                    b *= 0.35f;
-                }
-                blend_px(i, j, ((rgb_t)clampf(r, 0, 255) << 16) | ((rgb_t)clampf(g, 0, 255) << 8) |
-                                   (rgb_t)clampf(b, 0, 255),
-                         (int)(cov * 255));
-            }
-        }
-}
 
-void ui_plate(int id, int x, int y, int w, int h, const wchar_t *label, int enabled) {
-    int state = !enabled ? 3 : pressed(id) ? 2 : hot(id) ? 1 : 0;
-    int off = state == 2 ? 1 : 0, font = h >= 48 ? F_PLAY : F_BOLD, space = h >= 48 ? 3 : 1;
-    if (text_w(font, label) + space * (int)wcslen(label) > w - 24) {
-        font = F_BOLD; /* the label does not fit in the big font */
-        space = 1;
-    }
-    plate_dev(S(x), S(y), S(w), S(h), S(h >= 48 ? 11 : 6), state);
-    {
-        /* GDI does not count the extra letter spacing when centring, so centre by hand */
-        int tx = x + (w - (text_w(font, label) + space * ((int)wcslen(label) - 1))) / 2;
-        SetTextCharacterExtra(g_mem, S(space));
-        if (enabled)
-            txt(font, 0x2a0408, tx + 1, y + 2 + off, w, h, DT_SINGLELINE | DT_VCENTER, label);
-        txt(font, enabled ? 0xfff4ee : 0x8a6e70, tx, y + 1 + off, w, h, DT_SINGLELINE | DT_VCENTER,
-            label);
-        SetTextCharacterExtra(g_mem, 0);
-    }
-    if (enabled)
-        add_hit(x, y, w, h, id);
-}
 
-void ui_button(int id, int x, int y, int w, int h, const wchar_t *label, int style, int enabled) {
-    int over = enabled && hot(id);
-    if (style == 1) {
-        ui_plate(id, x, y, w, h, label, enabled);
-        return;
-    }
-    if (style == 2) {
-        rgb_t col = !enabled ? C_FAINT : over ? C_RED_HOT : C_STEEL;
-        int tw = text_w(F_BOLD, label);
-        txt(F_BOLD, col, x, y, w, h, DT_SINGLELINE | DT_VCENTER | DT_CENTER, label);
-        if (over)
-            fill_rect(x + (w - tw) / 2, y + h / 2 + 10, tw, 1, C_RED_HOT);
-        if (enabled)
-            add_hit(x, y, w, h, id);
-        return;
-    }
-    if (over)
-        fill_rrect_a(x - 2, y - 2, w + 4, h + 4, 7, C_RED, 70);
-    fill_rrect_grad(x, y, w, h, 5, !enabled ? 0x121216 : over ? 0x26262e : 0x1c1c23,
-                    !enabled ? 0x0e0e12 : over ? 0x18181e : 0x121217);
-    stroke_rrect(x, y, w, h, 5, !enabled ? 0x23232a : over ? 0xb02430 : 0x3a3d48);
-    fill_rect_a(x + 4, y + 1, w - 8, 1, 0xffffff, over ? 40 : 22);
-    txt(F_BOLD, !enabled ? C_FAINT : C_TEXT, x, y, w, h, DT_SINGLELINE | DT_VCENTER | DT_CENTER,
-        label);
-    if (enabled)
-        add_hit(x, y, w, h, id);
-}
 
-void ui_progress(int x, int y, int w, int h, int permille, int active) {
-    int fw = w * (permille < 0 ? 0 : permille > 1000 ? 1000 : permille) / 1000, i, j;
-    fill_rrect(x, y, w, h, h / 2, C_FIELD);
-    stroke_rrect(x, y, w, h, h / 2, 0x33333d);
-    if (fw > h / 2) {
-        int X = S(x), Y = S(y), W = S(fw), H = S(h);
-        long phase = active ? (long)(GetTickCount64() / 18) : 0;
-        fill_rrect_a(x - 3, y - 3, fw + 6, h + 6, h / 2 + 3, C_RED, 46);
-        fill_rrect_grad(x, y, fw, h, h / 2, 0xff4a52, 0x8e0f18);
-        gdi_sync();
-        for (j = Y + 1; j < Y + H - 1; j++)
-            for (i = X + H / 2; i < X + W - H / 2; i++)
-                if (((i + j - (int)phase) & 31) < 11)
-                    blend_px(i, j, 0xffffff, 26);
-    }
-}
 
-void ui_checkbox(int id, int x, int y, int on) {
-    if (on) {
-        fill_rrect_grad(x, y + 3, 22, 22, 5, 0xe8343c, 0x9a1018);
-        stroke_rrect(x, y + 3, 22, 22, 5, 0xff6a70);
-        capsule((float)x + 5.5f, (float)y + 14.5f, (float)x + 9.5f, (float)y + 18.5f, 2.4f, 0xffffff);
-        capsule((float)x + 9.5f, (float)y + 18.5f, (float)x + 17, (float)y + 9.5f, 2.4f, 0xffffff);
-    } else {
-        fill_rrect(x, y + 3, 22, 22, 5, C_FIELD);
-        stroke_rrect(x, y + 3, 22, 22, 5, hot(id) ? 0x7a7e8c : 0x3c3f4a);
-    }
-}
 
-void ui_chevron(int x, int y) {
-    capsule((float)x, (float)y, (float)x + 6, (float)y + 6, 2.0f, C_DIM);
-    capsule((float)x + 6, (float)y + 6, (float)x + 12, (float)y, 2.0f, C_DIM);
-}
 
 /* ------------------------------------------------------------ lacquer widgets ---- */
 

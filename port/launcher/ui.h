@@ -15,22 +15,6 @@
 
 typedef uint32_t rgb_t;
 
-/* Palette 0xRRGGBB: black and charcoal, cold steel text, red accents. */
-#define C_MAIN 0x0b0b0e
-#define C_CARD 0x141419
-#define C_CARD_HOT 0x1d1d24
-#define C_FIELD 0x09090c
-#define C_LINE 0x2c2c35
-#define C_STEEL 0xc4cad6
-#define C_TEXT 0xe6e8ee
-#define C_DIM 0x8f93a0
-#define C_FAINT 0x5d606b
-#define C_RED 0xd01c26
-#define C_RED_HOT 0xff3a42
-#define C_OK 0x5fbf78
-#define C_WARN 0xe0a840
-#define C_BAD 0xe0584e
-
 /* "Lacquer and ink" tokens (docs/target/launcher-laca-design.md). One accent: vermilion.
  * muted, dim and sep are cream at 56 %, 36 % and 10 % pre-blended over bg. */
 #define C_BG 0x13110f
@@ -46,19 +30,19 @@ typedef uint32_t rgb_t;
 #define C_BADC 0xd8584c
 
 enum font_id {
-    F_BODY, F_SMALL, F_BOLD, F_TINY, F_H1, F_H2, F_PLAY, F_MONO, F_TAG,
-    /* lacquer set: Josefin Sans (embedded) and Yu Mincho for kanji */
+    F_MONO,    /* Consolas 12 (log, command line) */
     F_LBODY,   /* Josefin 300, 14 */
     F_LSMALL,  /* Josefin 300, 12.5 */
     F_LABEL,   /* Josefin 600, 10.5 (tracked uppercase micro labels) */
     F_TAB,     /* Josefin 600, 11 */
     F_VALUE,   /* Josefin 300, 16 */
     F_DISPLAY, /* Josefin 100, 88 (Play title) */
-    F_PAGE,    /* Josefin 100, 46 (inner page titles) */
+    F_PAGE,    /* Josefin 100, 42 (inner page titles) */
     F_HEAD,    /* Josefin 100, 54 (first-run headline) */
     F_BTN,     /* Josefin 600, 15 */
     F_GHOST,   /* Josefin 100, 128 (ghost page number) */
-    F_KANJI,   /* Yu Mincho 600, 16 */
+    F_SUB,     /* Josefin 300, 21 */
+    F_KANJI,   /* Shippori Mincho B1 600, 16 (embedded subset) */
     F_COUNT
 };
 
@@ -76,6 +60,14 @@ void ui_init(int dpi);
 void ui_begin(int backdrop_kind);
 void ui_end(void);
 void ui_present(HDC dc);
+/* Backdrops are cached per page kind; this drops the cache (game art arrived or changed). */
+void ui_invalidate_backdrop(void);
+/* Use the game art in the backdrops (invalidates the cache when it changes). */
+void ui_set_game_art(int on);
+/* What the next frames show of the moving backdrop (art_animate): time in seconds, mouse -1..1. */
+void ui_set_motion(double t, float mx, float my);
+/* An alpha mask (aw x ah, 0..255) scaled to (x, y, w, h) and painted in one colour. */
+void ui_mask(int x, int y, int w, int h, const uint8_t *a, int aw, int ah, rgb_t col, int opacity);
 int ui_save_bmp(const wchar_t *path);
 
 /* Shapes (logical coordinates). */
@@ -87,12 +79,9 @@ void fill_rrect_grad(int x, int y, int w, int h, int r, rgb_t c1, rgb_t c2);
 void stroke_rrect(int x, int y, int w, int h, int r, rgb_t c);
 void fill_circle(int cx, int cy, int r, rgb_t c);
 void capsule(float ax, float ay, float bx, float by, float thick, rgb_t col);
-void status_dot(int x, int y, rgb_t c);
 /* Restricts GDI text to a box until ui_unclip. */
 void ui_clip(int x, int y, int w, int h);
 void ui_unclip(void);
-/* Charcoal panel with a hairline border and a red tick on its top edge. */
-void ui_card(int x, int y, int w, int h);
 
 /* Text. */
 void txt(int font, rgb_t col, int x, int y, int w, int h, UINT fmt, const wchar_t *s);
@@ -107,11 +96,6 @@ void ui_font_face(int font, wchar_t *out, int n);
 /* Set before ui_init: skip loading the embedded fonts (tests the fallback). */
 extern int g_no_embedded_fonts;
 
-/* Text filled with a vertical chrome gradient and a red halo (headings). */
-void txt_chrome(int font, int x, int y, int w, int h, UINT fmt, int red_style, int spacing,
-                const wchar_t *s);
-void caption(int x, int y, int w, const wchar_t *s);
-void caption_col(int x, int y, int w, rgb_t col, const wchar_t *s);
 
 /* Click zones. */
 void add_hit(int x, int y, int w, int h, int id);
@@ -119,13 +103,6 @@ int hit_at(int lx, int ly);
 int hot(int id);
 int pressed(int id);
 
-/* Widgets. style: 0 steel button, 1 red plate (primary), 2 plain text link. */
-void ui_button(int id, int x, int y, int w, int h, const wchar_t *label, int style, int enabled);
-/* Big glowing red steel plate (PLAY / IMPORT). */
-void ui_plate(int id, int x, int y, int w, int h, const wchar_t *label, int enabled);
-void ui_progress(int x, int y, int w, int h, int permille, int active);
-void ui_checkbox(int id, int x, int y, int on);
-void ui_chevron(int x, int y);
 
 /* Lacquer widgets (docs/target/launcher-laca-design.md). Square, flat, one accent. */
 void ui_hair(int x, int y, int w);  /* 1 px horizontal hairline, cream at 10 % */
