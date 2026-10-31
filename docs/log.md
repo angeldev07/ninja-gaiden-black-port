@@ -984,3 +984,13 @@ Details in [[gpu-nv2a]].
 - `emblem_draw` (ui.c) draws it in the top bar and on About; `ngb-launcher.exe --emblem-mask FILE` writes the glyph
   as a 512 px BMP and `make_icon.py` builds `ngb.ico` from it, so the icon and the window match. `kamon.c` and its
   test are gone.
+
+## [2026-10-31] milestone | Release v0.8.0: the "lacquer and ink" launcher
+- **Tried:** the owner ran the launcher of PR #23 (both art modes, maximized) and approved it.
+- **Main changes since v0.7.0:** the launcher redesign of [[launcher-laca-design]]: original ink-wash art and a brush
+  dragon emblem and icon; optional game art read at runtime from the player's copy (the emblem, Ryu and Ayane
+  rotating, logotypes, title background, a window icon from Ryu's silhouette); every page and state redrawn;
+  maximize; Enter plays. The zip's `README.txt` and the release notes now name the **Disc image (.iso)** button.
+- **Known gaps, in the README:** the previous ones plus the occasional freeze the owner still sees, next on the list
+  (general guards on the CPU/GPU waits).
+- `version.h` goes to `0.8.0` and then to `0.9.0-dev`.

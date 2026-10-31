@@ -64,14 +64,16 @@ Code-signing the releases, which removes most of these warnings, is planned.
 ## Status
 
 The whole game has been played through: the story mode, from the title screen to the ending, and the mission mode,
-up to and including the last mission, "Eternal Legend". It plays well overall, with an occasional glitch. v0.7.0
-fixes a freeze and a crash seen in long story mode sessions, and makes fights lighter on the CPU. Known gaps:
+up to and including the last mission, "Eternal Legend". It plays well overall, with an occasional glitch. v0.8.0
+brings a redesigned launcher that can show the game's own artwork from your copy. Known gaps:
 
 - Some lighting details still differ from the console.
 - Floor reflections and the sword glow are missing.
 - Fights with many enemies on screen can still drop below 60 fps. For a few seconds after each stage loads, the game
   itself holds 30 fps, as it does on the console.
 - Under the heat haze over the lava, a thin dark band can show at the right edge of the screen.
+- Rarely, the game can stop responding and has to be closed; the waits between the emulated CPU and GPU are being
+  hardened against it.
 
 The [roadmap](docs/target/roadmap.md) lists what is next, and the [development log](docs/log.md) records every step.
 Compatibility reports for both releases and for the Japanese one are very welcome.
