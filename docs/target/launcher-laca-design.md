@@ -1,12 +1,12 @@
 ---
 tags: [ngb, target, launcher, design]
 updated: 2026-10-31
-status: draft
+status: current
 ---
 
 # Launcher redesign: "lacquer and ink" (design spec)
 
-> PROPOSAL. This page describes the launcher we are building for v0.8.0, not the current one.
+> PROPOSAL, built for v0.8.0 (see [[log]] 2026-10-31). Deviations found while building it are in the log entry.
 > The current launcher is described in [[log]] (entries "Launcher v2" and later). Plan: [[launcher-laca-plan]].
 
 ## Why
@@ -51,8 +51,8 @@ Rules: one accent only; flat surfaces (no glow, no chrome, no bevel); square but
   - Display: weight 100, wide tracking (0.06 to 0.1 em). Micro labels: 600, 10.5 px, tracking 0.26 em, uppercase.
   - GDI has no letter-spacing: tracked text is drawn glyph by glyph with `GetTextExtentPoint32` advances (the
     v2 `txt_chrome` already does this).
-- **Kanji:** Yu Mincho Demibold (ships with Windows 10 and 11). Fallback: MS Mincho, then skip the kanji (they are
-  ornament, never the only carrier of meaning).
+- **Kanji:** a subset of Shippori Mincho B1 SemiBold (OFL), embedded: Yu Mincho is not on a stock Windows 11.
+  Fallbacks: Yu Mincho, MS Mincho, then skip the kanji (they are ornament, never the only carrier of meaning).
 - If the embedded font fails to load, fall back to Segoe UI Light / Semibold.
 
 ### Layout (1240 × 700 logical, scaled to the system DPI)

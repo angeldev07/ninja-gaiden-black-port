@@ -1,7 +1,7 @@
 ---
 tags: [ngb, target, launcher, plan]
 updated: 2026-10-31
-status: draft
+status: current
 ---
 
 # Launcher "lacquer and ink": implementation plan

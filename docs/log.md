@@ -926,3 +926,28 @@ Details in [[gpu-nv2a]].
   vermilion) and the logotypes used as cream and vermilion masks. The owner's review images are in
   `%NGB_DATA%\comparisons\launcher-laca-2026-10-31\`.
 - **Out of scope here:** general guards against CPU/GPU wait freezes, a separate piece of work after v0.8.0.
+
+## [2026-10-31] feat | Launcher "lacquer and ink" (v0.8.0)
+- **What:** the launcher redesign of [[launcher-laca-design]], built from [[launcher-laca-plan]] on `feat/launcher-laca`.
+  - Tokens: lacquer black, one vermilion accent, 1 px hairlines, square buttons; top bar instead of the sidebar.
+  - Fonts embedded as `RCDATA` and loaded privately: Josefin Sans (OFL) and a 14.6 KB kanji subset of Shippori
+    Mincho B1 (OFL). **Yu Mincho is not on a stock Windows 11** (it comes with the optional Japanese fonts),
+    `VERIFIED` on the owner's PC, so the kanji are carried by the exe. `tests/port/test_launcher.py` checks the faces
+    with `--fonts FILE`.
+  - `ink.c`: the procedural landscape, threaded on the logical grid: 76 ms for 2480 x 1400 (`ink_test`).
+  - `kamon.c` and `make_icon.py`: the crest and the new icon from one signed-distance shape (`kamon_test`).
+  - `gamedata.c`: bounds-checked AFS / XPR0 / sprite-table readers (`gamedata_test`, synthetic and damaged files).
+  - `gameart.c`: the key art, logotypes, title background and ring decoded with the core's `texconv.c`, graded into
+    the palette (`gameart_test`); checked on the owner's PAL copy and on a variant whose BLACK logotype carries a
+    kanji subtitle glued under the letters (trimmed by `ga_trim_subtitle`).
+  - `music.c`: ADX decoder bit-exact with `ngb_tools.audio.adx` (`music_test`) and a `waveOut` player.
+    `bgm.afs#89 bgm_title.adx`: stereo, 44.1 kHz, version 3, 210.5 s, loop 1,970,880 to 9,276,544 samples; the
+    whole track decodes in 75 ms. `VERIFIED`.
+  - `art.c` + `pages.c`: every page and state; the backdrop moves (parallax, mist, the moon's halo, the ring) at
+    2 ms per frame at 100 % DPI (`--perf-anim`).
+- **Bug found while building it:** the hero's mix toward the lacquer ran in `uint32_t`, so ink or art darker than the
+  lacquer wrapped around into bright blocks. `art_test` pins it (RED with the bug, GREEN with the fix).
+- **New launcher switches:** `--no-game-art` (original art only, for README screenshots), `--fonts FILE`,
+  `--perf-anim FILE`, `--no-embedded-fonts`, `--demo widgets`. New `ngb.ini` keys under `[launcher]`: `game_art`,
+  `music`, `hero_index`.
+- README and [[getting-started]] screenshots are the original art only, from a clean first run.

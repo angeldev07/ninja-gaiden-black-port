@@ -67,7 +67,7 @@ make backups of their own discs; this project does not provide tools or download
    file or the folder onto the window.
 2. The launcher checks that it is Ninja Gaiden Black. A different game, or a damaged image, is refused with the
    reason.
-3. An image is extracted into the data folder shown on the card. By default that is `%LOCALAPPDATA%\NGBPort`.
+3. An image is extracted into the data folder shown at the bottom right. By default that is `%LOCALAPPDATA%\NGBPort`.
    **Change…** points the launcher at another folder before you import. It does not move files that are already
    there, saves included. An extracted folder is used where it is, without copying.
 
@@ -75,7 +75,7 @@ Extracting takes a few minutes. You can cancel at any time, and nothing half-cop
 
 ## 5. Play
 
-Click **PLAY**. The game opens in fullscreen at your screen's resolution.
+Click **PLAY** (or press Enter). The game opens in fullscreen at your screen's resolution.
 
 | Key | Action |
 | --- | --- |
@@ -104,6 +104,10 @@ them. Uninstalling the launcher does not touch it.
   menus are drawn for 4:3 and look stretched, as they did on the console. Turn it off for the original 4:3 picture
   with bars at the sides.
 - **Limit to 60 fps:** the game's speed. Leave it on.
+- **Game art in the launcher:** once your game is imported, the launcher can show the game's own key art and
+  logotype, and play the title theme, all read from your copy while it runs. Nothing is copied or shared. It is on by
+  default; turn it off for the launcher's own ink-wash art. **Music** in the top bar (or **Audio > Title theme in the
+  launcher**) silences the theme.
 
 ## 6. Updates
 

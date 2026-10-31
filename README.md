@@ -26,7 +26,9 @@ OpenGL renderer and an APU audio engine.
 - **A launcher that does the rest:**
   - it imports your disc image (Redump or XISO) or an extracted folder, and checks that it is the right game;
   - it updates itself;
-  - it has English and Spanish UI.
+  - it has English and Spanish UI;
+  - it has its own ink-wash art or, if you turn it on, the key art, logotype and title theme read from your own copy
+    while it runs (nothing of the game is shipped).
 
 ## Play
 
