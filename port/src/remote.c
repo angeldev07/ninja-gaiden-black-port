@@ -11,6 +11,7 @@
 #include <windows.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "ach/ach.h"
@@ -19,6 +20,64 @@
 #include "ngb.h"
 
 #define LINE_MAX_ 1024
+#define PEEK_MAX 256
+
+static int committed(uintptr_t at, MEMORY_BASIC_INFORMATION *m) {
+    return VirtualQuery((const void *)at, m, sizeof *m) && m->State == MEM_COMMIT &&
+           !(m->Protect & (PAGE_NOACCESS | PAGE_GUARD));
+}
+
+/* The game image (its code and globals: the variables the achievements read), in the
+ * {u32 va, u32 len, bytes} records of --dump-ram, to %NGB_DATA%\runs\remote-<name>.bin. */
+static int dump_image(const char *name, char *out, size_t n) {
+    const char *data = getenv("NGB_DATA");
+    char path[MAX_PATH];
+    uintptr_t at = g_ngb_xbe.base, end = (uintptr_t)g_ngb_xbe.base + g_ngb_xbe.size_of_image;
+    size_t total = 0;
+    FILE *f;
+    if (!data || !*data || strpbrk(name, "\\/:*?\"<>|") || !*name)
+        return snprintf(out, n, "error a plain name, and NGB_DATA set"), -1;
+    snprintf(path, sizeof path, "%s\\runs\\remote-%s.bin", data, name);
+    if ((f = fopen(path, "wb")) == NULL)
+        return snprintf(out, n, "error cannot write %s", path), -1;
+    while (at < end) {
+        MEMORY_BASIC_INFORMATION m;
+        uintptr_t stop;
+        if (!VirtualQuery((const void *)at, &m, sizeof m))
+            break;
+        stop = (uintptr_t)m.BaseAddress + m.RegionSize;
+        if (stop > end)
+            stop = end;
+        if (committed(at, &m)) {
+            uint32_t head[2] = {(uint32_t)at, (uint32_t)(stop - at)};
+            fwrite(head, sizeof head, 1, f);
+            fwrite((const void *)at, 1, stop - at, f);
+            total += stop - at;
+        }
+        at = stop;
+    }
+    fclose(f);
+    return snprintf(out, n, "ok %zu bytes to %s", total, path), 0;
+}
+
+/* Up to PEEK_MAX bytes of guest memory as hex. */
+static void peek(const char *arg, char *out, size_t n) {
+    char *end;
+    unsigned long va = strtoul(arg, &end, 16), len = strtoul(end, NULL, 0), i;
+    MEMORY_BASIC_INFORMATION m;
+    size_t o;
+    if (!len)
+        len = 16;
+    if (len > PEEK_MAX)
+        len = PEEK_MAX;
+    if (!committed(va, &m) || (uint64_t)va + len > (uint64_t)(uintptr_t)m.BaseAddress + m.RegionSize) {
+        snprintf(out, n, "error 0x%08lX is not readable", va);
+        return;
+    }
+    o = (size_t)snprintf(out, n, "ok 0x%08lX:", va);
+    for (i = 0; i < len && o + 4 < n; i++)
+        o += (size_t)snprintf(out + o, n - o, " %02X", *(volatile const uint8_t *)(uintptr_t)(va + i));
+}
 
 static void reply(HANDLE pipe, const char *text) {
     char line[LINE_MAX_ + 2];
@@ -68,6 +127,22 @@ static void command(HANDLE pipe, char *line) {
         ngb_ach_events(ev, sizeof ev);
         snprintf(out, sizeof out, "ok %s", ev);
         reply(pipe, out);
+    } else if (!strcmp(line, "dump")) {
+        dump_image(arg, out, sizeof out);
+        reply(pipe, out);
+    } else if (!strcmp(line, "dumpall")) {
+        const char *data = getenv("NGB_DATA");
+        char path[MAX_PATH];
+        if (!data || !*data || !*arg || strpbrk(arg, "/:*?<>|") || strchr(arg, 92)) {
+            reply(pipe, "error a plain name, and NGB_DATA set");
+        } else {
+            snprintf(path, sizeof path, "%s%cruns%cremote-%s-all.bin", data, 92, 92, arg);
+            snprintf(out, sizeof out, ngb_dump_guest_ram(path) ? "error cannot write %s" : "ok all guest RAM to %s", path);
+            reply(pipe, out);
+        }
+    } else if (!strcmp(line, "peek")) {
+        peek(arg, out, sizeof out);
+        reply(pipe, out);
     } else if (!strcmp(line, "shot")) {
         gfx_request_shot();
         reply(pipe, "ok the next frame goes to %NGB_DATA%\\runs\\shots");
@@ -77,7 +152,8 @@ static void command(HANDLE pipe, char *line) {
         snprintf(out, sizeof out, "ok polls %u %s", ngb_input_polls(), st);
         reply(pipe, out);
     } else if (!strcmp(line, "help") || !*line) {
-        reply(pipe, "ok commands: input <script, times from now>, trace on|off, events, god on|off, shot, status");
+        reply(pipe, "ok commands: input <script, times from now>, trace on|off, events, god on|off, shot, status, "
+                    "dump <name>, dumpall <name>, peek <hex address> [length]");
     } else {
         snprintf(out, sizeof out, "error unknown command '%.60s' (help)", line);
         reply(pipe, out);

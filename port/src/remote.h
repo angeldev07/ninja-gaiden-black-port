@@ -7,7 +7,10 @@
  *     events           the trace events not read yet, oldest first, as many as fit in a line
  *     god on|off       keeps player 1's health at its max (ach.c; the game files are not touched)
  *     shot             a capture of the next frame, as F12
- *     status           mode, chapter, play time, health, ki, move, weapon, defeats, polls
+ *     status           mode, chapter, play time, health, ki, action, weapon, ninpo, kills, hits, polls
+ *     dump <name>      the game image (code and globals) to %NGB_DATA%\runs\remote-<name>.bin
+ *     dumpall <name>   all guest RAM (about 210 MB), as --dump-ram, to runsemote-<name>-all.bin
+ *     peek <va> [n]    up to 256 bytes of guest memory, hex
  *
  * Client: python -m ngb_tools.remote "status" "input t=0p:Y" ...
  */
