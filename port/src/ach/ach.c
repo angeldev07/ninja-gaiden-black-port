@@ -9,6 +9,7 @@
 
 #include "../ngb.h"
 #include "../gfx/present.h"
+#include "../input/input.h"
 #include "../gfx/toast.h"
 #include "catalog.h"
 #include "rules.h"
@@ -336,10 +337,41 @@ static void on_story_end(int difficulty) {
 
 static uint16_t peek16(uint32_t va) { return *(volatile const uint16_t *)(uintptr_t)va; }
 
+#define TRACE_OBJECT 0xBC0u
+#define TRACE_FRAMES 20000
+
+/* --ach-trace also writes %NGB_DATA%\runs\ach-trace-player.bin: per game frame, {u32 poll,
+ * u32 play time, u32 TRACE_OBJECT} then player 1's object, to find its fields offline. */
+static void trace_object(uint32_t p) {
+    static FILE *f;
+    static uint32_t last_time = ~0u, frames;
+    uint32_t head[3];
+    char path[MAX_PATH];
+    const char *data = getenv("NGB_DATA");
+    if (!p || !readable(p, TRACE_OBJECT) || frames >= TRACE_FRAMES || peek32(g_va.play_time) == last_time)
+        return;
+    if (!f) {
+        snprintf(path, sizeof path, "%s\\runs\\ach-trace-player.bin", data && *data ? data : ".");
+        if ((f = fopen(path, "wb")) == NULL) {
+            frames = TRACE_FRAMES;
+            return;
+        }
+        ngb_log("ach-trace: player object frames to %s", path);
+    }
+    last_time = head[1] = peek32(g_va.play_time);
+    head[0] = ngb_input_polls();
+    head[2] = TRACE_OBJECT;
+    fwrite(head, sizeof head, 1, f);
+    fwrite((const void *)(uintptr_t)p, TRACE_OBJECT, 1, f);
+    if (++frames % 600 == 0 || frames == TRACE_FRAMES)
+        fflush(f);
+}
+
 /* --ach-trace: what the phase 2 detectors will need, as it changes. */
 static void trace_tick(void) {
     uint32_t p = readable(g_va.player, 4) ? peek32(g_va.player) : 0, kills, health, ki;
     int move = p && readable(p, 0xBC0) ? peek8(p + 4) : -1, i, ninpo_changed = 0;
+    trace_object(move >= 0 ? p : 0);
     if (g_trace.lines > 20000)
         return;
     kills = peek32(g_va.kills);

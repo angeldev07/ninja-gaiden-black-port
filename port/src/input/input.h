@@ -144,3 +144,5 @@ void input_script_apply(const input_script_t *script, uint32_t now_ms, uint32_t 
 int ngb_input_install(const char *symbols_csv, const char *script, int host_input);
 /* Summary of calls, to the log. */
 void ngb_input_summary(void);
+/* Gamepad reads of port 0 so far: the clock of "p" times in --input-script. */
+uint32_t ngb_input_polls(void);
