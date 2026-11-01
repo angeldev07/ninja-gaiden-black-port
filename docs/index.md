@@ -26,6 +26,7 @@ in [[CLAUDE]] and the timeline in [[log]].
 - [[native-boot]]: what `default.xbe` does when it boots natively (H6): threads, XAPI, drives, hard-disk cache, D3D init up to the first NV2A MMIO.
 - [[characters]]: gallery of the 62 `chr_*`: 49 export to GLB, 20 with idle; failures grouped by cause.
 - [[mods]]: hidden costumes and Intercept; `--dump-ram` to compare RAM states (draft)
+- [[game-state]]: chapter, difficulty and mode variables, the save block and the profile block (`system.dat`) the achievements read (draft).
 - [[audio-apu]]: MCPX APU: voice processor, mixing to waveOut, free-voice interrupts and CRI music (thread priorities and 60 Hz vblank).
 - [[xapi-input]]: HLE gamepad for the 8 XAPI functions. The hang after the warning screens is not the input (hypothesis: Sofdec video without audio).
 - [[gpu-nv2a]]: H7a. Emulated NV2A registers, vblank and push buffer: the game reaches the warnings screen and submits 808k primitives (not yet rasterized).
@@ -60,6 +61,8 @@ _(still empty)_
 - [[launcher-laca-design]]: launcher redesign "lacquer and ink" for v0.8.0: tokens, layout, procedural ink landscape, kamon, optional game art read at runtime from the user's copy (draft).
 - [[launcher-laca-plan]]: task-by-task implementation plan of the launcher redesign (draft).
 - [[achievements-brief]]: achievements (owner's list, in-game toast drawn by the port, launcher page); brief and feasibility spike for the design session (draft).
+- [[achievements-design]]: the 27 achievements, their detectors, the toast (seal and rare variants), the file and the launcher page (draft).
+- [[achievements-plan]]: phase 1 tasks and checks (draft).
 - [[adr-04-version-control]]: trunk-based, Conventional Commits, squash PRs, review, CI gates and a tag per milestone.
 
 ## Team (`team/`)
@@ -70,6 +73,7 @@ _(still empty)_
 ## Tools (`tools/`)
 
 - [[tools]]: extract-xiso and our own tools (`xbe_info.py`, `afs.py`).
+- [[remote-session]]: `--remote`, driving a running game from outside (presses, trace, infinite health, captures).
 
 ## External sources (`sources/`)
 

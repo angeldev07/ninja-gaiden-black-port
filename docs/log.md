@@ -1017,6 +1017,132 @@ Details in [[gpu-nv2a]].
 - **Toast in the game without patching it:** the port's presenter draws it over the frame, like the Steam overlay;
   the launcher gets an Achievements page. Work starts in a fresh session with the feasibility spike of the brief.
 
+## [2026-10-31] ingest | Achievements: the game state, a detector, the toast and the launcher
+- **Found** ([[game-state]]): the current chapter (`0x00E130D4`, from the save-name format string), the difficulty
+  (`0x005B4975`), the game mode (`0x005B497A`), the save block (`0x0059E160`) and the profile block that becomes
+  `system.dat` (`0x00E12980`), with the game's own "story completed" and "mission cleared" routines.
+- **Method:** Ghidra cross-references from a string, then `--watch` and `--dump-ram` while loading the owner's saves in
+  a copy of the data folder (`ngb-data-achtest*`). No owner play was needed for these.
+- **Spike** (branch `spike/achievements`): `port/src/ach/` polls the variables from the main thread every 5 ms and
+  writes `%NGB_DATA%\achievements.json`; `port/src/gfx/toast.c` composites a placeholder toast in `pgl_flip` (window
+  only: captures read the game's surface); the launcher's Play page counts the unlocks. `--ach-demo` fires a test
+  unlock. Tried: the toast shows, the file is written, the launcher reads it, and loading a chapter 2 or chapter 10
+  save does not unlock anything.
+- **Open:** a real chapter end (the owner plays chapter 1 to the end with the spike build) to check the detector and
+  to find the end-of-chapter rank.
+
+## [2026-10-31] ingest | Achievements: the game variables found in the code, on every release
+- The owner played chapter 1 on the modified build, where the spike's PAL-only address check switched the detectors
+  off; F10 and F12 also left nothing (no `RAM dump` line, no shot), most likely a keyboard sending media keys.
+- **Now** the port finds the chapter, difficulty, mode and saved-chapter variables in the game's own code at start
+  ([[game-state]] § Other releases), so PAL, NTSC-U and modified builds work with no table per release. Checked on
+  the three XBEs and live on the modified build.
+
+## [2026-10-31] ingest | Achievements: the first real unlock
+- The owner finished chapter 1 on the modified build with the spike: the toast showed and `achievements.json` got
+  `chapter-01` (difficulty Normal). The detector of [[game-state]] works on a natural chapter end.
+- Owner's verdict on the placeholder toast: "muy fea y es invasiva", fine for the spike. The design must make it
+  smaller and less intrusive.
+- The results screen's strings show no rank titles besides the difficulty names; asked the owner what the "rank" was.
+
+## [2026-10-31] ingest | Achievements: the end-of-chapter rank, read from the game's own formula
+- The owner showed the rank card ("MASTER NINJA", a picture) and dumped RAM on it. Diffing the dumps led to the run's
+  karma (`0x005B4780`) and the karma at the last chapter end (`0x005B4784`); `FUN_002ed790` computes the rank from
+  their difference and a per-chapter `{max, min}` table in a game data file. Replaying the formula on the dumps gives
+  rank 0 for karma 405,327 and 415,007 (Master Ninja from 260,000 in chapter 1), as on screen. Details in
+  [[game-state]].
+- So the owner's "Master Ninja rank per chapter" achievements need only RAM reads.
+
+## [2026-10-31] milestone | Achievements, phase 1: detectors, the seal toast and the launcher page
+- Built on `feat/achievements` from [[achievements-design]] and [[achievements-plan]]: a shared catalog of 27
+  (`port/src/ach/catalog.c`), `achievements.json` v2 with progress (`store.c`), the game's rank formula (`rules.c`),
+  the variables found by signature with the karma and the rank table added (`sig.c`, [[game-state]]), and the
+  detectors for chapter 1, the story per difficulty (`INFERRED`: the chapter going past 15), the Master Ninja rank
+  with the sixteen seals, the first session, the hours played and F12.
+- **Toast** (`port/src/gfx/toast.c`): the mockup's variant A (seal 誉) and D (ensō, double rule, 7 s) with a queue, a
+  12-unit rise, Josefin Sans and the Shippori subset embedded in the core (the subset gains 誉 極 試 数 蒐 挑 灯), and a
+  drum hit synthesized by the port. `--lang en|es`, `--no-ach-toast`, `--ach-demo` shows both.
+- **Launcher:** an Achievements page (05; Advanced and About move to 06 and 07), filters, newest first, progress
+  rules, the two switches; the Play page column reads "n / 27"; PLAY passes the language and the toast switch.
+- Gotcha: Josefin's static Light and SemiBold faces register under their legacy family names ("Josefin Sans Light"),
+  as the launcher already knew; asking for "Josefin Sans" with a weight gave a fallback face in the toast.
+- Checked: `ach_test` (catalog, store, rank edges, signatures), the Python suite, both toasts in the window back
+  buffer, the page in both languages with `--shot`, and a chapter 2 load that unlocks nothing.
+- Needs the owner: a clear of the last chapter for the story detector; phase 1b dumps (missions, inventory, deaths).
+
+## [2026-10-31] ingest | Achievements, phase 1b: missions, game over and Golden Scarabs without the owner's dumps
+- Mission mode read from the code: the menu table (46 missions, nine pages of five plus "Eternal Legend", which is
+  mission 50), the profile's per-mission flags, best difficulty and start difficulty, and the unlock tiers. Details in
+  [[game-state]] § Mission mode.
+- The end-of-stage state `0x00E12E94` (the chapter − 0x240): 0x80 on a game over, 0x81 on a clear. The mission
+  results set the chapter to 0x81 like the story's ending does, so a mission clear needs no profile reading.
+- Five data folders with one of the owner's PAL saves each (`ngb-data-scan-c01` … `-cend`, outside the repo) let the
+  load menu land on that save; RAM dumps of four of them gave the inventory (`0x005B43F0`, `{u16 item, u8 count}`),
+  the item ids (the game's `messtr.mes` records), the play time in frames and the scarab total handed to Muramasa
+  (`0x005B4794`, confirmed in `FUN_00187400`). Golden Scarab is item 0x59.
+- Each new variable sits at a fixed distance from the ones the port already finds, checked in the PAL, NTSC-U and
+  modified XBEs.
+- Checked live: Ryu left idle in a mission on the modified build died and the port counted the game over; loading a
+  save with 24 scarabs handed in counted nothing. The mission clear itself is still `INFERRED`.
+- Open: which mission the owner means by "the stadium", and the weapon list and levels for the collection
+  achievements.
+
+## [2026-10-31] ingest | Achievements, phase 2 groundwork: the player, a trace mode and the run tracker
+- Found in `FUN_00023520` (player 1's per-frame update): the player object pointer, the defeat counter and its
+  "defeated one" flag, the combo; health and ki next to the save block. All at fixed distances in the three XBEs.
+  Details in [[game-state]] § The player.
+- `--ach-trace` logs the move byte, defeats, health, ki and ninpo as they change. A scripted fight in a mission shows
+  the health going down with each hit and the game over; the weapon variable is unused in mission mode.
+- Run tracker for "Only the Sword" and "The True Ultimate Master Ninja" ([[achievements-design]] § Phase 2): followed
+  from New Game, checkpoints when the game writes a save, resumed only from a save that matches one. First version
+  treated any change of mode as a load and lost the run between the intro and chapter 1; now only a jump of the play
+  time does.
+- Needs the owner: a short session with `--ach-trace` to name the moves (Izuna Drop, Flying Swallow, fire ninpo).
+
+## [2026-10-31] milestone | Remote session: measurements in the owner's running game
+- No save statue has enemies near it, so the owner proposed infinite health plus a session they leave in front of
+  enemies for the agent to drive. `--remote` opens `\\.\pipe\ngb-loader` (input from now, trace, god, shot, status);
+  `ngb_tools.remote` is the client; the launcher passes `[advanced] extra_args` from `ngb.ini`. See [[remote-session]].
+- Found on the way: the game's anti-tamper sums (24 groups, `FUN_00164e70`/`FUN_00164db0`); writing the health alone
+  sent the game back to the main menu. God mode now sets the groups' flags first, as the game's own revive does.
+- Also: the player object's byte +4 is an action state (0 idle, 6/8/9/A running, 0x55 jump, 0x5B air Y, 0x0B air X,
+  0x0E landing, 0xB9 Y held), not the attack; ground attacks leave it at 0. Naming the Izuna Drop and the Flying
+  Swallow needs enemies: the next step, in the owner's session.
+
+## [2026-10-31] ingest | First remote measurement in the owner's session (chapter 15, Hard, True Dragon Sword)
+- The owner did Flying Swallows (X+A then Y), Izuna Drops (X Y X X Y) and ninpo (Y+B) in front of two respawning
+  fiends, with god mode and the trace on; the per-frame file holds their pad and player 1's object.
+- **Ninpo is clear:** every Y+B drops the ki by 200 (1000, 800, 600, 400). A ki drop is the cast.
+- **Correction:** `0x005B4614` goes up with every hit that lands (each X or Y), not with each enemy defeated: it is a
+  hit count. The kill count the HUD shows ("Kill 4") is elsewhere and still to be found.
+- **Not settled:** neither the action byte (+4) nor the other small fields (+0x14 changes on every attack) take one
+  value per Flying Swallow across 11 tries. The move has to be found another way (the game's move tables or the code
+  that starts it).
+- The melee weapon reads 0x00CA with the True Dragon Sword in hand on this build, where `messtr.mes` (PAL) gives 0xC9;
+  the item ids of this build need checking.
+
+## [2026-10-31] ingest | Kills, the equipment in use and fire ninpo, checked in the owner's session
+- `0x005B4610` is the chapter's kill count (an actor's health reaching 0) and `0x005B4614` counts hits; the weapon
+  and ninpo in use are `0x005B5790` and `0x005B5794` (the save block's copies go stale between saves). Details in
+  [[game-state]] § The player.
+- In the owner's session (modified build, chapter 15, Hard), the status read the True Dragon Sword (0x00C9) and The
+  Art of the Inferno (0x009C). 9 kills with the sword and 4 Inferno casts gave "Disciple of the Dragon" 9 and "Rain of
+  Fire" (now 100 fire ninpo casts, the owner's call) 4.
+- The Izuna Drop and Flying Swallow counters stay out until their moves are found in the game's move tables.
+
+## [2026-10-31] ingest | Story challenges: first look, left for later
+- The owner explained the story "challenges": a karma HUD (Karma, Combo, Kill, Time) shows up in set places, and
+  enemies come in waves until a total (the stadium, from chapter 12 to 15: 120 Vigoorian Berserkers on Master
+  Ninja). Clearing one gives a reward. "The Arena" (#12) and "Untouchable" (#13) are this challenge, not a mission.
+- Image dumps through the remote session (`dump`), taken before the challenge, at Kill 0, 1 and 2 (modified build,
+  chapter 12, Hard):
+  - only the chapter kill count (`0x005893F0`) and a byte in a pool of dynamic objects (`0x00810C69`) followed
+    0, 0, 1, 2;
+  - no code refers to that pool's addresses directly;
+  - entering the area changes too much memory to single out an "active" flag or the target.
+- Finding the challenge state needs a clear (the completion and reward) or the code that draws the karma HUD. The
+  owner chose only deterministic detectors for now, so #12 and #13 stay out with #15, #18 and #22. The dumps were
+  deleted.
 ## [2026-10-31] milestone | Checkpoints: named game saves the loader loads on its own
 - The owner's idea: checkpoints, so that traces and tests start at a known spot without playing to it. True save
   states would mean freezing host threads, GL state and handles, so `ngb_tools.checkpoint` uses the game's own saves:

@@ -141,6 +141,7 @@ static void make_fonts(void) {
         {L"Josefin Sans", 1280, FW_THIN, ANTIALIASED_QUALITY, L"Segoe UI Light"},
         {L"Josefin Sans", 210, FW_LIGHT, ANTIALIASED_QUALITY, L"Segoe UI Light"},
         {L"Shippori Mincho B1", 160, FW_SEMIBOLD, ANTIALIASED_QUALITY, L"Yu Mincho"},
+        {L"Josefin Sans", 320, FW_THIN, ANTIALIASED_QUALITY, L"Segoe UI Light"},
     };
     int i;
     load_embedded_fonts();

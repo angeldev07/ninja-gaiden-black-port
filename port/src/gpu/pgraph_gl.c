@@ -38,6 +38,7 @@
 #include "rcache.h"
 #include "rdoc.h"
 #include "../gfx/present.h"
+#include "../gfx/toast.h"
 #include "../gl/glbackend.h"
 #include "../gl/glload.h"
 #include "../gl/glstate.h"
@@ -2256,6 +2257,9 @@ int pgl_flip(const pgl_regs *r, const char *shot_path) {
             ngl_glBlitFramebuffer(0, 0, sw, sh, rect[0], client.bottom - rect[1], rect[2], client.bottom - rect[3],
                                   GL_COLOR_BUFFER_BIT, GL_LINEAR);
         }
+        /* The port's overlay goes on the window only: captures read the game's surface. */
+        toast_draw(client.right, client.bottom, rect);
+        R.cur_prog = 0;
         if (shot_path) {
             size_t n_px = (size_t)sw * (size_t)sh;
             uint8_t *buf = (uint8_t *)malloc(n_px * 4);

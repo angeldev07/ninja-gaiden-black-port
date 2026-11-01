@@ -29,7 +29,7 @@ cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\core.pdb" /c ^
   "%SRC%\gl\glbackend.c" "%SRC%\gl\glload.c" "%SRC%\gl\glstate.c" "%SRC%\gl\texconv.c" ^
   "%SRC%\shaders\vsh.c" "%SRC%\shaders\psh.c" "%SRC%\shaders\emit.c" ^
   "%SRC%\input\input.c" "%SRC%\input\xapi_hle.c" ^
-  "%SRC%\gfx\present.c" || exit /b 1
+  "%SRC%\gfx\present.c" "%SRC%\gfx\toast.c" "%SRC%\ach\ach.c" "%SRC%\ach\catalog.c" "%SRC%\ach\store.c" "%SRC%\ach\rules.c" "%SRC%\ach\sig.c" "%SRC%\remote.c" || exit /b 1
 link /nologo /DLL /DEBUG /OUT:"%OUT%\ngb-core.dll" /PDB:"%OUT%\ngb-core.pdb" ^
   /BASE:0x60000000 /LARGEADDRESSAWARE ^
   "%OUT%\obj\main.obj" "%OUT%\obj\symbols.obj" "%OUT%\obj\xbe.obj" "%OUT%\obj\memory.obj" "%OUT%\obj\log.obj" "%OUT%\obj\logfilter.obj" "%OUT%\obj\libaddr.obj" "%OUT%\obj\watch.obj" "%OUT%\obj\prof.obj" ^
@@ -41,7 +41,7 @@ link /nologo /DLL /DEBUG /OUT:"%OUT%\ngb-core.dll" /PDB:"%OUT%\ngb-core.pdb" ^
   "%OUT%\obj\glbackend.obj" "%OUT%\obj\glload.obj" "%OUT%\obj\glstate.obj" "%OUT%\obj\texconv.obj" ^
   "%OUT%\obj\vsh.obj" "%OUT%\obj\psh.obj" "%OUT%\obj\emit.obj" ^
   "%OUT%\obj\input.obj" "%OUT%\obj\xapi_hle.obj" ^
-  "%OUT%\obj\present.obj" "%OUT%\obj\core.res" kernel32.lib shell32.lib user32.lib gdi32.lib winmm.lib opengl32.lib dbghelp.lib || exit /b 1
+  "%OUT%\obj\present.obj" "%OUT%\obj\toast.obj" "%OUT%\obj\ach.obj" "%OUT%\obj\catalog.obj" "%OUT%\obj\store.obj" "%OUT%\obj\rules.obj" "%OUT%\obj\sig.obj" "%OUT%\obj\remote.obj" "%OUT%\obj\core.res" kernel32.lib advapi32.lib shell32.lib user32.lib gdi32.lib winmm.lib opengl32.lib dbghelp.lib || exit /b 1
 
 rem 2) ngb-loader.exe: fixed base 0x10000 + BSS that reserves the XBE image. No CRT.
 cl /nologo /W4 /WX /O1 /GS- /Zi /utf-8 /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\stub.pdb" /c "%SRC%\loader_stub.c" || exit /b 1
@@ -63,6 +63,9 @@ cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\pgl_track_test.pdb" /Fe"%OUT%\pgl_tra
 rem 3a3) Library addresses moved between builds of the game (libaddr.c).
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\libaddr_test.pdb" /Fe"%OUT%\libaddr_test.exe" "%PORT%tests\libaddr_test.c" "%SRC%\libaddr.c" || exit /b 1
 "%OUT%\libaddr_test.exe" || exit /b 1
+rem 3a5) Achievements: catalog, store, rank rules and the search for the game variables (ach\).
+cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\ach_test.pdb" /Fe"%OUT%\ach_test.exe" "%PORT%tests\ach_test.c" "%SRC%\ach\catalog.c" "%SRC%\ach\store.c" "%SRC%\ach\rules.c" "%SRC%\ach\sig.c" "%SRC%\xbe.c" || exit /b 1
+"%OUT%\ach_test.exe" || exit /b 1
 rem 3b) Push buffer decoder test (hand-made buffers).
 cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\pushbuf_test.pdb" /Fe"%OUT%\pushbuf_test.exe" "%PORT%tests\pushbuf_test.c" "%SRC%\gpu\pushbuf.c" || exit /b 1
 "%OUT%\pushbuf_test.exe" || exit /b 1
@@ -120,7 +123,7 @@ cl %CFLAGS% /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\gameart_test.pdb" /Fe"%OUT%\gameart_t
 rem 5) ngb-launcher.exe: the graphical launcher (Win32 + GDI; bcrypt and winhttp for the updater). See launcher\launcher.c.
 rc /nologo /I"%PORT%res" /I"%PORT%launcher" /fo"%OUT%\obj\launcher.res" "%PORT%launcher\launcher.rc" || exit /b 1
 cl %CFLAGS% /I"%PORT%res" /I"%PORT%launcher" /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\launcher.pdb" /Fe"%OUT%\ngb-launcher.exe" ^
-  "%PORT%launcher\launcher.c" "%PORT%launcher\pages.c" "%PORT%launcher\ui.c" "%PORT%launcher\art.c" "%PORT%launcher\ink.c" "%PORT%launcher\gamedata.c" "%PORT%launcher\gameart.c" "%SRC%\gl\texconv.c" "%PORT%launcher\import.c" "%PORT%launcher\xdvdfs.c" "%PORT%launcher\update.c" "%OUT%\obj\launcher.res" ^
+  "%PORT%launcher\launcher.c" "%PORT%launcher\pages.c" "%PORT%launcher\ui.c" "%PORT%launcher\art.c" "%PORT%launcher\ink.c" "%PORT%launcher\gamedata.c" "%PORT%launcher\gameart.c" "%SRC%\gl\texconv.c" "%PORT%launcher\import.c" "%PORT%launcher\xdvdfs.c" "%PORT%launcher\update.c" "%SRC%\ach\catalog.c" "%SRC%\ach\store.c" "%OUT%\obj\launcher.res" ^
   /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib shell32.lib comdlg32.lib advapi32.lib ole32.lib bcrypt.lib winhttp.lib || exit /b 1
 echo build: %OUT%\ngb-loader.exe + ngb-core.dll + ngb-launcher.exe
 endlocal

@@ -302,10 +302,16 @@ static int default_shot_path(char *out, size_t len) {
     return 0;
 }
 
+void gfx_request_shot(void) {
+    if (g.external)
+        InterlockedCompareExchange(&g.shot_pending, 2, 0); /* 2: asked by the port; an F12 (1) wins */
+}
+
 int gfx_take_shot_request(char *path, size_t len) {
-    if (!InterlockedExchange(&g.shot_pending, 0))
+    LONG who = InterlockedExchange(&g.shot_pending, 0);
+    if (!who || default_shot_path(path, len))
         return 0;
-    return default_shot_path(path, len) == 0;
+    return (int)who;
 }
 
 int gfx_copy_frame(void *dst, size_t dst_pixels, int *width, int *height) {
