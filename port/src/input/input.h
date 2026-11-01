@@ -117,7 +117,13 @@ typedef struct input_event {
     uint8_t polls;
     uint16_t buttons;
     uint8_t analog_mask; /* bit i -> analog[i] = 255 */
+    uint8_t stick;       /* left stick pushed all the way: INPUT_STICK_* bits */
 } input_event_t;
+
+#define INPUT_STICK_UP 1
+#define INPUT_STICK_DOWN 2
+#define INPUT_STICK_LEFT 4
+#define INPUT_STICK_RIGHT 8
 
 typedef struct input_script {
     int count;
@@ -138,3 +144,5 @@ void input_script_apply(const input_script_t *script, uint32_t now_ms, uint32_t 
 int ngb_input_install(const char *symbols_csv, const char *script, int host_input);
 /* Summary of calls, to the log. */
 void ngb_input_summary(void);
+/* Gamepad reads of port 0 so far: the clock of "p" times in --input-script. */
+uint32_t ngb_input_polls(void);

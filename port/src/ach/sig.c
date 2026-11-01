@@ -90,6 +90,13 @@ int ach_find_vars(const xbe_t *xbe, ach_vars *out) {
     out->play_time = out->saved - 0x1EF;
     out->scarabs = out->saved - 0x1E3;
     out->mission = out->saved + 1;
+    out->inventory = out->saved - 0x587;
+    out->kills = out->saved - 0x363;
+    out->weapon = out->saved - 0x19D;
+    out->health = out->saved + 0xE0D;
+    out->ninpo = out->saved + 0xDDD;
+    out->ki = out->saved + 0xE15;
+    out->player = out->chapter + 0x3C8;
     if (stores_of_0x80(t, tsize, out->chapter - 0x240) >= 4)
         out->stage_end = out->chapter - 0x240;
     return 0;

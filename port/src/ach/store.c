@@ -49,6 +49,16 @@ void ach_store_set_progress(ach_store *s, const char *id, uint64_t value) {
     s->nprogress++;
 }
 
+void ach_store_remove_progress(ach_store *s, const char *id) {
+    int i;
+    for (i = 0; i < s->nprogress; i++)
+        if (!strcmp(s->progress[i].id, id)) {
+            memmove(&s->progress[i], &s->progress[i + 1], (size_t)(s->nprogress - i - 1) * sizeof s->progress[0]);
+            s->nprogress--;
+            return;
+        }
+}
+
 int ach_store_load(ach_store *s, const char *path) {
     char line[512], id[32], time[24];
     unsigned long long value;

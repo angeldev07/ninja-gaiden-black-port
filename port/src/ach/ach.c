@@ -8,6 +8,8 @@
 #include <string.h>
 
 #include "../ngb.h"
+#include "../gfx/present.h"
+#include "../input/input.h"
 #include "../gfx/toast.h"
 #include "catalog.h"
 #include "rules.h"
@@ -21,6 +23,11 @@
 #define SCARABS 50
 #define FRAMES_STEADY 600u   /* play time read twice 5 ms apart: more than this apart is a load */
 #define QUIET_AFTER_LOAD 2000u
+#define NEW_GAME_FRAMES 1200u /* a run whose play time is under 20 s with no karma is a New Game */
+#define CHECKPOINT_SLACK 600u /* a loaded save's play time may run up to 10 s before it is read */
+#define CHECKPOINTS 40
+#define INVENTORY_SLOTS 128
+#define RUN_CLEAN_UMN (ACH_RUN_HIT | ACH_RUN_HEAL | ACH_RUN_NINPO | ACH_RUN_UPGRADE)
 #define SAVE_EVERY_MS 60000u
 #define FIRST_SESSION_MS 300000u /* when the detectors are off, 5 minutes in counts as a session */
 
@@ -33,8 +40,21 @@ static ach_vars g_va;
 static int g_ready, g_on, g_demo, g_table_ok = -1;
 static int g_last_chapter = -1;
 static int g_last_mission_chapter = -1, g_last_stage_end = -1;
-static int g_run_seen;
+static int g_run_seen, g_last_mode = -1;
 static uint32_t g_last_play_time, g_last_scarabs;
+static struct {
+    int move, lines;
+    uint32_t kills, health, ki;
+    uint16_t ninpo[8];
+    uint8_t seen[256]; /* move ids already captured */
+} g_trace = {-1, 0, 0, 0, 0, {0}, {0}};
+/* The story run followed for the challenge achievements (rules.h, ACH_RUN_*). */
+static struct {
+    int on, difficulty, resync, have_body;
+    unsigned marks;
+    uint32_t last_time;
+    ach_body body;
+} g_run;
 static DWORD g_quiet_until;
 static uint32_t g_last_karma_last;
 static DWORD g_start, g_last_tick, g_last_save, g_ms; /* g_ms: play time not yet counted in seconds */
@@ -189,38 +209,218 @@ static void death_tick(int playing) {
     g_last_stage_end = end;
 }
 
-/* Golden Scarabs, handed to Muramasa (PAL FUN_00187400 adds the ones carried to the total and caps
- * it at 50). A load copies the whole save block, total included, so a rise only counts while the
- * run's play time moves on steadily: the load makes it jump, and the next two seconds are ignored
- * in case the copy was read half done. The total is read before the time, which sits lower in the
- * block: a new total always comes with a new time. */
-static void scarab_tick(DWORD now, int mode) {
-    uint32_t n = peek32(g_va.scarabs), t;
-    int steady;
-    t = peek32(g_va.play_time);
-    steady = g_run_seen && t >= g_last_play_time && t - g_last_play_time <= FRAMES_STEADY;
-    if (!steady)
+/* The run's play time. A load copies the whole save block, so the time jumps; 1 when it moved on
+ * steadily since the last read and no jump happened in the last two seconds (in case the copy was
+ * read half done). A jump asks the run tracker to find out which run the loaded save belongs to; a
+ * change of mode (a menu, the title) only pauses it. */
+static int clock_tick(DWORD now, int mode) {
+    uint32_t t = peek32(g_va.play_time);
+    int steady = g_run_seen && t >= g_last_play_time && t - g_last_play_time <= FRAMES_STEADY;
+    if (!steady || mode != g_last_mode) {
         g_quiet_until = now + QUIET_AFTER_LOAD;
-    else if (mode == MODE_STORY && n > g_last_scarabs && n <= SCARABS && (LONG)(now - g_quiet_until) >= 0) {
+        g_run.resync |= !steady;
+        if (!steady && g_run_seen && g_run.on)
+            ngb_log("ach: play time jumped %u -> %u", g_last_play_time, t);
+        g_run.have_body = 0;
+    }
+    g_last_play_time = t;
+    g_last_mode = mode;
+    g_run_seen = 1;
+    return steady && (LONG)(now - g_quiet_until) >= 0;
+}
+
+/* Golden Scarabs, handed to Muramasa (PAL FUN_00187400 adds the ones carried to the total and caps
+ * it at 50). `n` was read before the play time, which sits lower in the save block, so a total
+ * copied by a load always comes with a jump of the time and is never counted. */
+static void scarab_tick(uint32_t n, int calm, int mode) {
+    if (calm && mode == MODE_STORY && n > g_last_scarabs && n <= SCARABS) {
         ngb_log("ach: golden scarabs handed in: %u", n);
         ach_store_set_progress(&g_store, "golden-scarabs", n);
         save();
         if (n == SCARABS)
             unlock("golden-scarabs", peek8(g_va.difficulty));
     }
-    g_last_play_time = t;
     g_last_scarabs = n;
-    g_run_seen = 1;
+}
+
+static void read_body(ach_body *b) {
+    uint32_t h = peek32(g_va.health), k = peek32(g_va.ki), at;
+    int i;
+    b->health_max = h & 0xFFFF;
+    b->health = h >> 16;
+    b->ki_max = k & 0xFFFF;
+    b->ki = k >> 16;
+    b->weapon = *(volatile const uint16_t *)(uintptr_t)g_va.weapon;
+    b->heal_items = 0;
+    for (i = 0, at = g_va.inventory; i < INVENTORY_SLOTS; i++, at += 4) {
+        uint32_t slot = peek32(at);
+        if ((slot & 0xFFFF) != 0xFFFF && ach_is_healing_item(slot & 0xFFFF))
+            b->heal_items += (slot >> 16) & 0xFF;
+    }
+}
+
+/* Checkpoints: "run-TTTTTTTT-KKKKKKKK" (play time and karma of a save the game wrote during a
+ * followed run) = marks | difficulty << 8 | 1 << 16, the oldest dropped past CHECKPOINTS. */
+static void run_key(char *key, size_t n, uint32_t t, uint32_t karma) {
+    snprintf(key, n, "run-%08X-%08X", t, karma);
+}
+
+/* A New Game: the run's play time under 20 s, no karma, chapter 1. */
+static int new_game(uint32_t t, uint32_t karma) { return t < NEW_GAME_FRAMES && karma == 0 && peek8(g_va.chapter) == 0; }
+
+static void run_start(void) {
+    ngb_log("ach: run followed from New Game (difficulty %d)", peek8(g_va.difficulty));
+    g_run.on = 1;
+    g_run.difficulty = peek8(g_va.difficulty);
+    g_run.marks = 0;
+}
+
+/* After a load (the play time jumped): which run the save belongs to. */
+static void run_resync(void) {
+    uint32_t t = peek32(g_va.play_time), karma = peek32(g_va.karma), ct, ck;
+    int i;
+    if (new_game(t, karma)) {
+        run_start();
+        return;
+    }
+    for (i = g_store.nprogress - 1; i >= 0; i--)
+        if (sscanf(g_store.progress[i].id, "run-%8X-%8X", &ct, &ck) == 2 && ck == karma && ct <= t &&
+            t - ct <= CHECKPOINT_SLACK) {
+            g_run.on = 1;
+            g_run.marks = (unsigned)(g_store.progress[i].value & 0xFF);
+            g_run.difficulty = (int)(g_store.progress[i].value >> 8 & 0xFF);
+            ngb_log("ach: run resumed from a save (marks 0x%X, difficulty %d)", g_run.marks, g_run.difficulty);
+            return;
+        }
+    if (g_run.on)
+        ngb_log("ach: the save loaded (play time %u, karma %u) is not from a followed run", t, karma);
+    g_run.on = 0;
+}
+
+static void run_tick(int calm, int mode) {
+    ach_body b;
+    unsigned m;
+    if (mode != MODE_STORY || !calm) {
+        g_run.have_body = 0;
+        return;
+    }
+    if (g_run.resync) {
+        g_run.resync = 0;
+        run_resync();
+    } else if (new_game(peek32(g_va.play_time), peek32(g_va.karma)) &&
+               (!g_run.on || peek32(g_va.play_time) < g_run.last_time)) {
+        run_start(); /* from the title, where the time was already 0 */
+    }
+    g_run.last_time = peek32(g_va.play_time);
+    read_body(&b);
+    if (g_run.on && g_run.have_body && (m = ach_run_marks(&g_run.body, &b) & ~g_run.marks) != 0) {
+        g_run.marks |= m;
+        ngb_log("ach: run marked 0x%X (health %u/%u, ki %u/%u, weapon 0x%04X)", m, b.health, b.health_max, b.ki,
+                b.ki_max, b.weapon);
+    }
+    g_run.body = b;
+    g_run.have_body = 1;
+}
+
+/* The story ended naturally on `difficulty`. */
+static void on_story_end(int difficulty) {
+    if (!g_run.on)
+        return;
+    ngb_log("ach: followed run ended (marks 0x%X, started on difficulty %d)", g_run.marks, g_run.difficulty);
+    if (g_run.difficulty == DIFFICULTY_MASTER_NINJA && difficulty == DIFFICULTY_MASTER_NINJA &&
+        !(g_run.marks & RUN_CLEAN_UMN))
+        unlock("true-ultimate", difficulty);
+    if (!(g_run.marks & ACH_RUN_OTHER_WEAPON))
+        unlock("dragon-sword-only", difficulty);
+    g_run.on = 0;
+}
+
+static uint16_t peek16(uint32_t va) { return *(volatile const uint16_t *)(uintptr_t)va; }
+
+#define TRACE_OBJECT 0xBC0u
+#define TRACE_FRAMES 20000
+
+/* --ach-trace also writes %NGB_DATA%\runs\ach-trace-player.bin: per game frame, {u32 poll,
+ * u32 play time, u32 TRACE_OBJECT} then player 1's object, to find its fields offline. */
+static void trace_object(uint32_t p) {
+    static FILE *f;
+    static uint32_t last_time = ~0u, frames;
+    uint32_t head[3];
+    char path[MAX_PATH];
+    const char *data = getenv("NGB_DATA");
+    if (!p || !readable(p, TRACE_OBJECT) || frames >= TRACE_FRAMES || peek32(g_va.play_time) == last_time)
+        return;
+    if (!f) {
+        snprintf(path, sizeof path, "%s\\runs\\ach-trace-player.bin", data && *data ? data : ".");
+        if ((f = fopen(path, "wb")) == NULL) {
+            frames = TRACE_FRAMES;
+            return;
+        }
+        ngb_log("ach-trace: player object frames to %s", path);
+    }
+    last_time = head[1] = peek32(g_va.play_time);
+    head[0] = ngb_input_polls();
+    head[2] = TRACE_OBJECT;
+    fwrite(head, sizeof head, 1, f);
+    fwrite((const void *)(uintptr_t)p, TRACE_OBJECT, 1, f);
+    if (++frames % 600 == 0 || frames == TRACE_FRAMES)
+        fflush(f);
+}
+
+/* --ach-trace: what the phase 2 detectors will need, as it changes. */
+static void trace_tick(void) {
+    uint32_t p = readable(g_va.player, 4) ? peek32(g_va.player) : 0, kills, health, ki;
+    int move = p && readable(p, 0xBC0) ? peek8(p + 4) : -1, i, ninpo_changed = 0;
+    trace_object(move >= 0 ? p : 0);
+    if (g_trace.lines > 20000)
+        return;
+    kills = peek32(g_va.kills);
+    health = peek32(g_va.health);
+    ki = peek32(g_va.ki);
+    for (i = 0; i < 8; i++)
+        if (peek16(g_va.ninpo + i * 2) != g_trace.ninpo[i]) {
+            g_trace.ninpo[i] = peek16(g_va.ninpo + i * 2);
+            ninpo_changed = 1;
+        }
+    if (move != g_trace.move) {
+        int first = move >= 0 && !g_trace.seen[move];
+        ngb_log("ach-trace: move 0x%02X (weapon 0x%04X, play time %u)%s", move, peek16(g_va.weapon),
+                peek32(g_va.play_time), first ? ", first time: captured" : "");
+        if (first) { /* one picture per move id, to name them */
+            g_trace.seen[move] = 1;
+            gfx_request_shot();
+        }
+    }
+    if (kills != g_trace.kills)
+        ngb_log("ach-trace: kills %u, move 0x%02X, weapon 0x%04X, combo %u", kills, move, peek16(g_va.weapon),
+                p ? peek16(p + 0x60E) : 0);
+    if (health != g_trace.health)
+        ngb_log("ach-trace: health %u / %u", health >> 16, health & 0xFFFF);
+    if (ki != g_trace.ki)
+        ngb_log("ach-trace: ki %u / %u", ki >> 16, ki & 0xFFFF);
+    if (ninpo_changed)
+        ngb_log("ach-trace: ninpo %u %u %u %u %u %u %u %u", g_trace.ninpo[0], g_trace.ninpo[1], g_trace.ninpo[2],
+                g_trace.ninpo[3], g_trace.ninpo[4], g_trace.ninpo[5], g_trace.ninpo[6], g_trace.ninpo[7]);
+    g_trace.lines += (move != g_trace.move) + (kills != g_trace.kills) + (health != g_trace.health) +
+                     (ki != g_trace.ki) + ninpo_changed;
+    g_trace.move = move;
+    g_trace.kills = kills;
+    g_trace.health = health;
+    g_trace.ki = ki;
 }
 
 static void game_tick(DWORD now) {
-    int chapter, saved, difficulty, mode = peek8(g_va.mode);
-    uint32_t karma_last;
+    int chapter, saved, difficulty, calm, mode = peek8(g_va.mode);
+    uint32_t karma_last, scarabs = peek32(g_va.scarabs); /* before the clock: see scarab_tick */
     if (mode >= MODE_STORY && mode <= 4) /* story or missions: a game is being played */
         unlock("port-first-session", -1);
+    if (g_ngb_opts.ach_trace)
+        trace_tick();
+    calm = clock_tick(now, mode);
     death_tick(mode >= MODE_STORY && mode <= 4);
     mission_tick(mode);
-    scarab_tick(now, mode);
+    scarab_tick(scarabs, calm, mode);
+    run_tick(calm, mode);
     if (mode != MODE_STORY) {
         g_last_chapter = -1;
         return;
@@ -245,8 +445,10 @@ static void game_tick(DWORD now) {
     if (g_last_chapter >= 0 && saved != chapter) {
         if (g_last_chapter == 0 && chapter == 1)
             unlock("chapter-01", difficulty);
-        if (g_last_chapter == ACH_CHAPTERS - 1 && chapter >= ACH_CHAPTERS && difficulty < ACH_DIFFICULTIES)
+        if (g_last_chapter == ACH_CHAPTERS - 1 && chapter >= ACH_CHAPTERS && difficulty < ACH_DIFFICULTIES) {
             unlock(k_story[difficulty], difficulty);
+            on_story_end(difficulty);
+        }
     }
     g_last_chapter = chapter < ACH_CHAPTERS ? chapter : -1;
 }
@@ -318,6 +520,30 @@ void ngb_ach_screenshot(void) {
         return;
     AcquireSRWLockExclusive(&g_lock);
     unlock("port-screenshot", -1);
+    ReleaseSRWLockExclusive(&g_lock);
+}
+
+void ngb_ach_game_saved(void) {
+    char key[32];
+    int i, n = 0;
+    if (!g_ready || !g_on)
+        return;
+    AcquireSRWLockExclusive(&g_lock);
+    if (g_run.on && peek8(g_va.mode) == MODE_STORY) {
+        run_key(key, sizeof key, peek32(g_va.play_time), peek32(g_va.karma));
+        if (!ach_store_progress(&g_store, key))
+            ngb_log("ach: run checkpoint %s (marks 0x%X)", key, g_run.marks);
+        ach_store_set_progress(&g_store, key, g_run.marks | (unsigned)g_run.difficulty << 8 | 1u << 16);
+        for (i = 0; i < g_store.nprogress; i++)
+            n += !strncmp(g_store.progress[i].id, "run-", 4);
+        for (i = 0; n > CHECKPOINTS && i < g_store.nprogress; i++)
+            if (!strncmp(g_store.progress[i].id, "run-", 4)) { /* the oldest come first */
+                ach_store_remove_progress(&g_store, g_store.progress[i].id);
+                n--;
+                i--;
+            }
+        save();
+    }
     ReleaseSRWLockExclusive(&g_lock);
 }
 

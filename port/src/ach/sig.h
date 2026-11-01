@@ -22,6 +22,13 @@ typedef struct ach_vars {
     uint32_t play_time;  /* u32, game frames played in the run, 60 a second (PAL 0x005B4788) */
     uint32_t scarabs;    /* u32, Golden Scarabs handed to Muramasa, at most 50 (PAL 0x005B4794) */
     uint32_t mission;    /* u8, the mission being played in mission mode (PAL 0x005B4978) */
+    uint32_t inventory;  /* 128 x {u16 item, u8 count, u8}, 0xFFFF empty (PAL 0x005B43F0) */
+    uint32_t kills;      /* u32, enemies defeated in the run (PAL 0x005B4614) */
+    uint32_t weapon;     /* u16, the melee weapon in hand, an item id (PAL 0x005B47DA) */
+    uint32_t health;     /* u16 max health, then u16 health, of player 1 (PAL 0x005B5784) */
+    uint32_t ninpo;      /* u16[8] ninpo charges, the max 0x10 bytes lower (PAL 0x005B5754) */
+    uint32_t ki;         /* u16 max ki, then u16 ki (PAL 0x005B578C) */
+    uint32_t player;     /* ptr to player 1's object: +4 the move, +0xBBE "defeated one" (PAL 0x00E1349C) */
     uint32_t stage_end;  /* u8: 0x80 game over, 0x81 cleared (PAL 0x00E12E94); 0 if not found */
 } ach_vars;
 

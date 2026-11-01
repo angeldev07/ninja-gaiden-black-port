@@ -79,6 +79,8 @@ static int g_ready, g_host_input;
 static input_script_t g_script;
 static DWORD g_t0;
 static volatile LONG g_polls; /* reads of port 0: the clock for scripts in "p" */
+
+uint32_t ngb_input_polls(void) { return (uint32_t)g_polls; }
 static uint32_t g_packet = 1;
 static xbox_gamepad_t g_last;
 static volatile LONG g_calls[H_COUNT], g_state_logs, g_insertion_known, g_event_warned;

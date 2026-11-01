@@ -15,8 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "hostpath.h"
-#include "hostpath.h"
+#include "../ach/ach.h"
 #include "hostpath.h"
 #include "kernel.h"
 
@@ -475,6 +474,12 @@ static uint64_t NtWriteFile(uint32_t *args) {
         return RET32(STATUS_ACCESS_DENIED);
     }
     finish_io(ARG(1), (uint32_t *)PTR(4), STATUS_SUCCESS, put);
+    if (put >= 0x1000 && !is_raw((HANDLE)PTR(0))) { /* a game save (UDATA), not the profile or the cache */
+        char path[MAX_PATH];
+        DWORD n = GetFinalPathNameByHandleA((HANDLE)PTR(0), path, sizeof path, 0);
+        if (n && n < sizeof path && strstr(path, "\\UDATA\\"))
+            ngb_ach_game_saved();
+    }
     return STATUS_SUCCESS;
 }
 

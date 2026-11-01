@@ -30,4 +30,27 @@ int ach_mission_slot(int mission);
 /* Bits set in a 64-bit mask. */
 int ach_bit_count(uint64_t mask);
 
+/* A story run followed from New Game for the challenge achievements: what has happened in it
+ * that rules them out. */
+#define ACH_RUN_HIT 1u          /* health went down */
+#define ACH_RUN_HEAL 2u         /* a healing or ki item was used */
+#define ACH_RUN_NINPO 4u        /* ki went down (ninpo cast) */
+#define ACH_RUN_UPGRADE 8u      /* max health or max ki went up */
+#define ACH_RUN_OTHER_WEAPON 16u /* a melee weapon other than the Dragon Sword in hand */
+
+/* What the run tracker reads each tick. */
+typedef struct ach_body {
+    unsigned health, health_max, ki, ki_max; /* 0 max: not in play (loading, menus) */
+    unsigned weapon;                         /* melee item id, 0xFFFF none */
+    unsigned heal_items;                     /* healing and ki items carried, summed */
+} ach_body;
+
+/* The ACH_RUN_* bits that the change from `a` to `b` (two reads in a row while playing) sets. */
+unsigned ach_run_marks(const ach_body *a, const ach_body *b);
+
+/* 1 for the Dragon Sword's item ids (0x01, and 0xC9 for the True Dragon Sword). */
+int ach_is_dragon_sword(unsigned item);
+/* 1 for the items that restore health or ki (elixirs, fragrances, Ayane's food, the talisman). */
+int ach_is_healing_item(unsigned item);
+
 #endif

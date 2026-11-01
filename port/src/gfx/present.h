@@ -70,6 +70,8 @@ int gfx_should_close(void);
 /* With the GL render, F12 leaves a capture pending. Takes it: 1 and the path to use
  * (%NGB_DATA%\runs\shots\shot-<date>.png) if there was one. From the render thread. */
 int gfx_take_shot_request(char *path, size_t len);
+/* Leaves a capture pending, as F12 does (GL render only; the next flip takes it). */
+void gfx_request_shot(void);
 
 /* Saves the last frame as PNG. `path` NULL = %NGB_DATA%\runs\shots\shot-<date>.png.
  * The path used goes to `out_path` if it is not NULL. 0 if it was written. */

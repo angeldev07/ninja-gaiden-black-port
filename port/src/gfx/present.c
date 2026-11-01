@@ -302,6 +302,11 @@ static int default_shot_path(char *out, size_t len) {
     return 0;
 }
 
+void gfx_request_shot(void) {
+    if (g.external)
+        InterlockedExchange(&g.shot_pending, 1);
+}
+
 int gfx_take_shot_request(char *path, size_t len) {
     if (!InterlockedExchange(&g.shot_pending, 0))
         return 0;
