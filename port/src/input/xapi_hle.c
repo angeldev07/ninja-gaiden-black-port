@@ -157,6 +157,10 @@ void ngb_input_last(xbox_gamepad_t *out) {
 int ngb_input_inject(const char *script, char *err, size_t errlen) {
     static input_script_t add;
     int r;
+    if (!g_ready) {
+        snprintf(err, errlen, "the gamepad is not hooked yet");
+        return -1;
+    }
     AcquireSRWLockExclusive(&g_live_lock);
     if ((r = input_script_parse(script, &add, err, errlen)) == 0 &&
         (r = input_script_append(&g_live, &add, GetTickCount() - g_t0, (uint32_t)g_polls)) != 0)

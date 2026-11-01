@@ -4,6 +4,7 @@
 #include "ach.h"
 
 #include <stdarg.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -86,10 +87,26 @@ static void announce(const ach_def *a) {
     toast_show(label, a->name[lang()], a->points >= 100 || a->secret);
 }
 
+static int g_store_ok; /* 0: the file exists but could not be read; saving would wipe it */
+
 static void save(void) {
+    g_last_save = GetTickCount();
+    if (!g_store_ok) { /* read it now; merge what this session gained on top */
+        ach_store fresh;
+        int i;
+        if (ach_store_load(&fresh, g_store.path))
+            return;
+        for (i = 0; i < g_store.nunlocked; i++)
+            ach_store_unlock(&fresh, g_store.unlocked[i].id, g_store.unlocked[i].difficulty, g_store.unlocked[i].time);
+        for (i = 0; i < g_store.nprogress; i++)
+            if (g_store.progress[i].value > ach_store_progress(&fresh, g_store.progress[i].id))
+                ach_store_set_progress(&fresh, g_store.progress[i].id, g_store.progress[i].value);
+        g_store = fresh;
+        g_store_ok = 1;
+        ngb_log("ach: %s readable again", g_store.path);
+    }
     if (ach_store_save(&g_store))
         ngb_log("ach: could not write %s", g_store.path);
-    g_last_save = GetTickCount();
 }
 
 /* With g_lock held. */
@@ -495,7 +512,7 @@ static void trace_tick(void) {
     kills = peek32(g_va.kills);
     health = peek32(g_va.health);
     if (peek32(g_va.hits) != g_trace.hits) {
-        trace_event("hit landed (state 0x%02X, combo %u)", move, p ? peek16(p + 0x60E) : 0);
+        trace_event("hit landed (state 0x%02X, combo %u)", move, move >= 0 ? peek16(p + 0x60E) : 0);
         g_trace.hits = peek32(g_va.hits);
     }
     ki = peek32(g_va.ki);
@@ -605,6 +622,35 @@ static void time_tick(DWORD now) {
         save();
 }
 
+/* Every address the detectors read: a false find must not become an access violation. */
+static int vars_readable(void) {
+    static const struct {
+        size_t field;
+        uint32_t before, len;
+    } k[] = {
+        {offsetof(ach_vars, chapter), 0, 1},    {offsetof(ach_vars, saved), 0, 1},
+        {offsetof(ach_vars, difficulty), 0, 1}, {offsetof(ach_vars, mode), 0, 1},
+        {offsetof(ach_vars, karma), 0, 8},      {offsetof(ach_vars, rank_data), 0, 4},
+        {offsetof(ach_vars, play_time), 0, 4},  {offsetof(ach_vars, scarabs), 0, 4},
+        {offsetof(ach_vars, mission), 0, 1},    {offsetof(ach_vars, inventory), 0, INVENTORY_SLOTS * 4},
+        {offsetof(ach_vars, hits), 0, 4},       {offsetof(ach_vars, kills), 0, 4},
+        {offsetof(ach_vars, weapon), 0, 2},     {offsetof(ach_vars, ninpo), 0, 2},
+        {offsetof(ach_vars, health), 0, 4},     {offsetof(ach_vars, segments), 0x10, 0x20},
+        {offsetof(ach_vars, ki), 0, 4},         {offsetof(ach_vars, player), 0, 4},
+    };
+    size_t i;
+    for (i = 0; i < sizeof k / sizeof k[0]; i++) {
+        uint32_t va = *(const uint32_t *)((const char *)&g_va + k[i].field);
+        if (!va || !readable(va - k[i].before, k[i].len))
+            return 0;
+    }
+    if (g_va.stage_end && !readable(g_va.stage_end, 1))
+        g_va.stage_end = 0;
+    if (g_va.checks && !readable(g_va.checks, 0x18))
+        g_va.checks = 0;
+    return 1;
+}
+
 void ngb_ach_init(const xbe_t *xbe) {
     const char *data = getenv("NGB_DATA"), *home = getenv("USERPROFILE");
     char path[MAX_PATH];
@@ -615,12 +661,14 @@ void ngb_ach_init(const xbe_t *xbe) {
         snprintf(path, sizeof path, "%s\\ngb-data\\achievements.json", home);
     else
         return;
-    if (ach_store_load(&g_store, path))
-        ngb_log("ach: could not read %s; starting empty", path);
+    g_store_ok = !ach_store_load(&g_store, path);
+    if (!g_store_ok)
+        ngb_log("ach: could not read %s; it is left alone until it can be read", path);
     g_demo = g_ngb_opts.ach_demo;
     g_start = g_last_save = GetTickCount();
     /* The variables live in the game's image, mapped for the whole run. */
-    g_on = !ach_find_vars(xbe, &g_va) && g_va.karma >= xbe->base && g_va.chapter < end && g_va.mode < end;
+    g_on = !ach_find_vars(xbe, &g_va) && g_va.karma >= xbe->base && g_va.chapter < end && g_va.mode < end &&
+           vars_readable();
     if (g_on)
         ngb_log("ach: %d unlocked in %s; chapter 0x%08X, difficulty 0x%08X, mode 0x%08X, save copy 0x%08X, "
                 "karma 0x%08X, rank data 0x%08X, mission 0x%08X, stage end 0x%08X", g_store.nunlocked, path,

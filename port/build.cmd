@@ -41,7 +41,7 @@ link /nologo /DLL /DEBUG /OUT:"%OUT%\ngb-core.dll" /PDB:"%OUT%\ngb-core.pdb" ^
   "%OUT%\obj\glbackend.obj" "%OUT%\obj\glload.obj" "%OUT%\obj\glstate.obj" "%OUT%\obj\texconv.obj" ^
   "%OUT%\obj\vsh.obj" "%OUT%\obj\psh.obj" "%OUT%\obj\emit.obj" ^
   "%OUT%\obj\input.obj" "%OUT%\obj\xapi_hle.obj" ^
-  "%OUT%\obj\present.obj" "%OUT%\obj\toast.obj" "%OUT%\obj\ach.obj" "%OUT%\obj\catalog.obj" "%OUT%\obj\store.obj" "%OUT%\obj\rules.obj" "%OUT%\obj\sig.obj" "%OUT%\obj\remote.obj" "%OUT%\obj\core.res" kernel32.lib shell32.lib user32.lib gdi32.lib winmm.lib opengl32.lib dbghelp.lib || exit /b 1
+  "%OUT%\obj\present.obj" "%OUT%\obj\toast.obj" "%OUT%\obj\ach.obj" "%OUT%\obj\catalog.obj" "%OUT%\obj\store.obj" "%OUT%\obj\rules.obj" "%OUT%\obj\sig.obj" "%OUT%\obj\remote.obj" "%OUT%\obj\core.res" kernel32.lib advapi32.lib shell32.lib user32.lib gdi32.lib winmm.lib opengl32.lib dbghelp.lib || exit /b 1
 
 rem 2) ngb-loader.exe: fixed base 0x10000 + BSS that reserves the XBE image. No CRT.
 cl /nologo /W4 /WX /O1 /GS- /Zi /utf-8 /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\stub.pdb" /c "%SRC%\loader_stub.c" || exit /b 1

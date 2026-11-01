@@ -2,14 +2,15 @@
  * remote.c: see remote.h.
  *
  * One client at a time. Each line is a command, each answer one line ("ok ..." or "error ...").
- * The pipe rejects remote clients and keeps the default security (the user who started the
- * loader, administrators and SYSTEM can write to it).
+ * The pipe rejects remote clients, only the user who started the loader and SYSTEM may open it,
+ * and it must be the first of its name (another process cannot answer in its place).
  */
 #include "remote.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
+#include <sddl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -161,17 +162,30 @@ static void command(HANDLE pipe, char *line) {
 }
 
 static DWORD WINAPI serve(LPVOID unused) {
+    SECURITY_ATTRIBUTES sa;
+    int first = 1;
     (void)unused;
+    memset(&sa, 0, sizeof sa);
+    sa.nLength = sizeof sa;
+    /* full access for the owner (the user running the loader) and SYSTEM, nobody else */
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorA("D:P(A;;GA;;;OW)(A;;GA;;;SY)", SDDL_REVISION_1,
+                                                              &sa.lpSecurityDescriptor, NULL)) {
+        ngb_log("remote: could not build the pipe's security (error %lu)", GetLastError());
+        return 1;
+    }
     for (;;) {
         char line[LINE_MAX_];
         size_t len = 0;
-        HANDLE pipe = CreateNamedPipeA(NGB_REMOTE_PIPE, PIPE_ACCESS_DUPLEX,
+        int too_long = 0;
+        HANDLE pipe = CreateNamedPipeA(NGB_REMOTE_PIPE, PIPE_ACCESS_DUPLEX | (first ? FILE_FLAG_FIRST_PIPE_INSTANCE : 0),
                                        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
-                                       1, 4096, 4096, 0, NULL);
+                                       1, 4096, 4096, 0, &sa);
         if (pipe == INVALID_HANDLE_VALUE) {
             ngb_log("remote: could not create %s (error %lu)", NGB_REMOTE_PIPE, GetLastError());
+            LocalFree(sa.lpSecurityDescriptor);
             return 1;
         }
+        first = 0;
         if (ConnectNamedPipe(pipe, NULL) || GetLastError() == ERROR_PIPE_CONNECTED) {
             for (;;) {
                 char c;
@@ -180,13 +194,20 @@ static DWORD WINAPI serve(LPVOID unused) {
                     break;
                 if (c == '\r')
                     continue;
-                if (c != '\n' && len + 1 < sizeof line) {
-                    line[len++] = c;
+                if (c != '\n') {
+                    if (len + 1 < sizeof line)
+                        line[len++] = c;
+                    else
+                        too_long = 1;
                     continue;
                 }
                 line[len] = 0;
                 len = 0;
-                command(pipe, line);
+                if (too_long)
+                    reply(pipe, "error line too long (at most 1023 bytes); nothing done");
+                else
+                    command(pipe, line);
+                too_long = 0;
             }
         }
         DisconnectNamedPipe(pipe);
