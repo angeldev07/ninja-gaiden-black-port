@@ -1108,3 +1108,15 @@ Details in [[gpu-nv2a]].
 - Also: the player object's byte +4 is an action state (0 idle, 6/8/9/A running, 0x55 jump, 0x5B air Y, 0x0B air X,
   0x0E landing, 0xB9 Y held), not the attack; ground attacks leave it at 0. Naming the Izuna Drop and the Flying
   Swallow needs enemies: the next step, in the owner's session.
+
+## [2026-10-31] ingest | First remote measurement in the owner's session (chapter 15, Hard, True Dragon Sword)
+- The owner did Flying Swallows (X+A then Y), Izuna Drops (X Y X X Y) and ninpo (Y+B) in front of two respawning
+  fiends, with god mode and the trace on; the per-frame file holds their pad and player 1's object.
+- **Ninpo is clear:** every Y+B drops the ki by 200 (1000, 800, 600, 400). A ki drop is the cast.
+- **Correction:** `0x005B4614` goes up with every hit that lands (each X or Y), not with each enemy defeated: it is a
+  hit count. The kill count the HUD shows ("Kill 4") is elsewhere and still to be found.
+- **Not settled:** neither the action byte (+4) nor the other small fields (+0x14 changes on every attack) take one
+  value per Flying Swallow across 11 tries. The move has to be found another way (the game's move tables or the code
+  that starts it).
+- The melee weapon reads 0x00CA with the True Dragon Sword in hand on this build, where `messtr.mes` (PAL) gives 0xC9;
+  the item ids of this build need checking.
