@@ -106,9 +106,11 @@ Found without the owner's help, from the code and from dumps of the owner's save
   Ninja with none of the other marks. `VERIFIED`: New Game starts following and the trip into chapter 1 adds no mark.
   `INFERRED`: checkpoints (no scripted save yet) and the end.
 - **Disciple of the Dragon (#16):** each rise of the chapter's kill count while the melee weapon in use is the Dragon
-  Sword (0x01) or the True Dragon Sword (0xC9). Loads and chapter ends are ignored.
+  Sword (0x01) or the True Dragon Sword (0xC9). Loads and chapter ends are ignored. `VERIFIED` live on the modified
+  build (chapter 15, Hard): the weapon in use read 0x00C9, and 9 kills with it gave a progress of 9.
 - **Rain of Fire (#17), changed with the owner:** "cast fire ninpo 100 times" (The Art of the Fire Wheels or of the
   Inferno), not kills. A cast is the ki going down with its max unchanged; the kind is the ninpo in use at that moment.
+  `VERIFIED` live: the ninpo in use read 0x009C (Inferno), and 4 casts (ki 1000 to 200) gave a progress of 4.
 - **Izuna Drop (#15) and Flying Swallow (#18): left out for now** (the owner's call: only deterministic detectors). In
   the owner's session no field of the player object took one value per Flying Swallow across 11 tries; finding them
   needs the game's move tables.

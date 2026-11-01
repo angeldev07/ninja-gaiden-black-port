@@ -1120,3 +1120,12 @@ Details in [[gpu-nv2a]].
   that starts it).
 - The melee weapon reads 0x00CA with the True Dragon Sword in hand on this build, where `messtr.mes` (PAL) gives 0xC9;
   the item ids of this build need checking.
+
+## [2026-10-31] ingest | Kills, the equipment in use and fire ninpo, checked in the owner's session
+- `0x005B4610` is the chapter's kill count (an actor's health reaching 0) and `0x005B4614` counts hits; the weapon
+  and ninpo in use are `0x005B5790` and `0x005B5794` (the save block's copies go stale between saves). Details in
+  [[game-state]] § The player.
+- In the owner's session (modified build, chapter 15, Hard), the status read the True Dragon Sword (0x00C9) and The
+  Art of the Inferno (0x009C). 9 kills with the sword and 4 Inferno casts gave "Disciple of the Dragon" 9 and "Rain of
+  Fire" (now 100 fire ninpo casts, the owner's call) 4.
+- The Izuna Drop and Flying Swallow counters stay out until their moves are found in the game's move tables.
