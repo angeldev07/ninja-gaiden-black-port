@@ -1,6 +1,6 @@
 ---
 tags: [ngb, tools]
-updated: 2026-10-25
+updated: 2026-10-31
 status: draft
 ---
 
@@ -46,6 +46,7 @@ git config core.hooksPath .githooks              # enables the pre-commit guard
 | `ngb_tools.audio` | Decodes ADX, Xbox ADPCM (.wva) and XWB to WAV; spectrogram analysis | `python -I -m ngb_tools.audio adx|wva|xwb|analyze …` | [[adx]] |
 | `ngb_tools.stage` | Exports complete stages (all the parts of a zone) to glTF/GLB, with optional collision | `python -I -m ngb_tools.stage export <zone>` | [[stages]] |
 | `ngb_tools.hygiene` | Guard that prevents versioning game data (hook and CI) | `python -m ngb_tools.hygiene [--staged]` | [[adr-03-game-data-outside-repo]] |
+| `ngb_tools.checkpoint` | Named copies of single game saves, and sandboxes in which the loader loads one on its own | `python -I -m ngb_tools.checkpoint saves|add|list|prepare|run …` | this page |
 
 ### `ngb_tools.afs`
 
@@ -162,6 +163,35 @@ python -I -m ngb_tools.stage info boff
 ```
 
 - It joins the `<zone>_NN` parts of a zone; identical variants are exported once. Format: [[stages]].
+
+### `ngb_tools.checkpoint`
+
+Checkpoints for testing and reverse engineering: put the game in a known spot without playing to it. The port runs
+the game natively (host threads, OpenGL state, Windows handles), so it has no save states; a checkpoint is one of
+the game's own saves instead.
+
+```sh
+python -I -m ngb_tools.checkpoint saves --data %NGB_DATA%            # the saves there, newest first, by in-game name
+python -I -m ngb_tools.checkpoint add ch05 --note "chapter 5 start"  # copies the newest save (or --save <folder>)
+python -I -m ngb_tools.checkpoint list
+python -I -m ngb_tools.checkpoint run ch05 --input "t=6000p:Y" -- --window --ach-trace
+```
+
+- The library is `%NGB_DATA%\checkpoints\<name>\`: `checkpoint.json` (the save's in-game name, the title id, a
+  note), the save folder, the title's `.xbx` files and the profile (`TDATA`).
+- `prepare` (and `run`) make `<name>\play\`, a data folder with a junction `game` (to `%NGB_DATA%\game`, or `--game`)
+  and a fresh copy of the save. It starts again from the checkpoint every time, so a run never changes it, and the
+  achievements file there is reset too.
+- With one save, the load menu opens on it. `run` passes the loader `--input-script` with the route from the title
+  screen to the loaded save, then `--input`, and everything after `--`. The route: START at 200 to 800 polls, A every
+  250 polls to 3000 (menu, save, confirmation), then X held for 10 polls every 250 polls to 16000: the story text
+  shown while the chapter loads waits for "Proceed" (X), and a short tap gets lost. Scripted moves start at poll 16500 (`GAMEPLAY_POLL`). `VERIFIED` with the
+  owner's PAL saves (2026-10-31).
+- Gotchas found on the way: every save is made at a save statue, so an A after the load opens the statue's menu (and
+  can even save); the load takes 9,000 to 13,000 polls because the game reads the pad less often while loading, so
+  poll times are not a steady clock there. `LS_UP`, `LS_DOWN`, `LS_LEFT` and `LS_RIGHT` in `--input-script` push the
+  left stick, to walk away from the statue.
+- Saves are the player's data, not the game's; they stay in `NGB_DATA`, never in the repo.
 
 ### Headless analysis of `default.xbe` (H5, `tools/ghidra/`)
 

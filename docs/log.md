@@ -1143,3 +1143,10 @@ Details in [[gpu-nv2a]].
 - Finding the challenge state needs a clear (the completion and reward) or the code that draws the karma HUD. The
   owner chose only deterministic detectors for now, so #12 and #13 stay out with #15, #18 and #22. The dumps were
   deleted.
+## [2026-10-31] milestone | Checkpoints: named game saves the loader loads on its own
+- The owner's idea: checkpoints, so that traces and tests start at a known spot without playing to it. True save
+  states would mean freezing host threads, GL state and handles, so `ngb_tools.checkpoint` uses the game's own saves:
+  a library in `%NGB_DATA%\checkpoints`, and a sandbox data folder per checkpoint with only that save, which the load
+  route reaches on its own. Usage in [[tools]].
+- The library holds one checkpoint per chapter of the owner's PAL run (`ch01` … `ch16`, `story-cleared`). `run ch02
+  -- --ach-trace` loads chapter 2 and traces it.
