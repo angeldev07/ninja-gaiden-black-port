@@ -33,21 +33,21 @@ over many variables).
 | 7 | `rank-master-ninja` | Rank: Master Ninja | Calificación: Master Ninja | A chapter ends with the Master Ninja rank | 15 | RAM | 1 |
 | 8 | `rank-sixteen-seals` | Sixteen Seals | Dieciséis sellos | Master Ninja rank in all 16 chapters on one difficulty (progress n / 16) | 100 | RAM | 1 |
 | 9 | `true-ultimate` | The True Ultimate Master Ninja | El verdadero Ultimate Master Ninja | Story on Master Ninja without healing items, ninpo, a hit taken, or life and ki upgrades. **Secret** | 250 | Hook | 2 |
-| 10 | `mission-eternal-legend` | Eternal Legend | Leyenda eterna | The "Eternal Legend" mission cleared | 75 | RAM-R | 1b |
-| 11 | `mission-eternal-legend-mn` | Legend Without End | Leyenda sin final | "Eternal Legend" cleared on Master Ninja | 150 | RAM-R | 1b |
-| 12 | `mission-stadium-mn` | The Arena | La arena | The stadium challenge cleared on Master Ninja | 100 | RAM-R | 1b |
+| 10 | `mission-eternal-legend` | Eternal Legend | Leyenda eterna | The "Eternal Legend" mission cleared | 75 | RAM | 1b |
+| 11 | `mission-eternal-legend-mn` | Legend Without End | Leyenda sin final | "Eternal Legend" cleared on Master Ninja | 150 | RAM | 1b |
+| 12 | `mission-stadium-mn` | The Arena | La arena | The stadium challenge cleared on Master Ninja (which mission it is: ask the owner) | 100 | RAM | 1b |
 | 13 | `mission-stadium-untouched` | Untouchable | Intocable | The stadium on Master Ninja without healing or a hit taken | 150 | Hook | 2 |
-| 14 | `missions-all-mn` | Every Trial | Todas las pruebas | Every mission cleared on Master Ninja (progress) | 150 | RAM-R | 1b |
+| 14 | `missions-all-mn` | Every Trial | Todas las pruebas | All 46 missions cleared on Master Ninja (progress n / 46) | 150 | RAM | 1b |
 | 15 | `izuna-1000` | A Thousand Falls | Mil caídas | 1,000 enemies finished with the Izuna Drop (progress) | 50 | Hook | 2 |
 | 16 | `dragon-sword-500` | Disciple of the Dragon | Discípulo del dragón | 500 enemies defeated with the Dragon Sword (progress) | 25 | Hook | 2 |
 | 17 | `fire-ninpo-100` | Rain of Fire | Lluvia de fuego | 100 enemies defeated with fire ninpo (progress) | 25 | Hook | 2 |
 | 18 | `flying-swallow-500` | Flight of the Swallow | Vuelo de la golondrina | The Flying Swallow used 500 times (progress) | 20 | Hook | 2 |
-| 19 | `golden-scarabs` | Golden Scarabs | Escarabajos dorados | All 50 Golden Scarabs collected (progress) | 50 | RAM-R | 1b |
+| 19 | `golden-scarabs` | Golden Scarabs | Escarabajos dorados | All 50 Golden Scarabs handed to Muramasa (progress) | 50 | RAM | 1b |
 | 20 | `all-weapons` | Full Arsenal | Arsenal completo | Every weapon obtained (progress) | 30 | RAM-R | 1b |
 | 21 | `weapons-max` | Master Forge | Forja maestra | Every weapon at its top level | 50 | RAM-R | 1b |
 | 22 | `boss-no-damage` | Not a Scratch | Sin un rasguño | A boss defeated without taking damage | 30 | Hook | 2 |
 | 23 | `dragon-sword-only` | Only the Sword | Solo la espada | Story completed using only the Dragon Sword. **Secret** | 100 | Hook | 2 |
-| 24 | `deaths-100` | Always Back Up | Siempre en pie | Die 100 times (progress) | 5 | RAM-R | 1b |
+| 24 | `deaths-100` | Always Back Up | Siempre en pie | 100 game overs (progress) | 5 | RAM | 1b |
 | 25 | `port-first-session` | First Session | Primera sesión | The first game session in the native port | 5 | Port | 1 |
 | 26 | `port-100-hours` | A Hundred Hours | Cien horas | 100 hours played in the port (progress) | 25 | Port | 1 |
 | 27 | `port-screenshot` | Photographer | Fotógrafo | A screenshot saved with F12 | 5 | Port | 1 |
@@ -75,8 +75,25 @@ Other releases); a detector whose variables are missing stays off and the log sa
 - **Port:** #25 when the game reaches gameplay for the first time (the first chapter change); #26 adds the session's
   play time (the time the window is open and the game runs) to a counter; #27 when F12 writes a shot.
 
-Phase 1b adds the RAM-R rows once their variables are found (missions in the profile block, inventory in the save
-block, a death counter); phase 2 adds hooks for the rest.
+## Detectors (phase 1b, RAM)
+
+Found without the owner's help, from the code and from dumps of the owner's saves ([[game-state]] § Mission mode,
+§ Inventory and Golden Scarabs).
+
+- **Mission cleared:** in mission mode (mode 3) the results screen sets the chapter variable to 0x81 (0xFE in some
+  states). The mission (the saved chapter + 1) and the difficulty are read then. Mission 50 is "Eternal Legend" (#10,
+  and #11 on Master Ninja). A clear on Master Ninja sets the mission's bit, by its place in the game's menu, in a
+  46-bit mask kept as a hidden progress entry (`missions-mn-mask`); #14 shows the bit count and unlocks at 46.
+- **Game over:** the end-of-stage state (the chapter − 0x240) turns 0x80 in story or mission mode; each one counts
+  for #24. Revived by an item, Ryu does not reach it. `VERIFIED` live on the modified build.
+- **Golden Scarabs:** the total handed to Muramasa (the saved chapter − 0x1E3; the game caps it at 50) rises in story
+  mode while the run's play time moves on steadily (a load copies the whole save block and makes the time jump; the
+  two seconds after a jump are ignored). #19 shows the total and unlocks at 50. Checked: loading a save with 24
+  handed in counts nothing.
+- **Still open:** #12 needs the owner to say which mission "the stadium" is (the detector then only compares the
+  mission index); #20 and #21 need the weapon list and levels settled (the inventory and the item ids are known).
+
+Phase 2 adds hooks for the rest.
 
 ## Toast
 

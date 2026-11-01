@@ -19,4 +19,15 @@ int ach_rank(uint32_t chapter_karma, uint32_t max, uint32_t min, int difficulty)
 /* Chapters set in a 16-bit mask (bit n = chapter n + 1). */
 int ach_seal_count(uint32_t mask);
 
+/* Mission mode: the 46 missions of the mission menu, nine pages of five and "Eternal Legend" on
+ * its own (the menu table, PAL 0x00469668, is the same in every release). */
+#define ACH_MISSIONS 46
+#define ACH_MISSION_ETERNAL_LEGEND 50
+
+/* The mission's place in the menu (0 to 45), or -1 for an index the menu does not list. */
+int ach_mission_slot(int mission);
+
+/* Bits set in a 64-bit mask. */
+int ach_bit_count(uint64_t mask);
+
 #endif

@@ -42,7 +42,51 @@ Ghidra (`H5Refs.java`, `H5Decomp.java` in `NGB_DATA\ghidra\scripts`) and checked
   - `FUN_001dba10` (**mission cleared**, mode 3): best score `[0x00E12CD8 + mission*4]`, flags `[0x00E12BAC +
     mission] |= 2` (cleared), highest difficulty cleared `[0x00E12C74 + mission]`, and the number of cleared missions
     unlocks more (table `0x00448B6D`).
-  All `INFERRED` from the decompilation; not yet watched live.
+  All `INFERRED` from the decompilation; not yet watched live. The flag bit 1 is "unlocked"; a dump of a profile with
+  the first ten missions open has exactly those set (`VERIFIED`).
+- `[0x00E12C10 + mission]` is the difficulty a mission starts on (the menu opens a difficulty choice when it is not
+  Normal; a clear on it raises it by one, up to 4).
+
+## Mission mode
+
+- **The menu** (`FUN_001769e0`, `FUN_001779a0`) shows nine pages of five missions and a tenth page with one,
+  "Eternal Legend". The table of mission indices, page by page, is `0x00469668` (PAL; `0x004474B8` in NTSC-U and
+  the modified build, same content, `VERIFIED`): 46 missions, indices from 3 to 0x44, and **"Eternal Legend" is
+  mission 50 (0x32)**. The page names are in the XBE (`0x00454E20` and on: "Path of the Master Ninja" …
+  "Giants of the Underworld", then "Eternal Legend"). Two routines compare the mission with 0x32 on their own
+  (`FUN_00168350`, `FUN_001dc460`). `VERIFIED` (decompilation and the tables).
+- **Unlocks:** the number of missions cleared opens more of that table in tiers (`0x00448B6C`: 0 cleared, 10 open; 5,
+  15; … 35, 45; 40, all), so "Eternal Legend" opens after 40 clears.
+- **Starting one** (`FUN_001774a0`): mode = 3, mission = the menu's choice, difficulty = `[0x00E12C10 + mission]`
+  (1 to 4).
+- **The end of a stage** is `0x00E12E94` (u8; the chapter − 0x240 in every release): below 0x80 while playing, **0x80
+  game over** (`FUN_002e3f60` when the health is 0 and nothing revives Ryu; `FUN_002ff940` for a failed mission), **0x81
+  cleared**. `FUN_002e16a0` then shows the continue screen (0x80) or the results (0x81 → `FUN_002e3810`).
+  `VERIFIED` for 0x80: Ryu left idle in "Giants of the Underworld" on the modified build died, the port logged the
+  game over and the screen showed GAME OVER with the continue choice.
+- **The results of a mission** (`FUN_002e3860`) set the chapter variable to **0x81** (0xFE in some states), as the
+  story's ending does (`FUN_002e3a70`), and return; `FUN_001dba10` then records the clear in the profile. A mission
+  clear is the chapter turning 0x81 or 0xFE while the mode is 3; the mission and the difficulty are read at that moment.
+  `INFERRED`.
+
+## Inventory and Golden Scarabs
+
+- **Inventory:** `0x005B43F0`, 128 slots of `{u16 item, u8 count, u8}` (to `0x005B45F0`); an empty slot is item
+  0xFFFF. `FUN_001541f0` finds an item's slot, `FUN_00154220` returns its count, `FUN_00154260` adds or removes, capped
+  by the item's data (`[0x00E12EE4]` table, byte +0x24). `VERIFIED`: the four saves read agree with the game's own
+  menus (chapter 5: Plasma Saber, Nunchaku, Wooden Sword, Lunar; Shuriken, Windmill Shuriken, Smoke Bomb, Bow).
+- **Item ids** are the ids of the item names in the game's text file `messtr.mes` (records `{0x000B0000 | id,
+  English name, Japanese name}`): Golden Scarab 0x59, Dragon Sword 0x01, Lunar 0x12B / 0x133 / 0x134 (one id per
+  level), Kitetsu 0xCC / 0x182 / 0x183, Plasma Saber 0xCE, its Mk. II 0xF7, Arrows 0x8E. Some weapons change item id
+  as they level up, others may keep it; **what "every weapon at its top level" means is not settled yet**.
+- **Equipped:** u16 melee weapon at `0x005B47DA`, projectile at `0x005B47DC` (0x133 Lunar, 0x30 Windmill Shuriken in
+  the chapter 5 save). `INFERRED`.
+- **Golden Scarabs handed to Muramasa:** `0x005B4794`, u32, the karma + 0x14. `FUN_00187400` adds the scarabs carried
+  (item 0x59) and caps the total at 50, then empties their slot; `FUN_00187480` picks the reward from a table by that
+  total. `VERIFIED` (decompilation; 0, 0, 24, 44 in the saves of chapters 1, 5, 10 and 16; the same code at
+  `0x00186871` in NTSC-U reads `0x00589574`, the same distance).
+- **Totals of the run** next to it (`FUN_00164e70` sums them as a check): `0x005B4614` grows 110, 856, 2,339, 4,843
+  over the same saves (a kill count, `INFERRED`); `0x005B4790` is the essence (99,999 at most).
 
 ## Karma and the end-of-chapter rank
 
@@ -50,7 +94,7 @@ Ghidra (`H5Refs.java`, `H5Decomp.java` in `NGB_DATA\ghidra\scripts`) and checked
 | --- | --- | --- | --- |
 | `0x005B4780` | u32 | Karma of the whole run so far. | `VERIFIED`: 405,327 and 415,007 at the end of chapter 1 in two runs |
 | `0x005B4784` | u32 | Karma at the last chapter end; `FUN_002ed790` updates it. | `VERIFIED` (copied when the rank shows) |
-| `0x005B4788` | u32 | Play time (the save name formats it, `FUN_001dab20` → `FUN_0022cc20`). | `INFERRED` |
+| `0x005B4788` | u32 | Play time in game frames, 60 a second (the save name formats it, `FUN_001dab20` → `FUN_0022cc20`). | `VERIFIED`: 1,688,005 in a save named "7:47" |
 | `0x00E12EC4` | ptr | A game data file in RAM that holds the rank thresholds. | `VERIFIED` |
 
 All of them are 0 after `FUN_002e3580` (new game). The first three are in the save block, so their offsets from the
@@ -82,6 +126,8 @@ the difference and the rank follows from the table: RAM only, no hook.
 
 ## Not yet read
 
+- Weapon levels and the list of weapons that counts for the collection achievements (see Inventory).
+
 - The kill count, essence and ninpo of the results screen ("Clear Time", "Kill", "Essence", "Ninpo", "Karma"; drawn
   as pictures).
 
@@ -105,10 +151,17 @@ finds these variables at start in the game's code (`port/src/ach/ach.c`, `find_v
 | Karma of the run | `0x005B4780` | `0x00589560` |
 | Karma at the last chapter end | `0x005B4784` | `0x00589564` |
 | Rank data pointer | `0x00E12EC4` | `0x00DB98C4` |
+| Mission | `0x005B4978` | `0x00589758` |
+| Mission flags (profile) | `0x00E12BAC` | `0x00DB95AC` |
+| End of stage | `0x00E12E94` | `0x00DB9894` |
+| Golden Scarabs handed in | `0x005B4794` | `0x00589574` |
 
 The last three come from fixed distances (saved chapter − 0x1F7 and − 0x1F3; chapter − 0x210), `VERIFIED` on the
 owner's dumps of the modified build; the port checks the rank table it reaches (17 pairs with max > min) before using
-it. Code: `port/src/ach/sig.c`, tested with synthetic code in `port/tests/ach_test.c`.
+it. Code: `port/src/ach/sig.c`, tested with synthetic code in `port/tests/ach_test.c`. The mission is the saved
+chapter + 1, the play time − 0x1EF, the scarab total − 0x1E3 (`VERIFIED` by finding `FUN_001dba10` and `FUN_00187400`
+in the three XBEs); the end of stage is the chapter − 0x240 and is only used when the code stores 0x80 into it at least
+four times (six in each of the three XBEs).
 
 `VERIFIED`: the search gives these on the three XBEs, and a run of the modified build loads a save and starts
 chapter 1 with the chapter read as 0 and the difficulty as 1.

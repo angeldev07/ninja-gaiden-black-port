@@ -19,6 +19,10 @@ typedef struct ach_vars {
     uint32_t karma;      /* u32, karma of the run so far (PAL 0x005B4780) */
     uint32_t karma_last; /* u32, the karma at the last chapter end (PAL 0x005B4784) */
     uint32_t rank_data;  /* ptr to the game data file with the rank table (PAL 0x00E12EC4) */
+    uint32_t play_time;  /* u32, game frames played in the run, 60 a second (PAL 0x005B4788) */
+    uint32_t scarabs;    /* u32, Golden Scarabs handed to Muramasa, at most 50 (PAL 0x005B4794) */
+    uint32_t mission;    /* u8, the mission being played in mission mode (PAL 0x005B4978) */
+    uint32_t stage_end;  /* u8: 0x80 game over, 0x81 cleared (PAL 0x00E12E94); 0 if not found */
 } ach_vars;
 
 /* 0 and every field set, or -1 if the code is not there (another game, or a build that

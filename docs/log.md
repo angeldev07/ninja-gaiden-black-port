@@ -1069,3 +1069,20 @@ Details in [[gpu-nv2a]].
 - Checked: `ach_test` (catalog, store, rank edges, signatures), the Python suite, both toasts in the window back
   buffer, the page in both languages with `--shot`, and a chapter 2 load that unlocks nothing.
 - Needs the owner: a clear of the last chapter for the story detector; phase 1b dumps (missions, inventory, deaths).
+
+## [2026-10-31] ingest | Achievements, phase 1b: missions, game over and Golden Scarabs without the owner's dumps
+- Mission mode read from the code: the menu table (46 missions, nine pages of five plus "Eternal Legend", which is
+  mission 50), the profile's per-mission flags, best difficulty and start difficulty, and the unlock tiers. Details in
+  [[game-state]] § Mission mode.
+- The end-of-stage state `0x00E12E94` (the chapter − 0x240): 0x80 on a game over, 0x81 on a clear. The mission
+  results set the chapter to 0x81 like the story's ending does, so a mission clear needs no profile reading.
+- Five data folders with one of the owner's PAL saves each (`ngb-data-scan-c01` … `-cend`, outside the repo) let the
+  load menu land on that save; RAM dumps of four of them gave the inventory (`0x005B43F0`, `{u16 item, u8 count}`),
+  the item ids (the game's `messtr.mes` records), the play time in frames and the scarab total handed to Muramasa
+  (`0x005B4794`, confirmed in `FUN_00187400`). Golden Scarab is item 0x59.
+- Each new variable sits at a fixed distance from the ones the port already finds, checked in the PAL, NTSC-U and
+  modified XBEs.
+- Checked live: Ryu left idle in a mission on the modified build died and the port counted the game over; loading a
+  save with 24 scarabs handed in counted nothing. The mission clear itself is still `INFERRED`.
+- Open: which mission the owner means by "the stadium", and the weapon list and levels for the collection
+  achievements.

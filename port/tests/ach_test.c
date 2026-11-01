@@ -94,6 +94,10 @@ static void test_rules(void) {
     CHECK(ach_rank(405327, 260000, 120000, 0) == 2);
     CHECK(ach_rank(0, 260000, 120000, 0) == 4);
     CHECK(ach_seal_count(0) == 0 && ach_seal_count(0xFFFFu) == 16 && ach_seal_count(0x10005u) == 2);
+    CHECK(ach_bit_count(0) == 0 && ach_bit_count(~0ull) == 64);
+    /* The mission menu: its first entry, "Eternal Legend" last, and an index it does not list. */
+    CHECK(ach_mission_slot(0x25) == 0 && ach_mission_slot(ACH_MISSION_ETERNAL_LEGEND) == ACH_MISSIONS - 1);
+    CHECK(ach_mission_slot(0x41) == ACH_MISSIONS - 2 && ach_mission_slot(0) == -1 && ach_mission_slot(0x62) == -1);
 }
 
 /* A synthetic XBE with the two routines the search reads, at the PAL addresses. */
@@ -139,6 +143,14 @@ static int sig_case(int variant, ach_vars *v) {
     memcpy(t + 0x40B, "\x66\x8B\x15\x7E\x49\x5B\x00", 7);
     memcpy(t + 0x412, "\x88\x0D", 2);
     put32(t + 0x414, chapter);
+    if (variant == 3) { /* 3: the stage end routines, four stores of 0x80 (game over) */
+        int i;
+        for (i = 0; i < 4; i++) {
+            memcpy(t + 0x600 + i * 0x10, "\xC6\x05", 2);
+            put32(t + 0x602 + i * 0x10, chapter - 0x240);
+            t[0x606 + i * 0x10] = 0x80;
+        }
+    }
     secs[0].va = 0x00011000u;
     xbe.data = data;
     xbe.size = sizeof data;
@@ -153,7 +165,10 @@ static void test_sig(void) {
     CHECK(sig_case(0, &v) == 0);
     CHECK(v.chapter == 0x00E130D4u && v.saved == 0x005B4977u && v.mode == 0x005B497Au);
     CHECK(v.difficulty == 0x005B4975u && v.karma == 0x005B4780u && v.karma_last == 0x005B4784u);
-    CHECK(v.rank_data == 0x00E12EC4u);
+    CHECK(v.rank_data == 0x00E12EC4u && v.mission == 0x005B4978u);
+    CHECK(v.play_time == 0x005B4788u && v.scarabs == 0x005B4794u);
+    CHECK(v.stage_end == 0); /* no stores of 0x80 into it */
+    CHECK(sig_case(3, &v) == 0 && v.stage_end == 0x00E12E94u);
     CHECK(sig_case(1, &v) == -1 && v.chapter == 0);
     CHECK(sig_case(2, &v) == -1);
 }

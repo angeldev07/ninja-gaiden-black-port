@@ -8,7 +8,9 @@
  * The save block has the same layout in every release (saves of one load in another), so the
  * difficulty, the mode and the karma sit at fixed distances from the saved chapter; the mode's
  * distance cross-checks the first two finds. The rank data pointer keeps its distance to the
- * chapter in the builds seen (PAL and NTSC-U); the caller checks what it points to.
+ * chapter in the builds seen (PAL and NTSC-U); the caller checks what it points to. So does the
+ * stage end state, which is only taken when the code stores 0x80 (game over) into it, as the PAL
+ * routines that end a stage do (FUN_002e3f60, FUN_002ff940).
  */
 #include "sig.h"
 
@@ -23,6 +25,17 @@ static long find(const uint8_t *hay, size_t from, size_t to, const uint8_t *pat,
         if (hay[i] == pat[0] && !memcmp(hay + i, pat, n))
             return (long)i;
     return -1;
+}
+
+/* Stores of 0x80 into `va` (mov byte [imm32], 0x80) in the code. */
+static int stores_of_0x80(const uint8_t *t, uint32_t tsize, uint32_t va) {
+    uint8_t pat[7] = {0xC6, 0x05, 0, 0, 0, 0, 0x80};
+    long at;
+    int n = 0;
+    memcpy(pat + 2, &va, 4);
+    for (at = find(t, 0, tsize, pat, 7); at >= 0; at = find(t, (size_t)at + 1, tsize, pat, 7))
+        n++;
+    return n;
 }
 
 int ach_find_vars(const xbe_t *xbe, ach_vars *out) {
@@ -74,5 +87,10 @@ int ach_find_vars(const xbe_t *xbe, ach_vars *out) {
     out->karma = out->saved - 0x1F7;
     out->karma_last = out->saved - 0x1F3;
     out->rank_data = out->chapter - 0x210;
+    out->play_time = out->saved - 0x1EF;
+    out->scarabs = out->saved - 0x1E3;
+    out->mission = out->saved + 1;
+    if (stores_of_0x80(t, tsize, out->chapter - 0x240) >= 4)
+        out->stage_end = out->chapter - 0x240;
     return 0;
 }

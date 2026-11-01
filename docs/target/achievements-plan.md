@@ -46,5 +46,6 @@ status: draft
 ## Needs the owner (after the PR)
 
 - Clear the last chapter once, to confirm the story detector (`INFERRED`).
-- Phase 1b: dumps on the mission results and the inventory screens, to find the mission, scarab, weapon and death
-  variables.
+- Phase 1b: done without dumps from the owner (missions, game over, Golden Scarabs; see the design's "Detectors
+  (phase 1b)"). Still needed from the owner: which mission is "the stadium" (#12), and which weapons and levels count
+  for #20 and #21.
