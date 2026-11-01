@@ -23,8 +23,10 @@ static int g_fail;
 
 static void test_catalog(void) {
     int i, j, l;
-    CHECK(ach_catalog_count == 27);
-    CHECK(ach_total_points() == 1680);
+    CHECK(ach_catalog_count == 20 && ach_parked_count == 7);
+    CHECK(ach_total_points() == 1250); /* the parked ones do not count */
+    for (i = 0; i < ach_parked_count; i++)
+        CHECK(ach_find(ach_parked[i].id) == NULL);
     for (i = 0; i < ach_catalog_count; i++) {
         const ach_def *a = &ach_catalog[i];
         CHECK(strlen(a->id) < 32);
@@ -123,6 +125,8 @@ static void test_rules(void) {
         b.weapon = 0xFFFF;
         CHECK(ach_run_marks(&a, &b) == 0);
         CHECK(ach_is_healing_item(0xBE) && !ach_is_healing_item(0x59));
+        CHECK(ach_is_fire_ninpo(0x9A) && ach_is_fire_ninpo(0x0F) && ach_is_fire_ninpo(0x9C));
+        CHECK(!ach_is_fire_ninpo(0x9E) && !ach_is_fire_ninpo(0xAC) && !ach_is_fire_ninpo(0xFFFF));
     }
 }
 
@@ -169,8 +173,11 @@ static int sig_case(int variant, ach_vars *v) {
     memcpy(t + 0x40B, "\x66\x8B\x15\x7E\x49\x5B\x00", 7);
     memcpy(t + 0x412, "\x88\x0D", 2);
     put32(t + 0x414, chapter);
-    if (variant == 3) { /* 3: the stage end routines, four stores of 0x80 (game over) */
+    if (variant == 3) { /* 3: the stage end routines (four stores of 0x80) and the scarab routine */
+        static const unsigned char give[] = {0x8B, 0x0D, 0x94, 0x47, 0x5B, 0x00, 0x03, 0xC8, 0x83, 0xF9, 0x32, 0xB2,
+                                             0x01, 0x89, 0x0D, 0x94, 0x47, 0x5B, 0x00, 0x88, 0x15, 0xBB, 0xCC, 0x81, 0x00};
         int i;
+        memcpy(t + 0x700, give, sizeof give);
         for (i = 0; i < 4; i++) {
             memcpy(t + 0x600 + i * 0x10, "\xC6\x05", 2);
             put32(t + 0x602 + i * 0x10, chapter - 0x240);
@@ -192,11 +199,13 @@ static void test_sig(void) {
     CHECK(v.chapter == 0x00E130D4u && v.saved == 0x005B4977u && v.mode == 0x005B497Au);
     CHECK(v.difficulty == 0x005B4975u && v.karma == 0x005B4780u && v.karma_last == 0x005B4784u);
     CHECK(v.rank_data == 0x00E12EC4u && v.mission == 0x005B4978u);
-    CHECK(v.play_time == 0x005B4788u && v.scarabs == 0x005B4794u && v.kills == 0x005B4614u);
-    CHECK(v.weapon == 0x005B47DAu && v.health == 0x005B5784u && v.ninpo == 0x005B5754u && v.ki == 0x005B578Cu);
+    CHECK(v.play_time == 0x005B4788u && v.scarabs == 0x005B4794u && v.hits == 0x005B4614u);
+    CHECK(v.kills == 0x005B4610u && v.weapon == 0x005B5790u && v.ninpo == 0x005B5794u);
+    CHECK(v.health == 0x005B5784u && v.segments == 0x005B5754u && v.ki == 0x005B578Cu);
     CHECK(v.player == 0x00E1349Cu && v.inventory == 0x005B43F0u);
     CHECK(v.stage_end == 0); /* no stores of 0x80 into it */
-    CHECK(sig_case(3, &v) == 0 && v.stage_end == 0x00E12E94u);
+    CHECK(sig_case(3, &v) == 0 && v.stage_end == 0x00E12E94u && v.checks == 0x0081CCB4u);
+    CHECK(sig_case(0, &v) == 0 && v.checks == 0);
     CHECK(sig_case(1, &v) == -1 && v.chapter == 0);
     CHECK(sig_case(2, &v) == -1);
 }

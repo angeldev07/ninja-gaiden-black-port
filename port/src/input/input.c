@@ -231,6 +231,25 @@ int input_script_parse(const char *text, input_script_t *out, char *err, size_t 
     return 0;
 }
 
+int input_script_append(input_script_t *live, const input_script_t *add, uint32_t now_ms, uint32_t now_polls) {
+    int i, kept = 0;
+    for (i = 0; i < live->count; i++) {
+        const input_event_t *ev = &live->events[i];
+        uint32_t now = ev->polls ? now_polls : now_ms;
+        if (now < ev->at_ms || now - ev->at_ms < ev->hold_ms)
+            live->events[kept++] = *ev;
+    }
+    live->count = kept;
+    if (live->count + add->count > INPUT_SCRIPT_MAX)
+        return -1;
+    for (i = 0; i < add->count; i++) {
+        input_event_t ev = add->events[i];
+        ev.at_ms += ev.polls ? now_polls : now_ms;
+        live->events[live->count++] = ev;
+    }
+    return 0;
+}
+
 void input_script_apply(const input_script_t *script, uint32_t now_ms, uint32_t now_polls,
                         xbox_gamepad_t *out) {
     int i, k;

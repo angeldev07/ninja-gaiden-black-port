@@ -57,6 +57,8 @@ typedef struct ngb_options {
     int no_host_input;        /* 1: neither PC gamepad nor keyboard, only the script */
     int ach_demo;             /* --ach-demo: both achievement toasts 5 s after start (ach/ach.c) */
     int ach_trace;            /* --ach-trace: log the player's moves, kills and health (ach/ach.c) */
+    int ach_god;              /* --ach-god: player 1's health kept at its max (ach/ach.c; for measurements) */
+    int remote;               /* --remote: commands from a local pipe (remote.c) */
     int ach_toast_off;        /* --no-ach-toast: achievements record without the toast */
     int lang;                 /* --lang: 0 English, 1 Spanish (achievement toasts) */
     const char *watch;        /* --watch: game addresses to watch (watch.c) */

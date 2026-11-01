@@ -77,6 +77,8 @@ enum {
 static CRITICAL_SECTION g_lock;
 static int g_ready, g_host_input;
 static input_script_t g_script;
+static input_script_t g_live; /* presses sent to the running game (ngb_input_inject) */
+static SRWLOCK g_live_lock = SRWLOCK_INIT;
 static DWORD g_t0;
 static volatile LONG g_polls; /* reads of port 0: the clock for scripts in "p" */
 
@@ -133,7 +135,38 @@ static void read_gamepad(xbox_gamepad_t *out) {
             xpad_merge(out, &part);
         }
     }
-    input_script_apply(&g_script, GetTickCount() - g_t0, (uint32_t)InterlockedIncrement(&g_polls), out);
+    {
+        uint32_t ms = GetTickCount() - g_t0, polls = (uint32_t)InterlockedIncrement(&g_polls);
+        input_script_apply(&g_script, ms, polls, out);
+        AcquireSRWLockShared(&g_live_lock);
+        input_script_apply(&g_live, ms, polls, out);
+        ReleaseSRWLockShared(&g_live_lock);
+    }
+}
+
+void ngb_input_last(xbox_gamepad_t *out) {
+    if (!g_ready) {
+        memset(out, 0, sizeof *out);
+        return;
+    }
+    EnterCriticalSection(&g_lock);
+    *out = g_last;
+    LeaveCriticalSection(&g_lock);
+}
+
+int ngb_input_inject(const char *script, char *err, size_t errlen) {
+    static input_script_t add;
+    int r;
+    if (!g_ready) {
+        snprintf(err, errlen, "the gamepad is not hooked yet");
+        return -1;
+    }
+    AcquireSRWLockExclusive(&g_live_lock);
+    if ((r = input_script_parse(script, &add, err, errlen)) == 0 &&
+        (r = input_script_append(&g_live, &add, GetTickCount() - g_t0, (uint32_t)g_polls)) != 0)
+        snprintf(err, errlen, "too many pending presses (at most %d)", INPUT_SCRIPT_MAX);
+    ReleaseSRWLockExclusive(&g_live_lock);
+    return r;
 }
 
 /* ---------------------------------------------------------------- HLE functions ---- */

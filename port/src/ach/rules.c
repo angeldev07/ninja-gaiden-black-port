@@ -50,6 +50,8 @@ int ach_is_healing_item(unsigned item) {
     return 0;
 }
 
+int ach_is_fire_ninpo(unsigned item) { return item == 0x9A || item == 0x0F || item == 0x9B || item == 0x9C; }
+
 unsigned ach_run_marks(const ach_body *a, const ach_body *b) {
     unsigned m = 0;
     if (!a->health_max || !b->health_max) /* a load or a menu between the two reads */

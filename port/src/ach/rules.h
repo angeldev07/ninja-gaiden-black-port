@@ -52,5 +52,8 @@ unsigned ach_run_marks(const ach_body *a, const ach_body *b);
 int ach_is_dragon_sword(unsigned item);
 /* 1 for the items that restore health or ki (elixirs, fragrances, Ayane's food, the talisman). */
 int ach_is_healing_item(unsigned item);
+/* 1 for the fire ninpo: The Art of the Fire Wheels (0x9A) and The Art of the Inferno (0x0F, 0x9B,
+ * 0x9C, one id per level); not the Ice Storm (0x9E-0xA0) nor the Inazuma (0xAC-0xAE). */
+int ach_is_fire_ninpo(unsigned item);
 
 #endif

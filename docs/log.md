@@ -1098,3 +1098,48 @@ Details in [[gpu-nv2a]].
   treated any change of mode as a load and lost the run between the intro and chapter 1; now only a jump of the play
   time does.
 - Needs the owner: a short session with `--ach-trace` to name the moves (Izuna Drop, Flying Swallow, fire ninpo).
+
+## [2026-10-31] milestone | Remote session: measurements in the owner's running game
+- No save statue has enemies near it, so the owner proposed infinite health plus a session they leave in front of
+  enemies for the agent to drive. `--remote` opens `\\.\pipe\ngb-loader` (input from now, trace, god, shot, status);
+  `ngb_tools.remote` is the client; the launcher passes `[advanced] extra_args` from `ngb.ini`. See [[remote-session]].
+- Found on the way: the game's anti-tamper sums (24 groups, `FUN_00164e70`/`FUN_00164db0`); writing the health alone
+  sent the game back to the main menu. God mode now sets the groups' flags first, as the game's own revive does.
+- Also: the player object's byte +4 is an action state (0 idle, 6/8/9/A running, 0x55 jump, 0x5B air Y, 0x0B air X,
+  0x0E landing, 0xB9 Y held), not the attack; ground attacks leave it at 0. Naming the Izuna Drop and the Flying
+  Swallow needs enemies: the next step, in the owner's session.
+
+## [2026-10-31] ingest | First remote measurement in the owner's session (chapter 15, Hard, True Dragon Sword)
+- The owner did Flying Swallows (X+A then Y), Izuna Drops (X Y X X Y) and ninpo (Y+B) in front of two respawning
+  fiends, with god mode and the trace on; the per-frame file holds their pad and player 1's object.
+- **Ninpo is clear:** every Y+B drops the ki by 200 (1000, 800, 600, 400). A ki drop is the cast.
+- **Correction:** `0x005B4614` goes up with every hit that lands (each X or Y), not with each enemy defeated: it is a
+  hit count. The kill count the HUD shows ("Kill 4") is elsewhere and still to be found.
+- **Not settled:** neither the action byte (+4) nor the other small fields (+0x14 changes on every attack) take one
+  value per Flying Swallow across 11 tries. The move has to be found another way (the game's move tables or the code
+  that starts it).
+- The melee weapon reads 0x00CA with the True Dragon Sword in hand on this build, where `messtr.mes` (PAL) gives 0xC9;
+  the item ids of this build need checking.
+
+## [2026-10-31] ingest | Kills, the equipment in use and fire ninpo, checked in the owner's session
+- `0x005B4610` is the chapter's kill count (an actor's health reaching 0) and `0x005B4614` counts hits; the weapon
+  and ninpo in use are `0x005B5790` and `0x005B5794` (the save block's copies go stale between saves). Details in
+  [[game-state]] § The player.
+- In the owner's session (modified build, chapter 15, Hard), the status read the True Dragon Sword (0x00C9) and The
+  Art of the Inferno (0x009C). 9 kills with the sword and 4 Inferno casts gave "Disciple of the Dragon" 9 and "Rain of
+  Fire" (now 100 fire ninpo casts, the owner's call) 4.
+- The Izuna Drop and Flying Swallow counters stay out until their moves are found in the game's move tables.
+
+## [2026-10-31] ingest | Story challenges: first look, left for later
+- The owner explained the story "challenges": a karma HUD (Karma, Combo, Kill, Time) shows up in set places, and
+  enemies come in waves until a total (the stadium, from chapter 12 to 15: 120 Vigoorian Berserkers on Master
+  Ninja). Clearing one gives a reward. "The Arena" (#12) and "Untouchable" (#13) are this challenge, not a mission.
+- Image dumps through the remote session (`dump`), taken before the challenge, at Kill 0, 1 and 2 (modified build,
+  chapter 12, Hard):
+  - only the chapter kill count (`0x005893F0`) and a byte in a pool of dynamic objects (`0x00810C69`) followed
+    0, 0, 1, 2;
+  - no code refers to that pool's addresses directly;
+  - entering the area changes too much memory to single out an "active" flag or the target.
+- Finding the challenge state needs a clear (the completion and reward) or the code that draws the karma HUD. The
+  owner chose only deterministic detectors for now, so #12 and #13 stay out with #15, #18 and #22. The dumps were
+  deleted.

@@ -319,6 +319,7 @@ static void load_settings(void) {
     g_set.update_day = ini_int(L"update", L"last_day", 0);
     g_set.game_art = ini_int(L"launcher", L"game_art", 1) != 0;
     g_set.ach_toast = ini_int(L"achievements", L"toast", 1) != 0;
+    ini_text(L"advanced", L"extra_args", L"", g_set.extra_args, 256); /* set by hand; never written */
     for (i = 0; i < (int)(sizeof k_logcap_vals / sizeof k_logcap_vals[0]); i++)
         ok |= k_logcap_vals[i] == g_set.log_cap;
     if (!ok)
@@ -449,6 +450,10 @@ void build_cmdline(wchar_t *out, size_t n) {
         wcat(out, n, L" --lang es");
     if (!g_set.ach_toast)
         wcat(out, n, L" --no-ach-toast");
+    if (g_set.extra_args[0]) {
+        wcat(out, n, L" ");
+        wcat(out, n, g_set.extra_args);
+    }
 }
 
 
