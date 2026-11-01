@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "../ngb.h"
+#include "../gfx/present.h"
 #include "../gfx/toast.h"
 #include "catalog.h"
 #include "rules.h"
@@ -44,7 +45,8 @@ static struct {
     int move, lines;
     uint32_t kills, health, ki;
     uint16_t ninpo[8];
-} g_trace = {-1, 0, 0, 0, 0, {0}};
+    uint8_t seen[256]; /* move ids already captured */
+} g_trace = {-1, 0, 0, 0, 0, {0}, {0}};
 /* The story run followed for the challenge achievements (rules.h, ACH_RUN_*). */
 static struct {
     int on, difficulty, resync, have_body;
@@ -348,8 +350,15 @@ static void trace_tick(void) {
             g_trace.ninpo[i] = peek16(g_va.ninpo + i * 2);
             ninpo_changed = 1;
         }
-    if (move != g_trace.move)
-        ngb_log("ach-trace: move 0x%02X (weapon 0x%04X)", move, peek16(g_va.weapon));
+    if (move != g_trace.move) {
+        int first = move >= 0 && !g_trace.seen[move];
+        ngb_log("ach-trace: move 0x%02X (weapon 0x%04X, play time %u)%s", move, peek16(g_va.weapon),
+                peek32(g_va.play_time), first ? ", first time: captured" : "");
+        if (first) { /* one picture per move id, to name them */
+            g_trace.seen[move] = 1;
+            gfx_request_shot();
+        }
+    }
     if (kills != g_trace.kills)
         ngb_log("ach-trace: kills %u, move 0x%02X, weapon 0x%04X, combo %u", kills, move, peek16(g_va.weapon),
                 p ? peek16(p + 0x60E) : 0);
