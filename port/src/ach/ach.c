@@ -42,12 +42,13 @@ static int g_ready, g_on, g_demo, g_table_ok = -1;
 static int g_last_chapter = -1;
 static int g_last_mission_chapter = -1, g_last_stage_end = -1;
 static int g_run_seen, g_last_mode = -1;
+static uint32_t g_last_kills, g_last_ki = ~0u;
 static uint32_t g_last_play_time, g_last_scarabs;
 static struct {
     int move;
-    uint32_t kills, health, ki;
+    uint32_t kills, health, ki, hits;
     uint8_t seen[256]; /* state ids already captured */
-} g_trace = {-1, 0, 0, 0, {0}};
+} g_trace = {-1, 0, 0, 0, 0, {0}};
 /* The story run followed for the challenge achievements (rules.h, ACH_RUN_*). */
 static struct {
     int on, difficulty, resync, have_body;
@@ -69,6 +70,7 @@ static int readable(uint32_t va, uint32_t len) {
 
 static uint8_t peek8(uint32_t va) { return *(volatile const uint8_t *)(uintptr_t)va; }
 static uint32_t peek32(uint32_t va) { return *(volatile const uint32_t *)(uintptr_t)va; }
+static uint16_t peek16(uint32_t va) { return *(volatile const uint16_t *)(uintptr_t)va; }
 
 static int lang(void) { return g_ngb_opts.lang == 1 ? ACH_LANG_ES : ACH_LANG_EN; }
 
@@ -156,14 +158,16 @@ static void on_rank(int chapter, int difficulty, uint32_t before, uint32_t after
         unlock("rank-sixteen-seals", difficulty);
 }
 
-/* A progress counter one step up; unlocks at the catalog's goal. */
-static void count_up(const char *id, int difficulty) {
-    uint64_t n = ach_store_progress(&g_store, id) + 1;
+/* A progress counter `step` up; unlocks at the catalog's goal. */
+static void count_by(const char *id, unsigned step, int difficulty) {
+    uint64_t n = ach_store_progress(&g_store, id) + step;
     ach_store_set_progress(&g_store, id, n);
     save();
     if (n >= ach_find(id)->goal)
         unlock(id, difficulty);
 }
+
+static void count_up(const char *id, int difficulty) { count_by(id, 1, difficulty); }
 
 /* The game cleared `mission` (its own index) on `difficulty`. */
 static void on_mission(int mission, int difficulty) {
@@ -241,6 +245,33 @@ static void scarab_tick(uint32_t n, int calm, int mode) {
             unlock("golden-scarabs", peek8(g_va.difficulty));
     }
     g_last_scarabs = n;
+}
+
+/* Enemies defeated, from the chapter's kill count (the game adds one when an actor's health
+ * reaches 0, PAL FUN_00023520), credited to the melee weapon in hand at that moment. The count
+ * goes back to 0 at a chapter end and is copied by a load; neither counts. */
+static void kill_tick(int calm, int mode) {
+    uint32_t k = peek32(g_va.kills);
+    if (calm && (mode == MODE_STORY || mode == MODE_MISSION) && k > g_last_kills && k - g_last_kills < 64) {
+        unsigned weapon = peek16(g_va.weapon), n = k - g_last_kills;
+        if (ach_is_dragon_sword(weapon))
+            count_by("dragon-sword-500", n, peek8(g_va.difficulty));
+    }
+    g_last_kills = k;
+}
+
+/* Ninpo cast: the ki goes down (only ninpo spends it) while its max stays; the kind is the ninpo
+ * in use at that moment. */
+static void ninpo_tick(int calm, int mode) {
+    uint32_t ki = peek32(g_va.ki);
+    if (calm && (mode == MODE_STORY || mode == MODE_MISSION) && g_last_ki != ~0u &&
+        (ki & 0xFFFF) && (ki & 0xFFFF) == (g_last_ki & 0xFFFF) && (ki >> 16) < (g_last_ki >> 16)) {
+        unsigned ninpo = peek16(g_va.ninpo);
+        ngb_log("ach: ninpo 0x%04X cast (ki %u -> %u)", ninpo, g_last_ki >> 16, ki >> 16);
+        if (ach_is_fire_ninpo(ninpo))
+            count_up("fire-ninpo-100", peek8(g_va.difficulty));
+    }
+    g_last_ki = ki;
 }
 
 static void read_body(ach_body *b) {
@@ -335,8 +366,6 @@ static void on_story_end(int difficulty) {
     g_run.on = 0;
 }
 
-static uint16_t peek16(uint32_t va) { return *(volatile const uint16_t *)(uintptr_t)va; }
-
 #define TRACE_OBJECT 0xBC0u
 #define TRACE_FRAMES 20000 /* per file; then the next file */
 #define EVENTS 512
@@ -395,7 +424,9 @@ static void pad_text(const xbox_gamepad_t *pad, char *out, size_t n) {
  * trace_head, then player 1's object, to find its fields offline; a new file every TRACE_FRAMES
  * frames and at every "trace on". */
 typedef struct trace_head {
-    uint32_t poll, play_time, size, defeats, ki; /* ki: u16 max, then u16 ki */
+    uint32_t poll, play_time, size, defeats, ki; /* defeats: the chapter's; ki: u16 max, then u16 ki */
+    uint32_t hits;
+    uint16_t ninpo, weapon; /* item ids in use */
     uint16_t buttons;
     uint8_t analog[XPAD_ANALOG_COUNT];
     int16_t thumb_lx, thumb_ly;
@@ -433,6 +464,9 @@ static void trace_object(uint32_t p, const xbox_gamepad_t *pad) {
     head.poll = ngb_input_polls();
     head.size = TRACE_OBJECT;
     head.defeats = peek32(g_va.kills);
+    head.hits = peek32(g_va.hits);
+    head.ninpo = peek16(g_va.ninpo);
+    head.weapon = peek16(g_va.weapon);
     head.ki = peek32(g_va.ki);
     head.buttons = pad->buttons;
     memcpy(head.analog, pad->analog, sizeof head.analog);
@@ -460,6 +494,10 @@ static void trace_tick(void) {
     }
     kills = peek32(g_va.kills);
     health = peek32(g_va.health);
+    if (peek32(g_va.hits) != g_trace.hits) {
+        trace_event("hit landed (state 0x%02X, combo %u)", move, p ? peek16(p + 0x60E) : 0);
+        g_trace.hits = peek32(g_va.hits);
+    }
     ki = peek32(g_va.ki);
     if (move != g_trace.move) {
         int first = move >= 0 && !g_trace.seen[move];
@@ -470,8 +508,8 @@ static void trace_tick(void) {
         }
     }
     if (kills != g_trace.kills)
-        trace_event("defeats %u (state 0x%02X, weapon 0x%04X, combo %u)", kills, move, peek16(g_va.weapon),
-                    p ? peek16(p + 0x60E) : 0);
+        trace_event("kill: %u in the chapter (state 0x%02X, weapon 0x%04X, ninpo 0x%04X)", kills, move,
+                    peek16(g_va.weapon), peek16(g_va.ninpo));
     if ((health >> 16) < (g_trace.health >> 16) && (health & 0xFFFF) == (g_trace.health & 0xFFFF))
         trace_event("hit: health %u / %u", health >> 16, health & 0xFFFF);
     if (ki != g_trace.ki)
@@ -496,8 +534,8 @@ static void god_tick(void) {
     *(volatile uint8_t *)(uintptr_t)(g_va.checks + CHECK_HEALTH) = 1;
     *(volatile uint8_t *)(uintptr_t)(g_va.checks + CHECK_SEGMENTS) = 1;
     *(volatile uint16_t *)(uintptr_t)(g_va.health + 2) = max;
-    if (peek16(g_va.ninpo - 0x10) == max) /* the segment copy, when it mirrors the health */
-        *(volatile uint16_t *)(uintptr_t)g_va.ninpo = max;
+    if (peek16(g_va.segments - 0x10) == max) /* the segment copy, when it mirrors the health */
+        *(volatile uint16_t *)(uintptr_t)g_va.segments = max;
 }
 
 static void game_tick(DWORD now) {
@@ -513,6 +551,8 @@ static void game_tick(DWORD now) {
     death_tick(mode >= MODE_STORY && mode <= 4);
     mission_tick(mode);
     scarab_tick(scarabs, calm, mode);
+    kill_tick(calm, mode);
+    ninpo_tick(calm, mode);
     run_tick(calm, mode);
     if (mode != MODE_STORY) {
         g_last_chapter = -1;
@@ -650,10 +690,10 @@ void ngb_ach_status(char *out, size_t n) {
     h = peek32(g_va.health);
     k = peek32(g_va.ki);
     snprintf(out, n, "mode %u chapter %u difficulty %u play_time %u health %u/%u ki %u/%u move 0x%02X weapon 0x%04X "
-             "defeats %u trace %d god %d", peek8(g_va.mode), peek8(g_va.chapter), peek8(g_va.difficulty),
-             peek32(g_va.play_time), h >> 16, h & 0xFFFF, k >> 16, k & 0xFFFF,
-             p && readable(p + 4, 1) ? peek8(p + 4) : 0xFFu, peek16(g_va.weapon), peek32(g_va.kills),
-             g_ngb_opts.ach_trace, g_ngb_opts.ach_god);
+             "ninpo 0x%04X kills %u hits %u trace %d god %d", peek8(g_va.mode), peek8(g_va.chapter),
+             peek8(g_va.difficulty), peek32(g_va.play_time), h >> 16, h & 0xFFFF, k >> 16, k & 0xFFFF,
+             p && readable(p + 4, 1) ? peek8(p + 4) : 0xFFu, peek16(g_va.weapon), peek16(g_va.ninpo),
+             peek32(g_va.kills), peek32(g_va.hits), g_ngb_opts.ach_trace, g_ngb_opts.ach_god);
 }
 
 void ngb_ach_set_trace(int on) {

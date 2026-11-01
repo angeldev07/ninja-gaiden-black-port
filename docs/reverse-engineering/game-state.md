@@ -129,15 +129,23 @@ the difference and the rank follows from the table: RAM only, no hook.
 - **Player 1's object:** pointer at `0x00E1349C` (the chapter + 0x3C8; `0x00DB9E9C` in NTSC-U). `FUN_00023520`, its
   per-frame update, reads `+4` (a byte: the current move or state), `+0x60E` (u16, the combo's hit count; the best is
   kept in `0x005B4620`) and `+0xBBE` (set for the frame an enemy is defeated). `VERIFIED` (decompilation).
-- **Enemies defeated:** `0x005B4614` (u32, the saved chapter − 0x363) goes up by one in that routine when `+0xBBE` is
-  set, up to 0xFFFF. The same code is at `0x00023BFB` in the three XBEs. `VERIFIED` (decompilation, the live trace).
+- **Hits:** `0x005B4614` (u32, the saved chapter − 0x363) goes up by one in that routine when `+0xBBE` is set, up to
+  0xFFFF: every attack that lands, not every enemy defeated. `VERIFIED` live: each X or Y that connects adds one.
+- **Kills:** `0x005B4610` (u32, the saved chapter − 0x367) is the chapter's kill count, the "Kill" the game shows.
+  The same routine walks the actors and adds one when an actor's health (`0x005B5784 + actor * 0x210 + 2`) reaches 0
+  (`FUN_002edc10` gives its karma). At the chapter end `FUN_002edf90` adds it to the run's total, `0x005B4628`, and
+  sets it back to 0. `VERIFIED` (decompilation; the same increment in the three XBEs).
 - **Health and ki:** `0x005B5784` u16 max health, `0x005B5786` u16 health, `0x005B578C` u16 max ki, `0x005B578E` u16
   ki (the saved chapter + 0xE0D … + 0xE17; same reference counts in PAL and NTSC-U). `FUN_002e3f60` checks the health
   for a game over and refills it from the max when an item revives Ryu. `VERIFIED` live: a giant's hits take 2400
   down to 0 in a mission, then the game over. `0x005B5744`/`0x005B5754` (u16[8], max and current) hold the health
   again in their first entry; what the others are is not known.
-- **Melee weapon in hand:** `0x005B47DA` is 0x0001 (Dragon Sword) after New Game and 0x0133 (Lunar) in the chapter 5
-  save, `VERIFIED`; it reads 0xFFFF in mission mode.
+- **Equipment in use:** u16 item ids at `0x005B5790` (melee weapon), `0x005B5794` (ninpo), `0x005B5798` and
+  `0x005B579C`. `FUN_002fe200` copies them into the save block (`0x005B47DA`, `47DE`, `47E2`, `47E6`) only when the game
+  saves, so the copy goes stale between saves. `VERIFIED` live: the chapter 16 checkpoint reads 0x00F7 (Plasma Saber Mk.
+  II) and 0x000F (The Art of the Inferno). The first trace read the save copy and showed an old weapon.
+- **Ninpo ids:** The Art of the Fire Wheels 0x9A; of the Inferno 0x0F, 0x9B, 0x9C; of the Ice Storm 0x9E, 0x9F, 0xA0; of
+  the Inazuma 0xAC, 0xAD, 0xAE (one id per level, `messtr.mes`). A cast spends ki: 200 a cast in the owner's session.
 - **Move ids:** `port/src/ach/ach.c` logs them with `--ach-trace`. In a scripted fight the moves seen most were 0x0D,
   0x00, 0x18, 0x46, 0x11, 0x1A; which one is the Izuna Drop or the Flying Swallow is not known yet.
 

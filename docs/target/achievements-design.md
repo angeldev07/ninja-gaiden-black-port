@@ -105,8 +105,13 @@ Found without the owner's help, from the code and from dumps of the owner's save
   port, or from another run, is never followed. A natural story end unlocks #23 with no weapon mark and #9 on Master
   Ninja with none of the other marks. `VERIFIED`: New Game starts following and the trip into chapter 1 adds no mark.
   `INFERRED`: checkpoints (no scripted save yet) and the end.
-- **Counters (#15 to #18):** the defeat counter and the player's move byte are found; the move ids still have to be
-  named. Next step: the owner plays a short session with `--ach-trace` doing each move a few times.
+- **Disciple of the Dragon (#16):** each rise of the chapter's kill count while the melee weapon in use is the Dragon
+  Sword (0x01) or the True Dragon Sword (0xC9). Loads and chapter ends are ignored.
+- **Rain of Fire (#17), changed with the owner:** "cast fire ninpo 100 times" (The Art of the Fire Wheels or of the
+  Inferno), not kills. A cast is the ki going down with its max unchanged; the kind is the ninpo in use at that moment.
+- **Izuna Drop (#15) and Flying Swallow (#18): left out for now** (the owner's call: only deterministic detectors). In
+  the owner's session no field of the player object took one value per Flying Swallow across 11 tries; finding them
+  needs the game's move tables.
 - **Boss without damage (#22)** and **the stadium untouched (#13):** the health is read; they need to know when a
   boss fight starts and ends, and which mission the stadium is.
 

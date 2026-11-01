@@ -23,10 +23,14 @@ typedef struct ach_vars {
     uint32_t scarabs;    /* u32, Golden Scarabs handed to Muramasa, at most 50 (PAL 0x005B4794) */
     uint32_t mission;    /* u8, the mission being played in mission mode (PAL 0x005B4978) */
     uint32_t inventory;  /* 128 x {u16 item, u8 count, u8}, 0xFFFF empty (PAL 0x005B43F0) */
-    uint32_t kills;      /* u32, enemies defeated in the run (PAL 0x005B4614) */
-    uint32_t weapon;     /* u16, the melee weapon in hand, an item id (PAL 0x005B47DA) */
+    uint32_t hits;       /* u32, attacks that landed in the run (PAL 0x005B4614) */
+    uint32_t kills;      /* u32, enemies defeated in the chapter; added to the run's total at its end
+                          * (PAL 0x005B4610, FUN_00023520 and FUN_002edf90) */
+    uint32_t weapon;     /* u16, the melee weapon in hand, an item id (PAL 0x005B5790; the save
+                          * keeps a copy at 0x005B47DA) */
+    uint32_t ninpo;      /* u16, the ninpo in use, an item id (PAL 0x005B5794) */
     uint32_t health;     /* u16 max health, then u16 health, of player 1 (PAL 0x005B5784) */
-    uint32_t ninpo;      /* u16[8] ninpo charges, the max 0x10 bytes lower (PAL 0x005B5754) */
+    uint32_t segments;   /* u16[8], player 1's health segments; their max 0x10 bytes lower (PAL 0x005B5754) */
     uint32_t ki;         /* u16 max ki, then u16 ki (PAL 0x005B578C) */
     uint32_t player;     /* ptr to player 1's object: +4 the action, +0xBBE "defeated one" (PAL 0x00E1349C) */
     uint32_t checks;     /* u8[24], the game's "changed on purpose" flags of its anti-tamper sums

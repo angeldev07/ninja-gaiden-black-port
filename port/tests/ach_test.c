@@ -123,6 +123,8 @@ static void test_rules(void) {
         b.weapon = 0xFFFF;
         CHECK(ach_run_marks(&a, &b) == 0);
         CHECK(ach_is_healing_item(0xBE) && !ach_is_healing_item(0x59));
+        CHECK(ach_is_fire_ninpo(0x9A) && ach_is_fire_ninpo(0x0F) && ach_is_fire_ninpo(0x9C));
+        CHECK(!ach_is_fire_ninpo(0x9E) && !ach_is_fire_ninpo(0xAC) && !ach_is_fire_ninpo(0xFFFF));
     }
 }
 
@@ -195,8 +197,9 @@ static void test_sig(void) {
     CHECK(v.chapter == 0x00E130D4u && v.saved == 0x005B4977u && v.mode == 0x005B497Au);
     CHECK(v.difficulty == 0x005B4975u && v.karma == 0x005B4780u && v.karma_last == 0x005B4784u);
     CHECK(v.rank_data == 0x00E12EC4u && v.mission == 0x005B4978u);
-    CHECK(v.play_time == 0x005B4788u && v.scarabs == 0x005B4794u && v.kills == 0x005B4614u);
-    CHECK(v.weapon == 0x005B47DAu && v.health == 0x005B5784u && v.ninpo == 0x005B5754u && v.ki == 0x005B578Cu);
+    CHECK(v.play_time == 0x005B4788u && v.scarabs == 0x005B4794u && v.hits == 0x005B4614u);
+    CHECK(v.kills == 0x005B4610u && v.weapon == 0x005B5790u && v.ninpo == 0x005B5794u);
+    CHECK(v.health == 0x005B5784u && v.segments == 0x005B5754u && v.ki == 0x005B578Cu);
     CHECK(v.player == 0x00E1349Cu && v.inventory == 0x005B43F0u);
     CHECK(v.stage_end == 0); /* no stores of 0x80 into it */
     CHECK(sig_case(3, &v) == 0 && v.stage_end == 0x00E12E94u && v.checks == 0x0081CCB4u);
