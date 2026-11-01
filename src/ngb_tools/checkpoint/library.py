@@ -39,16 +39,16 @@ _PARTITION: Final = ("runs", "hdd", "partition1")
 _NAME_RE: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 # Title screen to the load menu (START five times), A through the menu to the only save and its
-# confirmation, then Y: the story text shown while the chapter loads waits for a button once it is
-# done (Y, B or RT answer it; X does not). The load takes 9,000 to 13,000 polls (the game reads the
-# pad less often while loading), so Y keeps coming until poll 16000; in gameplay it is only a strong
-# attack. No A once the save is
+# confirmation, then X held for 10 polls: the story text shown while the chapter loads waits for
+# "Proceed" (X) once it is done, and a short tap gets lost. The load takes 9,000 to 13,000 polls
+# (the game reads the pad less often while loading), so X keeps coming until poll 16000; in
+# gameplay it is only a light attack. No A once the save is
 # loaded: Ryu stands at the save statue, where A opens its menu. Gamepad polls (`p`), the units of
 # the loader's --input-script; scripted moves should start at GAMEPLAY_POLL.
 LOAD_SCRIPT: Final = ",".join(
     [f"t={t}p:START" for t in (200, 350, 500, 650, 800)]
     + [f"t={t}p:A" for t in range(1000, 3001, 250)]
-    + [f"t={t}p:Y" for t in range(3500, 16001, 250)]
+    + [f"t={t}p:X@10p" for t in range(3500, 16001, 250)]
 )
 GAMEPLAY_POLL: Final = 16500
 

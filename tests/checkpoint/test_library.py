@@ -95,7 +95,7 @@ class LibraryTestCase(unittest.TestCase):
 
     def test_load_script_reaches_the_save(self) -> None:
         self.assertTrue(library.LOAD_SCRIPT.startswith("t=200p:START,"))
-        self.assertIn("t=3000p:A,t=3500p:Y", library.LOAD_SCRIPT)
+        self.assertIn("t=3000p:A,t=3500p:X@10p", library.LOAD_SCRIPT)
         last = max(int(item[2:].split("p:")[0]) for item in library.LOAD_SCRIPT.split(","))
         self.assertLess(last, library.GAMEPLAY_POLL)
 
