@@ -175,6 +175,17 @@ static void test_script(void) {
                                       (1u << XPAD_BLACK) | (1u << XPAD_WHITE)));
     CHECK(s.events[0].buttons == XPAD_LEFT_THUMB);
 
+    /* The left stick, alone or with a button. */
+    CHECK(input_script_parse("t=1s:LS_UP@2s,t=2s:ls_left+X", &s, err, sizeof err) == 0);
+    CHECK(s.events[0].stick == INPUT_STICK_UP && s.events[1].stick == INPUT_STICK_LEFT);
+    memset(&x, 0, sizeof x);
+    input_script_apply(&s, 2000, 0, &x);
+    CHECK(x.thumb_ly == 32767 && x.thumb_lx == -32768 && x.analog[XPAD_X] == 255);
+    memset(&x, 0, sizeof x);
+    input_script_apply(&s, 3000, 0, &x);
+    CHECK(x.thumb_ly == 0 && x.thumb_lx == 0);
+    CHECK(input_script_parse("t=1s:LS_FORWARD", &s, err, sizeof err) == -1);
+
     /* "p" unit: gamepad reads, with their own default hold; the ms clock does not count. */
     CHECK(input_script_parse("t=100p:START,t=200p:A@3p,t=1s:B", &s, err, sizeof err) == 0);
     CHECK(s.count == 3 && s.events[0].polls && s.events[0].at_ms == 100);

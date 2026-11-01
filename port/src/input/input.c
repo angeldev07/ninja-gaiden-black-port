@@ -112,6 +112,17 @@ static const button_name_t k_buttons[] = {
     {"LT", 0, XPAD_LEFT_TRIGGER},    {"RT", 0, XPAD_RIGHT_TRIGGER},
 };
 
+/* The left stick, pushed all the way (to walk or run in a script). */
+static const struct {
+    const char *name;
+    uint8_t bit;
+} k_stick[] = {
+    {"LS_UP", INPUT_STICK_UP},
+    {"LS_DOWN", INPUT_STICK_DOWN},
+    {"LS_LEFT", INPUT_STICK_LEFT},
+    {"LS_RIGHT", INPUT_STICK_RIGHT},
+};
+
 /* "<n>s" or "<n>ms" (n integer) to milliseconds, or "<n>p" to reads (*polls = 1). -1 if not
  * valid. */
 static long parse_ms(const char *text, size_t len, int *polls) {
@@ -157,11 +168,16 @@ static int parse_buttons(const char *text, size_t len, input_event_t *ev) {
                 break;
             }
         }
+        for (i = 0; !found && i < sizeof k_stick / sizeof k_stick[0]; i++)
+            if (strlen(k_stick[i].name) == stop - start && !_strnicmp(k_stick[i].name, text + start, stop - start)) {
+                ev->stick |= k_stick[i].bit;
+                found = 1;
+            }
         if (!found)
             return -1;
         start = stop + 1;
     }
-    return ev->buttons || ev->analog_mask ? 0 : -1;
+    return ev->buttons || ev->analog_mask || ev->stick ? 0 : -1;
 }
 
 int input_script_parse(const char *text, input_script_t *out, char *err, size_t errlen) {
@@ -227,5 +243,13 @@ void input_script_apply(const input_script_t *script, uint32_t now_ms, uint32_t 
         for (k = 0; k < XPAD_ANALOG_COUNT; k++)
             if (ev->analog_mask & (1u << k))
                 out->analog[k] = 255;
+        if (ev->stick & INPUT_STICK_UP)
+            out->thumb_ly = 32767;
+        if (ev->stick & INPUT_STICK_DOWN)
+            out->thumb_ly = -32768;
+        if (ev->stick & INPUT_STICK_RIGHT)
+            out->thumb_lx = 32767;
+        if (ev->stick & INPUT_STICK_LEFT)
+            out->thumb_lx = -32768;
     }
 }

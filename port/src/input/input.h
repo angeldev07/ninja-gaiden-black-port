@@ -117,7 +117,13 @@ typedef struct input_event {
     uint8_t polls;
     uint16_t buttons;
     uint8_t analog_mask; /* bit i -> analog[i] = 255 */
+    uint8_t stick;       /* left stick pushed all the way: INPUT_STICK_* bits */
 } input_event_t;
+
+#define INPUT_STICK_UP 1
+#define INPUT_STICK_DOWN 2
+#define INPUT_STICK_LEFT 4
+#define INPUT_STICK_RIGHT 8
 
 typedef struct input_script {
     int count;
