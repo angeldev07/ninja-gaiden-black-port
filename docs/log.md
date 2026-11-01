@@ -1016,3 +1016,56 @@ Details in [[gpu-nv2a]].
   the decisions are in [[achievements-brief]].
 - **Toast in the game without patching it:** the port's presenter draws it over the frame, like the Steam overlay;
   the launcher gets an Achievements page. Work starts in a fresh session with the feasibility spike of the brief.
+
+## [2026-10-31] ingest | Achievements: the game state, a detector, the toast and the launcher
+- **Found** ([[game-state]]): the current chapter (`0x00E130D4`, from the save-name format string), the difficulty
+  (`0x005B4975`), the game mode (`0x005B497A`), the save block (`0x0059E160`) and the profile block that becomes
+  `system.dat` (`0x00E12980`), with the game's own "story completed" and "mission cleared" routines.
+- **Method:** Ghidra cross-references from a string, then `--watch` and `--dump-ram` while loading the owner's saves in
+  a copy of the data folder (`ngb-data-achtest*`). No owner play was needed for these.
+- **Spike** (branch `spike/achievements`): `port/src/ach/` polls the variables from the main thread every 5 ms and
+  writes `%NGB_DATA%\achievements.json`; `port/src/gfx/toast.c` composites a placeholder toast in `pgl_flip` (window
+  only: captures read the game's surface); the launcher's Play page counts the unlocks. `--ach-demo` fires a test
+  unlock. Tried: the toast shows, the file is written, the launcher reads it, and loading a chapter 2 or chapter 10
+  save does not unlock anything.
+- **Open:** a real chapter end (the owner plays chapter 1 to the end with the spike build) to check the detector and
+  to find the end-of-chapter rank.
+
+## [2026-10-31] ingest | Achievements: the game variables found in the code, on every release
+- The owner played chapter 1 on the modified build, where the spike's PAL-only address check switched the detectors
+  off; F10 and F12 also left nothing (no `RAM dump` line, no shot), most likely a keyboard sending media keys.
+- **Now** the port finds the chapter, difficulty, mode and saved-chapter variables in the game's own code at start
+  ([[game-state]] § Other releases), so PAL, NTSC-U and modified builds work with no table per release. Checked on
+  the three XBEs and live on the modified build.
+
+## [2026-10-31] ingest | Achievements: the first real unlock
+- The owner finished chapter 1 on the modified build with the spike: the toast showed and `achievements.json` got
+  `chapter-01` (difficulty Normal). The detector of [[game-state]] works on a natural chapter end.
+- Owner's verdict on the placeholder toast: "muy fea y es invasiva", fine for the spike. The design must make it
+  smaller and less intrusive.
+- The results screen's strings show no rank titles besides the difficulty names; asked the owner what the "rank" was.
+
+## [2026-10-31] ingest | Achievements: the end-of-chapter rank, read from the game's own formula
+- The owner showed the rank card ("MASTER NINJA", a picture) and dumped RAM on it. Diffing the dumps led to the run's
+  karma (`0x005B4780`) and the karma at the last chapter end (`0x005B4784`); `FUN_002ed790` computes the rank from
+  their difference and a per-chapter `{max, min}` table in a game data file. Replaying the formula on the dumps gives
+  rank 0 for karma 405,327 and 415,007 (Master Ninja from 260,000 in chapter 1), as on screen. Details in
+  [[game-state]].
+- So the owner's "Master Ninja rank per chapter" achievements need only RAM reads.
+
+## [2026-10-31] milestone | Achievements, phase 1: detectors, the seal toast and the launcher page
+- Built on `feat/achievements` from [[achievements-design]] and [[achievements-plan]]: a shared catalog of 27
+  (`port/src/ach/catalog.c`), `achievements.json` v2 with progress (`store.c`), the game's rank formula (`rules.c`),
+  the variables found by signature with the karma and the rank table added (`sig.c`, [[game-state]]), and the
+  detectors for chapter 1, the story per difficulty (`INFERRED`: the chapter going past 15), the Master Ninja rank
+  with the sixteen seals, the first session, the hours played and F12.
+- **Toast** (`port/src/gfx/toast.c`): the mockup's variant A (seal 誉) and D (ensō, double rule, 7 s) with a queue, a
+  12-unit rise, Josefin Sans and the Shippori subset embedded in the core (the subset gains 誉 極 試 数 蒐 挑 灯), and a
+  drum hit synthesized by the port. `--lang en|es`, `--no-ach-toast`, `--ach-demo` shows both.
+- **Launcher:** an Achievements page (05; Advanced and About move to 06 and 07), filters, newest first, progress
+  rules, the two switches; the Play page column reads "n / 27"; PLAY passes the language and the toast switch.
+- Gotcha: Josefin's static Light and SemiBold faces register under their legacy family names ("Josefin Sans Light"),
+  as the launcher already knew; asking for "Josefin Sans" with a weight gave a fallback face in the toast.
+- Checked: `ach_test` (catalog, store, rank edges, signatures), the Python suite, both toasts in the window back
+  buffer, the page in both languages with `--shot`, and a chapter 2 load that unlocks nothing.
+- Needs the owner: a clear of the last chapter for the story detector; phase 1b dumps (missions, inventory, deaths).

@@ -110,6 +110,21 @@ them. Uninstalling the launcher does not touch it.
 
 The launcher window can be maximized: everything is redrawn larger.
 
+### Achievements
+
+The port has achievements of its own, in the spirit of the Xbox 360 ones: finishing chapter 1, the story on each
+difficulty, a chapter with the Master Ninja rank, all 16 chapters at that rank, and a few about the port itself. When
+you earn one, a small notice slides in at the bottom of the picture for a few seconds, with a short drum hit.
+
+- The game is never modified: the port reads what the game is doing while you play.
+- The **Achievements** page of the launcher lists them all, with the date you got each one and the progress of the
+  longer ones. Secret ones stay hidden unless you switch on *Show secrets*.
+- *Notices in the game* on that page turns the notice off; achievements still count.
+- They are kept in `achievements.json` in the data folder, apart from your saves. Nothing is granted from old saves:
+  achievements count from the moment you play with this version.
+- Some achievements in the list (missions, collection, kill counters, no-damage challenges) arrive in later
+  versions.
+
 ## 6. Updates
 
 Once a day the launcher checks for a new release. When one is out, the Play page shows **Version X is available**:

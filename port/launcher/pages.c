@@ -18,6 +18,8 @@
 #include <string.h>
 
 #include "art.h"
+#include "ach/catalog.h"
+#include "ach/store.h"
 #include "gameart.h"
 #include "ui.h"
 #include "update.h"
@@ -36,9 +38,9 @@
 
 static int g_ovl_x, g_ovl_y, g_ovl_w;
 
-static const int k_page_names[PG_COUNT] = {S_NAV_PLAY,     S_NAV_GRAPHICS, S_NAV_AUDIO,
-                                           S_NAV_CONTROLS, S_NAV_ADVANCED, S_NAV_ABOUT};
-static const wchar_t *const k_page_kanji[PG_COUNT] = {L"始", L"画", L"音", L"操", L"設", L"記"};
+static const int k_page_names[PG_COUNT] = {S_NAV_PLAY, S_NAV_GRAPHICS, S_NAV_AUDIO, S_NAV_CONTROLS,
+                                           S_NAV_ACH,  S_NAV_ADVANCED, S_NAV_ABOUT};
+static const wchar_t *const k_page_kanji[PG_COUNT] = {L"始", L"画", L"音", L"操", L"誉", L"設", L"記"};
 
 /* ------------------------------------------------------------------ helpers ---- */
 
@@ -115,8 +117,41 @@ static int spec_col(int x, const wchar_t *label, const wchar_t *value, const wch
     return x + w + 80;
 }
 
+/* %NGB_DATA%\achievements.json (written by the loader, src/ach/store.c), read again only when it
+ * changes. Used by the Play page column and the Achievements page. */
+static ach_store g_ach;
+
+static void ach_refresh(void) {
+    static FILETIME seen;
+    static int loaded;
+    wchar_t wpath[MAX_PATH];
+    char path[MAX_PATH * 2];
+    WIN32_FILE_ATTRIBUTE_DATA fa;
+    wfmt(wpath, MAX_PATH, L"%ls\\achievements.json", g_data);
+    if (!g_data[0] || !GetFileAttributesExW(wpath, GetFileExInfoStandard, &fa)) {
+        if (loaded)
+            memset(&g_ach, 0, sizeof g_ach);
+        loaded = 0;
+        return;
+    }
+    if (loaded && !CompareFileTime(&fa.ftLastWriteTime, &seen))
+        return;
+    seen = fa.ftLastWriteTime;
+    loaded = 1;
+    /* The loader gets the folder through NGB_DATA, in the ANSI code page: the same path here. */
+    if (!WideCharToMultiByte(CP_ACP, 0, wpath, -1, path, (int)sizeof path, NULL, NULL) || ach_store_load(&g_ach, path))
+        memset(&g_ach, 0, sizeof g_ach);
+}
+
+static int ach_unlocked_count(void) {
+    int i, n = 0;
+    for (i = 0; i < g_ach.nunlocked; i++)
+        n += ach_find(g_ach.unlocked[i].id) != NULL;
+    return n;
+}
+
 static void play_specs(void) {
-    wchar_t res[48], ar[16];
+    wchar_t res[48], ar[16], ach[16];
     int w, h, x = TX;
     const wchar_t *rend = g_set.renderer == 1 ? L"OpenGL 4.x" : g_set.renderer == 2 ? L"Software" : tr(S_SPEC_AUTO);
     scaled_size(&w, &h);
@@ -125,6 +160,9 @@ static void play_specs(void) {
     x = spec_col(x, tr(S_SPEC_RENDER), rend, NULL, 0);
     x = spec_col(x, tr(S_SPEC_RES), res, ar, 0);
     x = spec_col(x, tr(S_SPEC_PACE), g_set.pacing ? L"60 fps" : tr(S_PACE_FREE), NULL, 0);
+    ach_refresh();
+    wfmt(ach, 16, L"%d / %d", ach_unlocked_count(), ach_catalog_count);
+    x = spec_col(x, tr(S_SPEC_ACH), ach, NULL, 0);
     (void)spec_col(x, tr(S_SPEC_VERSION), L"" NGB_VERSION_STR, NULL, 1);
 }
 
@@ -353,9 +391,13 @@ static void page_side(int number, const wchar_t *title, const wchar_t *kanji, co
     wfmt(num, 8, L"%02d", number);
     txt(F_GHOST, GHOST, 76, 76, 230, 130, DT_SINGLELINE | DT_VCENTER, num);
     {
-        float em; /* long titles ("Acerca de") give up tracking before touching the column rule */
-        ui_fit_tracked(F_PAGE, 0.06f, title, ART_SIDE_W - 88 - 18, &em);
-        txt_tracked(F_PAGE, C_CREAM, 88, 176, 60, em, title);
+        float em; /* long titles ("Acerca de") give up tracking, and then size, before touching the column rule */
+        if (ui_fit_tracked(F_PAGE, 0.06f, title, ART_SIDE_W - 88 - 18, &em))
+            txt_tracked(F_PAGE, C_CREAM, 88, 176, 60, em, title);
+        else {
+            ui_fit_tracked(F_PAGE_S, 0.06f, title, ART_SIDE_W - 88 - 18, &em);
+            txt_tracked(F_PAGE_S, C_CREAM, 88, 186, 50, em, title);
+        }
     }
     if (kanji && ui_has_kanji())
         txt(F_KANJI, C_VERM, TX, 244, 40, 24, DT_SINGLELINE | DT_VCENTER, kanji);
@@ -545,7 +587,7 @@ static void page_advanced(void) {
     int y = 104, x = LX, b1, b2, b3, bh;
     wchar_t cmd[4096];
     const wchar_t *copy_label = g_copied_until ? tr(S_BTN_COPIED) : tr(S_BTN_COPY_INFO);
-    page_side(5, tr(S_NAV_ADVANCED), k_page_kanji[PG_ADVANCED], tr(S_ADV_SUB));
+    page_side(6, tr(S_NAV_ADVANCED), k_page_kanji[PG_ADVANCED], tr(S_ADV_SUB));
     ui_hair(LX, y - 1, LW);
     y = row_switch(ID_CHK_UPDATES, y, tr(S_ADV_UPDATES), tr(S_ADV_UPDATES_DESC), g_set.check_updates, 1);
     y = group(y + 14, tr(S_ADV_DEBUG));
@@ -593,7 +635,7 @@ static rgb_t log_line_color(const wchar_t *line) {
 static void page_log(void) {
     int bx = LX - 16, by = 96, bw = LW + 32 + 22, bh = LOGICAL_H - 24 - by, lh = 17, vis, maxs, i;
     wchar_t buf[300];
-    page_side(5, tr(S_LOG_TITLE), tr(S_PAGE_LOG_KANJI), tr(S_LOG_SUB));
+    page_side(6, tr(S_LOG_TITLE), tr(S_PAGE_LOG_KANJI), tr(S_LOG_SUB));
     ui_secondary(ID_LOG_BACK, TX, 470, 150, 40, tr(S_BTN_BACK), 1);
     ui_link(ID_OPEN_RUNS, TX, 530, tr(S_LOG_OPEN), 1);
     fill_rect_a(bx, by, bw, bh, 0x0b0a09, 200);
@@ -625,6 +667,190 @@ static void page_log(void) {
     }
 }
 
+/* ------------------------------------------------------------ achievements ---- */
+
+#define ACH_ROW 64
+#define ACH_LIST_Y 150
+
+/* 1680 -> "1,680" or "1.680". */
+static void ach_num(wchar_t *out, size_t n, unsigned long long v) {
+    wchar_t raw[24];
+    int len, i, o = 0;
+    wfmt(raw, 24, L"%llu", v);
+    len = (int)wcslen(raw);
+    for (i = 0; i < len && o + 2 < (int)n; i++) {
+        if (i && (len - i) % 3 == 0)
+            out[o++] = g_lang == LANG_ES ? L'.' : L',';
+        out[o++] = raw[i];
+    }
+    out[o] = 0;
+}
+
+/* "15 誉", right-aligned so that it ends at `right`: the number in `font`, the kanji from the
+ * embedded subset (the Latin faces have no 誉, and the fallback face is larger). */
+static void ach_points(int font, rgb_t col, int right, int y, int h, const wchar_t *num) {
+    int kw = ui_has_kanji() ? 18 : 0;
+    txt(font, col, right - kw - 4 - 120, y, 120, h, DT_SINGLELINE | DT_VCENTER | DT_RIGHT, num);
+    if (kw)
+        txt(F_KANJI, col, right - kw, y, kw, h, DT_SINGLELINE | DT_VCENTER | DT_CENTER, L"誉");
+}
+
+static int ach_in_filter(const ach_def *a) {
+    switch (g_ach_filter) {
+    case 1: return a->category == ACH_CAT_STORY || a->category == ACH_CAT_RANK;
+    case 2: return a->category == ACH_CAT_MISSION;
+    case 3: return a->category == ACH_CAT_COUNTER || a->category == ACH_CAT_COLLECTION;
+    case 4: return a->category == ACH_CAT_CHALLENGE || a->category == ACH_CAT_PORT;
+    default: return 1;
+    }
+}
+
+/* Progress in thousandths, 0 without a goal. */
+static int ach_permille(const ach_def *a) {
+    uint64_t v = ach_store_progress(&g_ach, a->id);
+    if (!a->goal)
+        return 0;
+    return v >= a->goal ? 1000 : (int)(v * 1000 / a->goal);
+}
+
+/* Unlocked first, newest first; then those in progress, furthest first; then the rest in catalog
+ * order. */
+static int ach_order(int *out) {
+    int i, j, n = 0;
+    for (i = 0; i < ach_catalog_count; i++)
+        if (ach_in_filter(&ach_catalog[i]))
+            out[n++] = i;
+    for (i = 1; i < n; i++)
+        for (j = i; j > 0; j--) {
+            const ach_def *a = &ach_catalog[out[j - 1]], *b = &ach_catalog[out[j]];
+            int ia = ach_store_find(&g_ach, a->id), ib = ach_store_find(&g_ach, b->id), swap;
+            if (ia >= 0 || ib >= 0)
+                swap = ib >= 0 && (ia < 0 || strcmp(g_ach.unlocked[ib].time, g_ach.unlocked[ia].time) > 0);
+            else
+                swap = ach_permille(b) > ach_permille(a);
+            if (!swap)
+                break;
+            { /* insertion sort: equal keys keep the catalog order */
+                int t = out[j - 1];
+                out[j - 1] = out[j];
+                out[j] = t;
+            }
+        }
+    return n;
+}
+
+static void ach_row(const ach_def *a, int y) {
+    int u = ach_store_find(&g_ach, a->id), done = u >= 0, hidden = a->secret && !done && !g_ach_secrets;
+    int tile = 44, tx = LX + 64, right = 230, tw = LW - 64 - right - 24, pm = ach_permille(a);
+    wchar_t state[64], pts[16], date[24];
+    uint64_t v = ach_store_progress(&g_ach, a->id);
+    if (done)
+        fill_rect(LX, y + 10, tile, tile, C_VERM);
+    else
+        hair_box(LX, y + 10, tile, tile, a->secret ? 30 : 46);
+    if (ui_has_kanji())
+        txt(F_KANJI, done ? C_CREAM : C_DIMC, LX, y + 10, tile, tile, DT_SINGLELINE | DT_CENTER | DT_VCENTER,
+            hidden ? L"?" : ach_category_glyph(a->category));
+    txt(F_VALUE, done ? C_CREAM : C_MUTED, tx, y + 9, tw, 24, T_LINE, hidden ? tr(S_ACH_SECRET_NAME) : a->name[g_lang]);
+    txt(F_LSMALL, C_DESC, tx, y + 35, tw, 20, T_LINE, hidden ? tr(S_ACH_SECRET_DESC) : a->desc[g_lang]);
+    if (done) {
+        int yy = 0, mm = 0, dd = 0;
+        if (sscanf(g_ach.unlocked[u].time, "%d-%d-%d", &yy, &mm, &dd) == 3)
+            wfmt(date, 24, g_lang == LANG_ES ? L"%02d/%02d/%04d" : L"%04d-%02d-%02d", g_lang == LANG_ES ? dd : yy, mm,
+                 g_lang == LANG_ES ? yy : dd);
+        else
+            date[0] = 0;
+        wfmt(state, 64, tr(S_ACH_UNLOCKED), date);
+        ui_label(LX + LW - 70 - tracked_w(F_LABEL, 0.26f, state), y + 26, state, C_VERM);
+    } else if (pm > 0 && !hidden) {
+        if (!strcmp(a->id, "port-100-hours"))
+            wfmt(state, 64, tr(S_ACH_HOURS), (unsigned long long)(v / 3600), a->goal / 3600);
+        else
+        {
+            wchar_t a1[24], a2[24];
+            ach_num(a1, 24, v);
+            ach_num(a2, 24, a->goal);
+            wfmt(state, 64, L"%ls / %ls", a1, a2);
+        }
+        ui_rule_progress(LX + LW - 240, y + 24, 150, pm);
+        txt(F_LSMALL, C_MUTED, LX + LW - 240, y + 31, 150, 20, T_LINE | DT_RIGHT, state);
+    } else {
+        const wchar_t *s = a->secret && !done ? tr(S_ACH_SECRET) : tr(S_ACH_LOCKED);
+        ui_label(LX + LW - 70 - tracked_w(F_LABEL, 0.26f, s), y + 26, s, C_DIMC);
+    }
+    wfmt(pts, 16, L"%d", a->points);
+    ach_points(F_VALUE, done ? C_CREAM : C_DIMC, LX + LW, y + 9, 46, pts);
+    ui_hair(LX, y + ACH_ROW - 1, LW);
+}
+
+static void page_ach(void) {
+    static const int k_filters[ACH_FILTERS] = {S_ACH_F_ALL, S_ACH_F_STORY, S_ACH_F_MISSIONS, S_ACH_F_COUNTERS,
+                                               S_ACH_F_CHALLENGES};
+    int order[64], n, i, f, vis, maxs, y, done, pts = 0, all = ach_total_points();
+    wchar_t buf[48];
+    ach_refresh();
+    done = ach_unlocked_count();
+    for (i = 0; i < g_ach.nunlocked; i++)
+        if (ach_find(g_ach.unlocked[i].id))
+            pts += ach_find(g_ach.unlocked[i].id)->points;
+    page_side(5, tr(S_NAV_ACH), k_page_kanji[PG_ACH], tr(S_ACH_SUB));
+    /* totals under the description */
+    ui_label(TX, 420, tr(S_ACH_COUNT), C_DIMC);
+    wfmt(buf, 48, L"%d / %d", done, ach_catalog_count);
+    txt(F_SUB, C_CREAM, TX, 440, 110, 30, T_LINE, buf);
+    ui_label(TX + 112, 420, tr(S_ACH_HONOR), C_DIMC);
+    {
+        wchar_t a1[24], a2[24];
+        ach_num(a1, 24, (unsigned long long)pts);
+        ach_num(a2, 24, (unsigned long long)all);
+        wfmt(buf, 48, L"%ls / %ls", a1, a2);
+        txt(F_SUB, C_CREAM, TX + 112, 440, 150, 30, T_LINE, buf);
+        if (ui_has_kanji())
+            txt(F_KANJI, C_DIMC, TX + 112 + text_w(F_SUB, buf) + 6, 440, 20, 30, DT_SINGLELINE | DT_VCENTER, L"誉");
+    }
+    ui_rule_progress(TX, 482, ART_SIDE_W - TX - 40, all ? pts * 1000 / all : 0);
+    /* filters */
+    for (f = 0, y = 500; f < ACH_FILTERS; f++, y += 30) {
+        int cnt = 0, id = ID_ACH_FILTER0 + f, sel = g_ach_filter == f, save = g_ach_filter;
+        g_ach_filter = f;
+        for (i = 0; i < ach_catalog_count; i++)
+            cnt += ach_in_filter(&ach_catalog[i]);
+        g_ach_filter = save;
+        if (sel)
+            fill_rect(TX, y + 12, 6, 6, C_VERM);
+        txt(F_LSMALL, sel ? C_CREAM : hot(id) ? C_CREAM : C_MUTED, TX + 18, y + 4, 170, 22, T_LINE, tr(k_filters[f]));
+        wfmt(buf, 48, L"%d", cnt);
+        txt(F_LSMALL, C_DIMC, ART_SIDE_W - 40 - 40, y + 4, 40, 22, T_LINE | DT_RIGHT, buf);
+        ui_hair(TX, y + 29, ART_SIDE_W - TX - 40);
+        add_hit(TX - 8, y, ART_SIDE_W - TX - 32, 30, id);
+    }
+    /* list header: the two switches */
+    ui_switch(ID_CHK_ACH_TOAST, LX, 98, g_set.ach_toast, 1);
+    ui_label(LX + 58, 103, tr(S_ACH_TOAST), g_set.ach_toast ? C_CREAM : C_DIMC);
+    {
+        int w = tracked_w(F_LABEL, 0.26f, tr(S_ACH_SECRETS));
+        ui_switch(ID_CHK_ACH_SECRETS, LX + LW - w - 58, 98, g_ach_secrets, 1);
+        ui_label(LX + LW - w, 103, tr(S_ACH_SECRETS), g_ach_secrets ? C_CREAM : C_DIMC);
+    }
+    ui_hair(LX, ACH_LIST_Y - 14, LW);
+    n = ach_order(order);
+    if (!n) {
+        txt(F_LSMALL, C_DIMC, LX, ACH_LIST_Y, LW, 24, T_LINE, tr(S_ACH_NONE));
+        return;
+    }
+    vis = (LOGICAL_H - 24 - ACH_LIST_Y) / ACH_ROW;
+    maxs = n > vis ? n - vis : 0;
+    if (g_ach_scroll > maxs)
+        g_ach_scroll = maxs;
+    for (i = 0; i < vis && g_ach_scroll + i < n; i++)
+        ach_row(&ach_catalog[order[g_ach_scroll + i]], ACH_LIST_Y + i * ACH_ROW);
+    if (maxs > 0) {
+        int th = vis * ACH_ROW - 8, kh = th * vis / n;
+        fill_rect_a(LX + LW + 18, ACH_LIST_Y + 4, 2, th, C_CREAM, 20);
+        fill_rect(LX + LW + 18, ACH_LIST_Y + 4 + (th - kh) * g_ach_scroll / maxs, 2, kh, C_VERM);
+    }
+}
+
 /* One credit: the project, and what the port takes from it beside it. */
 static int credit_row(int y, const wchar_t *name, const wchar_t *what) {
     txt(F_LBODY, C_CREAM, LX, y, 260, 24, T_LINE, name);
@@ -635,7 +861,7 @@ static int credit_row(int y, const wchar_t *name, const wchar_t *what) {
 static void page_about(void) {
     int y = 104, x;
     wchar_t buf[96];
-    page_side(6, tr(S_NAV_ABOUT), k_page_kanji[PG_ABOUT], tr(S_ABOUT_SUB));
+    page_side(7, tr(S_NAV_ABOUT), k_page_kanji[PG_ABOUT], tr(S_ABOUT_SUB));
     emblem_draw(LX + LW - 110, 92, 110, C_CREAM, C_VERM);
     txt(F_SUB, C_CREAM, LX, y, LW - 140, 30, T_LINE, tr(S_ABOUT_PRODUCT));
     wfmt(buf, 96, tr(S_ABOUT_VERSION), L"" NGB_VERSION_STR);
@@ -695,6 +921,7 @@ void paint_all(void) {
         case PG_GRAPHICS: page_graphics(); break;
         case PG_AUDIO: page_audio(); break;
         case PG_CONTROLS: page_controls(); break;
+        case PG_ACH: page_ach(); break;
         case PG_ADVANCED:
             if (g_log_view)
                 page_log();

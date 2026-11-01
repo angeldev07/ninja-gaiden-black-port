@@ -51,6 +51,12 @@ patched**: no file of the user's copy changes, and nothing of the game ships ([[
 - **Launcher page "Achievements"** in the same style: unlocked (with date), locked, hidden, and progress bars for
   counters ("Izuna Drop: 412 / 1000").
 - **Storage:** a file in the data folder, apart from the game's saves (which are the user's and stay read-only).
+- **Rank achievements (owner, 2026-10-31):** only the Master Ninja rank counts (rank 0 of the game's formula,
+  [[game-state]]); the other four ranks need no names. A chapter played from a mid-chapter save still counts: no
+  "from the start" rule, to keep it simple.
+- **Mockups (2026-10-31):** 27 achievements, four toast variants and the launcher page, on a private design canvas;
+  the owner's verdict on the spike toast was "muy fea y es invasiva", so every variant stays under 12 % of the
+  picture's height.
 
 ## How the game state could be read (to research)
 

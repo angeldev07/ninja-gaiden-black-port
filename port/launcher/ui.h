@@ -43,6 +43,7 @@ enum font_id {
     F_GHOST,   /* Josefin 100, 128 (ghost page number) */
     F_SUB,     /* Josefin 300, 21 */
     F_KANJI,   /* Shippori Mincho B1 600, 16 (embedded subset) */
+    F_PAGE_S,  /* Josefin 100, 32 (an inner page title too long for F_PAGE) */
     F_COUNT
 };
 

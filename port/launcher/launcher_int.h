@@ -16,7 +16,7 @@
 #define DEFAULT_LOG_CAP 2000
 
 /* The log viewer is not a page: it is a sub-view of Advanced (g_log_view). */
-enum page_id { PG_PLAY, PG_GRAPHICS, PG_AUDIO, PG_CONTROLS, PG_ADVANCED, PG_ABOUT, PG_COUNT };
+enum page_id { PG_PLAY, PG_GRAPHICS, PG_AUDIO, PG_CONTROLS, PG_ACH, PG_ADVANCED, PG_ABOUT, PG_COUNT };
 
 enum ui_id {
     ID_NONE = 0,
@@ -25,11 +25,14 @@ enum ui_id {
     ID_DATA_OPEN, ID_VIEW_LOG, ID_OPEN_RUNS, ID_CB_RENDERER, ID_CB_SCALE, ID_CB_LOGCAP, ID_CHK_PACING, ID_CHK_FULLSCREEN, ID_CHK_WIDESCREEN,
     ID_CHK_MUTE, ID_CHK_WAV, ID_CHK_RDOC, ID_CHK_LENIENT, ID_CHK_DETAIL, ID_LANG_EN, ID_LANG_ES,
     ID_LOG_BACK, ID_COPY_INFO, ID_ABOUT_REPO, ID_ABOUT_CONTRIB, ID_ABOUT_LICENSE,
-    ID_CHK_UPDATES, ID_UPD_NOTES, ID_UPD_GO, ID_CHK_GAMEART,
+    ID_CHK_UPDATES, ID_UPD_NOTES, ID_UPD_GO, ID_CHK_GAMEART, ID_CHK_ACH_TOAST, ID_CHK_ACH_SECRETS,
+    ID_ACH_FILTER0 = 70, /* ..ID_ACH_FILTER0 + ACH_FILTERS - 1 */
     ID_ITEM0 = 100 /* items of the open drop-down */
 };
 
 enum lang_id { LANG_EN, LANG_ES };
+
+#define ACH_FILTERS 5 /* all, story and rank, missions, counters and collection, challenges and port */
 
 typedef struct settings {
     wchar_t xbe[MAX_PATH];
@@ -48,6 +51,7 @@ typedef struct settings {
     int check_updates; /* look for a new release once a day (update.h) */
     int update_day;    /* day number of the last check */
     int game_art;   /* [launcher] game_art: art from the user's copy */
+    int ach_toast;  /* [achievements] toast: the notice in the game (0: --no-ach-toast) */
 } settings_t;
 
 typedef struct session {
@@ -84,6 +88,7 @@ extern int g_log_n, g_log_scroll;
 extern wchar_t g_log_path[MAX_PATH], g_log_stamp[16];
 extern wchar_t g_updated_to[32], g_upd_fail[160];
 extern int g_upd_wanted;
+extern int g_ach_scroll, g_ach_filter, g_ach_secrets; /* the Achievements page */
 extern const int k_logcap_vals[4];
 
 const wchar_t *tr(int id);
