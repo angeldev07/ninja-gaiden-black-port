@@ -409,6 +409,24 @@ static void trace_tick(void) {
     g_trace.ki = ki;
 }
 
+/* --ach-god: player 1's health back to its max, as the game does when an item revives Ryu
+ * (FUN_002e3f60): the health and its copy in the first segment (the max of that one sits 0x10
+ * bytes lower), with the anti-tamper flags of their sums (groups 0xF and 0x11) set first. */
+#define CHECK_HEALTH 0x0F
+#define CHECK_SEGMENTS 0x11
+
+static void god_tick(void) {
+    uint32_t h = peek32(g_va.health);
+    uint16_t max = (uint16_t)(h & 0xFFFF);
+    if (!max || (h >> 16) >= max)
+        return;
+    *(volatile uint8_t *)(uintptr_t)(g_va.checks + CHECK_HEALTH) = 1;
+    *(volatile uint8_t *)(uintptr_t)(g_va.checks + CHECK_SEGMENTS) = 1;
+    *(volatile uint16_t *)(uintptr_t)(g_va.health + 2) = max;
+    if (peek16(g_va.ninpo - 0x10) == max) /* the segment copy, when it mirrors the health */
+        *(volatile uint16_t *)(uintptr_t)g_va.ninpo = max;
+}
+
 static void game_tick(DWORD now) {
     int chapter, saved, difficulty, calm, mode = peek8(g_va.mode);
     uint32_t karma_last, scarabs = peek32(g_va.scarabs); /* before the clock: see scarab_tick */
@@ -416,6 +434,8 @@ static void game_tick(DWORD now) {
         unlock("port-first-session", -1);
     if (g_ngb_opts.ach_trace)
         trace_tick();
+    if (g_ngb_opts.ach_god && g_va.checks && mode >= MODE_STORY && mode <= 4)
+        god_tick();
     calm = clock_tick(now, mode);
     death_tick(mode >= MODE_STORY && mode <= 4);
     mission_tick(mode);
@@ -545,6 +565,22 @@ void ngb_ach_game_saved(void) {
         save();
     }
     ReleaseSRWLockExclusive(&g_lock);
+}
+
+void ngb_ach_status(char *out, size_t n) {
+    uint32_t p, h, k;
+    if (!g_ready || !g_on) {
+        snprintf(out, n, "detectors off");
+        return;
+    }
+    p = readable(g_va.player, 4) ? peek32(g_va.player) : 0;
+    h = peek32(g_va.health);
+    k = peek32(g_va.ki);
+    snprintf(out, n, "mode %u chapter %u difficulty %u play_time %u health %u/%u ki %u/%u move 0x%02X weapon 0x%04X "
+             "defeats %u trace %d god %d", peek8(g_va.mode), peek8(g_va.chapter), peek8(g_va.difficulty),
+             peek32(g_va.play_time), h >> 16, h & 0xFFFF, k >> 16, k & 0xFFFF,
+             p && readable(p + 4, 1) ? peek8(p + 4) : 0xFFu, peek16(g_va.weapon), peek32(g_va.kills),
+             g_ngb_opts.ach_trace, g_ngb_opts.ach_god);
 }
 
 void ngb_ach_shutdown(void) {

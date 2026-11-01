@@ -73,6 +73,7 @@ _(still empty)_
 ## Tools (`tools/`)
 
 - [[tools]]: extract-xiso and our own tools (`xbe_info.py`, `afs.py`).
+- [[remote-session]]: `--remote`, driving a running game from outside (presses, trace, infinite health, captures).
 
 ## External sources (`sources/`)
 

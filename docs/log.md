@@ -1098,3 +1098,13 @@ Details in [[gpu-nv2a]].
   treated any change of mode as a load and lost the run between the intro and chapter 1; now only a jump of the play
   time does.
 - Needs the owner: a short session with `--ach-trace` to name the moves (Izuna Drop, Flying Swallow, fire ninpo).
+
+## [2026-10-31] milestone | Remote session: measurements in the owner's running game
+- No save statue has enemies near it, so the owner proposed infinite health plus a session they leave in front of
+  enemies for the agent to drive. `--remote` opens `\\.\pipe\ngb-loader` (input from now, trace, god, shot, status);
+  `ngb_tools.remote` is the client; the launcher passes `[advanced] extra_args` from `ngb.ini`. See [[remote-session]].
+- Found on the way: the game's anti-tamper sums (24 groups, `FUN_00164e70`/`FUN_00164db0`); writing the health alone
+  sent the game back to the main menu. God mode now sets the groups' flags first, as the game's own revive does.
+- Also: the player object's byte +4 is an action state (0 idle, 6/8/9/A running, 0x55 jump, 0x5B air Y, 0x0B air X,
+  0x0E landing, 0xB9 Y held), not the attack; ground attacks leave it at 0. Naming the Izuna Drop and the Flying
+  Swallow needs enemies: the next step, in the owner's session.

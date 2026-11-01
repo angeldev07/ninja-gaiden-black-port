@@ -169,8 +169,11 @@ static int sig_case(int variant, ach_vars *v) {
     memcpy(t + 0x40B, "\x66\x8B\x15\x7E\x49\x5B\x00", 7);
     memcpy(t + 0x412, "\x88\x0D", 2);
     put32(t + 0x414, chapter);
-    if (variant == 3) { /* 3: the stage end routines, four stores of 0x80 (game over) */
+    if (variant == 3) { /* 3: the stage end routines (four stores of 0x80) and the scarab routine */
+        static const unsigned char give[] = {0x8B, 0x0D, 0x94, 0x47, 0x5B, 0x00, 0x03, 0xC8, 0x83, 0xF9, 0x32, 0xB2,
+                                             0x01, 0x89, 0x0D, 0x94, 0x47, 0x5B, 0x00, 0x88, 0x15, 0xBB, 0xCC, 0x81, 0x00};
         int i;
+        memcpy(t + 0x700, give, sizeof give);
         for (i = 0; i < 4; i++) {
             memcpy(t + 0x600 + i * 0x10, "\xC6\x05", 2);
             put32(t + 0x602 + i * 0x10, chapter - 0x240);
@@ -196,7 +199,8 @@ static void test_sig(void) {
     CHECK(v.weapon == 0x005B47DAu && v.health == 0x005B5784u && v.ninpo == 0x005B5754u && v.ki == 0x005B578Cu);
     CHECK(v.player == 0x00E1349Cu && v.inventory == 0x005B43F0u);
     CHECK(v.stage_end == 0); /* no stores of 0x80 into it */
-    CHECK(sig_case(3, &v) == 0 && v.stage_end == 0x00E12E94u);
+    CHECK(sig_case(3, &v) == 0 && v.stage_end == 0x00E12E94u && v.checks == 0x0081CCB4u);
+    CHECK(sig_case(0, &v) == 0 && v.checks == 0);
     CHECK(sig_case(1, &v) == -1 && v.chapter == 0);
     CHECK(sig_case(2, &v) == -1);
 }

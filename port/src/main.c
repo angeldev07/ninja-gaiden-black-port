@@ -19,6 +19,7 @@
 
 #include "../res/version.h"
 #include "ach/ach.h"
+#include "remote.h"
 #include "gpu/nv2a.h"
 #include "gfx/present.h"
 #include "input/input.h"
@@ -72,6 +73,8 @@ static void usage(void) {
             "  --no-host-input neither PC gamepad nor keyboard: only the script\n"
             "  --ach-demo   both achievement toasts 5 s after start (nothing is recorded)\n"
             "  --ach-trace  log the player's moves, kills, health, ki and ninpo (to map the game's moves)\n"
+            "  --ach-god    keep player 1's health at its max (measurements; the game files are not touched)\n"
+            "  --remote     take commands from \\\\.\\pipe\\ngb-loader: input, trace, god, shot, status\n"
             "  --no-ach-toast  achievements still unlock and record, without the toast in the game\n"
             "  --lang en|es language of the achievement toasts (en)\n"
             "  --profile    sample the render and audio threads; hot functions in <log>-profile.txt\n");
@@ -238,6 +241,10 @@ static int parse_args(void) {
             g_ngb_opts.ach_demo = 1;
         else if (!strcmp(a, "--ach-trace"))
             g_ngb_opts.ach_trace = 1;
+        else if (!strcmp(a, "--ach-god"))
+            g_ngb_opts.ach_god = 1;
+        else if (!strcmp(a, "--remote"))
+            g_ngb_opts.remote = 1;
         else if (!strcmp(a, "--no-ach-toast"))
             g_ngb_opts.ach_toast_off = 1;
         else if (!strcmp(a, "--lang") && more)
@@ -434,6 +441,8 @@ __declspec(dllexport) int __cdecl ngb_main(void) {
     }
     ngb_memory_patch_irql(&g_ngb_xbe);
     ngb_ach_init(&g_ngb_xbe);
+    if (g_ngb_opts.remote)
+        ngb_remote_start();
     if (ngb_memory_patch_thunk(&g_ngb_xbe))
         ngb_stop(NGB_EXIT_USAGE, "the thunk imports unknown ordinals");
     /* H8: the gamepad, through XAPI HLE (USB has no devices). Before the first thread. */

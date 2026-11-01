@@ -186,6 +186,28 @@ static void test_script(void) {
     CHECK(x.thumb_ly == 0 && x.thumb_lx == 0);
     CHECK(input_script_parse("t=1s:LS_FORWARD", &s, err, sizeof err) == -1);
 
+    /* Live presses: times count from now, and presses that are over make room. */
+    {
+        input_script_t live, add;
+        int i;
+        memset(&live, 0, sizeof live);
+        CHECK(input_script_parse("t=0p:X@5p,t=10p:Y", &add, err, sizeof err) == 0);
+        CHECK(input_script_append(&live, &add, 50000, 1000) == 0 && live.count == 2);
+        CHECK(live.events[0].at_ms == 1000 && live.events[1].at_ms == 1010);
+        memset(&x, 0, sizeof x);
+        input_script_apply(&live, 50000, 1002, &x);
+        CHECK(x.analog[XPAD_X] == 255 && x.analog[XPAD_Y] == 0);
+        CHECK(input_script_parse("t=1s:A", &add, err, sizeof err) == 0);
+        CHECK(input_script_append(&live, &add, 60000, 1006) == 0 && live.count == 2); /* X is over */
+        CHECK(live.events[1].at_ms == 61000 && !live.events[1].polls);
+        for (i = 0; i < INPUT_SCRIPT_MAX; i++) { /* full of presses still to come */
+            live.events[i] = add.events[0];
+            live.events[i].at_ms = 999999;
+        }
+        live.count = INPUT_SCRIPT_MAX;
+        CHECK(input_script_append(&live, &add, 0, 0) == -1 && live.count == INPUT_SCRIPT_MAX);
+    }
+
     /* "p" unit: gamepad reads, with their own default hold; the ms clock does not count. */
     CHECK(input_script_parse("t=100p:START,t=200p:A@3p,t=1s:B", &s, err, sizeof err) == 0);
     CHECK(s.count == 3 && s.events[0].polls && s.events[0].at_ms == 100);

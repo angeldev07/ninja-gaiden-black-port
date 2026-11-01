@@ -16,6 +16,8 @@
 #ifndef NGB_ACH_H
 #define NGB_ACH_H
 
+#include <stddef.h>
+
 #include "../xbe.h"
 
 void ngb_ach_init(const xbe_t *xbe);
@@ -23,6 +25,8 @@ void ngb_ach_tick(void);
 void ngb_ach_screenshot(void);
 /* The game wrote one of its saves (kernel NtWriteFile under UDATA): a run checkpoint. */
 void ngb_ach_game_saved(void);
+/* One line on the game's state, for the remote session (remote.c). */
+void ngb_ach_status(char *out, size_t n);
 void ngb_ach_shutdown(void);
 
 #endif

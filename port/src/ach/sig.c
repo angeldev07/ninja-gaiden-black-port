@@ -11,6 +11,11 @@
  * chapter in the builds seen (PAL and NTSC-U); the caller checks what it points to. So does the
  * stage end state, which is only taken when the code stores 0x80 (game over) into it, as the PAL
  * routines that end a stage do (FUN_002e3f60, FUN_002ff940).
+ *
+ * The game keeps 24 sums of its own variables (FUN_00164e70) and sends the player back to the
+ * title when one changes without its flag set (FUN_00164db0). The flags are found in the routine
+ * that hands Golden Scarabs to Muramasa (PAL FUN_00187400), which sets group 7's:
+ *     mov ecx, [scarabs]; add ecx, eax; cmp ecx, 50; mov dl, 1; mov [scarabs], ecx; mov [flag 7], dl
  */
 #include "sig.h"
 
@@ -99,5 +104,13 @@ int ach_find_vars(const xbe_t *xbe, ach_vars *out) {
     out->player = out->chapter + 0x3C8;
     if (stores_of_0x80(t, tsize, out->chapter - 0x240) >= 4)
         out->stage_end = out->chapter - 0x240;
+    {
+        uint8_t give[23] = {0x8B, 0x0D, 0, 0, 0, 0, 0x03, 0xC8, 0x83, 0xF9, 0x32, 0xB2, 0x01,
+                            0x89, 0x0D, 0, 0, 0, 0, 0x88, 0x15};
+        memcpy(give + 2, &out->scarabs, 4);
+        memcpy(give + 15, &out->scarabs, 4);
+        if ((at = find(t, 0, tsize, give, 21)) >= 0 && (size_t)at + 25 <= tsize)
+            out->checks = rd32(t + at + 21) - 7;
+    }
     return 0;
 }

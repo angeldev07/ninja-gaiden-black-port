@@ -52,6 +52,7 @@ typedef struct settings {
     int update_day;    /* day number of the last check */
     int game_art;   /* [launcher] game_art: art from the user's copy */
     int ach_toast;  /* [achievements] toast: the notice in the game (0: --no-ach-toast) */
+    wchar_t extra_args[256]; /* [advanced] extra_args: appended to PLAY's command line, as they are */
 } settings_t;
 
 typedef struct session {

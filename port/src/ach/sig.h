@@ -28,7 +28,9 @@ typedef struct ach_vars {
     uint32_t health;     /* u16 max health, then u16 health, of player 1 (PAL 0x005B5784) */
     uint32_t ninpo;      /* u16[8] ninpo charges, the max 0x10 bytes lower (PAL 0x005B5754) */
     uint32_t ki;         /* u16 max ki, then u16 ki (PAL 0x005B578C) */
-    uint32_t player;     /* ptr to player 1's object: +4 the move, +0xBBE "defeated one" (PAL 0x00E1349C) */
+    uint32_t player;     /* ptr to player 1's object: +4 the action, +0xBBE "defeated one" (PAL 0x00E1349C) */
+    uint32_t checks;     /* u8[24], the game's "changed on purpose" flags of its anti-tamper sums
+                          * (PAL 0x0081CCB4, FUN_00164db0); 0 if not found */
     uint32_t stage_end;  /* u8: 0x80 game over, 0x81 cleared (PAL 0x00E12E94); 0 if not found */
 } ach_vars;
 

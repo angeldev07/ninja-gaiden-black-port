@@ -135,6 +135,9 @@ int input_script_parse(const char *text, input_script_t *out, char *err, size_t 
 /* Adds to `out` the presses active at `now_ms` or at read number `now_polls`. */
 void input_script_apply(const input_script_t *script, uint32_t now_ms, uint32_t now_polls,
                         xbox_gamepad_t *out);
+/* Adds `add` (times counted from now: `now_ms`, or `now_polls` for "p" times) to `live`, after
+ * dropping the presses of `live` that are over. -1 (and `live` unchanged) if they do not fit. */
+int input_script_append(input_script_t *live, const input_script_t *add, uint32_t now_ms, uint32_t now_polls);
 
 /* xapi_hle.c (loader) --------------------------------------------------------------- */
 
@@ -146,3 +149,6 @@ int ngb_input_install(const char *symbols_csv, const char *script, int host_inpu
 void ngb_input_summary(void);
 /* Gamepad reads of port 0 so far: the clock of "p" times in --input-script. */
 uint32_t ngb_input_polls(void);
+/* Presses for the running game, times counted from now (the remote session, remote.c). 0, or -1
+ * and the reason in `err`. Works with or without --input-script and host input. */
+int ngb_input_inject(const char *script, char *err, size_t errlen);
