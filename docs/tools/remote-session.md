@@ -31,7 +31,8 @@ a fight with enemies around Ryu. Every save sits at a save statue with no enemy 
 | Command | What it does |
 | --- | --- |
 | `input <script>` | Presses for the game now, in the `--input-script` syntax, with times counted from now. They add up with the player's pad. |
-| `trace on\|off` | `--ach-trace`: the log lines for the action byte, defeats, health and ki. It also writes `runs\ach-trace-player.bin` (player 1's object every game frame, 20,000 frames at most, about 60 MB) and one capture the first time each action id shows. |
+| `trace on\|off` | `--ach-trace`: events for the pad (what the game read), the action byte, defeats, hits and ki. It also writes `runs\ach-trace-player-NNN.bin`: per game frame, the poll, play time, defeats, ki and pad, then player 1's object. A new file starts every 20,000 frames (about 60 MB) and at every `trace on`. It also takes one capture the first time each action id shows. |
+| `events` | The trace events not read yet, oldest first, as many as fit in one line: `N left: @poll pad X+A \| @poll state 0x56 \| …`. The log itself is locked while the game runs. |
 | `god on\|off` | Keeps player 1's health at its max (below). |
 | `shot` | Captures the next frame to `runs\shots`, as F12 does. |
 | `status` | Polls, mode, chapter, difficulty, play time, health, ki, action, melee weapon, defeats, and the trace and god switches. |
