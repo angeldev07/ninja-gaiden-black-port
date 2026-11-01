@@ -144,6 +144,16 @@ static void read_gamepad(xbox_gamepad_t *out) {
     }
 }
 
+void ngb_input_last(xbox_gamepad_t *out) {
+    if (!g_ready) {
+        memset(out, 0, sizeof *out);
+        return;
+    }
+    EnterCriticalSection(&g_lock);
+    *out = g_last;
+    LeaveCriticalSection(&g_lock);
+}
+
 int ngb_input_inject(const char *script, char *err, size_t errlen) {
     static input_script_t add;
     int r;

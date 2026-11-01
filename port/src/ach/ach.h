@@ -27,6 +27,10 @@ void ngb_ach_screenshot(void);
 void ngb_ach_game_saved(void);
 /* One line on the game's state, for the remote session (remote.c). */
 void ngb_ach_status(char *out, size_t n);
+/* --ach-trace on or off; turning it on starts a new object file. */
+void ngb_ach_set_trace(int on);
+/* The --ach-trace events not read yet, oldest first, as many as fit in one line ("N left: ..."). */
+void ngb_ach_events(char *out, size_t n);
 void ngb_ach_shutdown(void);
 
 #endif

@@ -3,6 +3,7 @@
  */
 #include "ach.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,11 +44,10 @@ static int g_last_mission_chapter = -1, g_last_stage_end = -1;
 static int g_run_seen, g_last_mode = -1;
 static uint32_t g_last_play_time, g_last_scarabs;
 static struct {
-    int move, lines;
+    int move;
     uint32_t kills, health, ki;
-    uint16_t ninpo[8];
-    uint8_t seen[256]; /* move ids already captured */
-} g_trace = {-1, 0, 0, 0, 0, {0}, {0}};
+    uint8_t seen[256]; /* state ids already captured */
+} g_trace = {-1, 0, 0, 0, {0}};
 /* The story run followed for the challenge achievements (rules.h, ACH_RUN_*). */
 static struct {
     int on, difficulty, resync, have_body;
@@ -338,71 +338,144 @@ static void on_story_end(int difficulty) {
 static uint16_t peek16(uint32_t va) { return *(volatile const uint16_t *)(uintptr_t)va; }
 
 #define TRACE_OBJECT 0xBC0u
-#define TRACE_FRAMES 20000
+#define TRACE_FRAMES 20000 /* per file; then the next file */
+#define EVENTS 512
+#define EVENT_LEN 72
 
-/* --ach-trace also writes %NGB_DATA%\runs\ach-trace-player.bin: per game frame, {u32 poll,
- * u32 play time, u32 TRACE_OBJECT} then player 1's object, to find its fields offline. */
-static void trace_object(uint32_t p) {
+/* The events of --ach-trace, kept for the remote session (`events`): the log is locked while the
+ * game runs. Written under g_lock. */
+static char g_events[EVENTS][EVENT_LEN];
+static unsigned g_event_next, g_event_read;
+static int g_trace_restart = 1;
+
+static void trace_event(const char *fmt, ...) {
+    va_list ap;
+    char *e = g_events[g_event_next % EVENTS];
+    int n = snprintf(e, EVENT_LEN, "@%u ", ngb_input_polls());
+    va_start(ap, fmt);
+    vsnprintf(e + n, EVENT_LEN - (size_t)n, fmt, ap);
+    va_end(ap);
+    ngb_log("ach-trace: %s", e);
+    if (++g_event_next - g_event_read > EVENTS)
+        g_event_read = g_event_next - EVENTS;
+}
+
+/* "X+A", "Y+B+LS_UP": the buttons held (analog ones past a light touch) and the left stick. */
+static void pad_text(const xbox_gamepad_t *pad, char *out, size_t n) {
+    static const char *const k_analog[XPAD_ANALOG_COUNT] = {"A", "B", "X", "Y", "BLACK", "WHITE", "LT", "RT"};
+    static const struct {
+        uint16_t bit;
+        const char *name;
+    } k_digital[] = {{XPAD_DPAD_UP, "UP"},       {XPAD_DPAD_DOWN, "DOWN"},    {XPAD_DPAD_LEFT, "LEFT"},
+                     {XPAD_DPAD_RIGHT, "RIGHT"}, {XPAD_START, "START"},       {XPAD_BACK, "BACK"},
+                     {XPAD_LEFT_THUMB, "LTHUMB"}, {XPAD_RIGHT_THUMB, "RTHUMB"}};
+    size_t i, len = 0;
+    out[0] = 0;
+#define PAD_ADD(name) (len += (size_t)snprintf(out + len, n - len, "%s%s", len ? "+" : "", name))
+    for (i = 0; i < XPAD_ANALOG_COUNT && len < n; i++)
+        if (pad->analog[i] > 0x30)
+            PAD_ADD(k_analog[i]);
+    for (i = 0; i < sizeof k_digital / sizeof k_digital[0] && len < n; i++)
+        if (pad->buttons & k_digital[i].bit)
+            PAD_ADD(k_digital[i].name);
+    if (pad->thumb_ly > 16000 && len < n)
+        PAD_ADD("LS_UP");
+    if (pad->thumb_ly < -16000 && len < n)
+        PAD_ADD("LS_DOWN");
+    if (pad->thumb_lx < -16000 && len < n)
+        PAD_ADD("LS_LEFT");
+    if (pad->thumb_lx > 16000 && len < n)
+        PAD_ADD("LS_RIGHT");
+#undef PAD_ADD
+    if (!out[0])
+        snprintf(out, n, "-");
+}
+
+/* --ach-trace also writes %NGB_DATA%\runs\ach-trace-player-NNN.bin: per game frame a
+ * trace_head, then player 1's object, to find its fields offline; a new file every TRACE_FRAMES
+ * frames and at every "trace on". */
+typedef struct trace_head {
+    uint32_t poll, play_time, size, defeats, ki; /* ki: u16 max, then u16 ki */
+    uint16_t buttons;
+    uint8_t analog[XPAD_ANALOG_COUNT];
+    int16_t thumb_lx, thumb_ly;
+} trace_head;
+
+static void trace_object(uint32_t p, const xbox_gamepad_t *pad) {
     static FILE *f;
     static uint32_t last_time = ~0u, frames;
-    uint32_t head[3];
+    static unsigned file_no;
+    trace_head head;
     char path[MAX_PATH];
     const char *data = getenv("NGB_DATA");
-    if (!p || !readable(p, TRACE_OBJECT) || frames >= TRACE_FRAMES || peek32(g_va.play_time) == last_time)
-        return;
-    if (!f) {
-        snprintf(path, sizeof path, "%s\\runs\\ach-trace-player.bin", data && *data ? data : ".");
-        if ((f = fopen(path, "wb")) == NULL) {
-            frames = TRACE_FRAMES;
-            return;
-        }
-        ngb_log("ach-trace: player object frames to %s", path);
+    if (g_trace_restart && f) {
+        fclose(f);
+        f = NULL;
     }
-    last_time = head[1] = peek32(g_va.play_time);
-    head[0] = ngb_input_polls();
-    head[2] = TRACE_OBJECT;
-    fwrite(head, sizeof head, 1, f);
+    if (g_trace_restart)
+        frames = 0;
+    g_trace_restart = 0;
+    if (!p || !readable(p, TRACE_OBJECT) || peek32(g_va.play_time) == last_time)
+        return;
+    if (f && frames >= TRACE_FRAMES) {
+        fclose(f);
+        f = NULL;
+        frames = 0;
+    }
+    if (!f) {
+        snprintf(path, sizeof path, "%s\\runs\\ach-trace-player-%03u.bin", data && *data ? data : ".", ++file_no);
+        if ((f = fopen(path, "wb")) == NULL)
+            return;
+        trace_event("player object frames to %s", path);
+    }
+    memset(&head, 0, sizeof head);
+    last_time = head.play_time = peek32(g_va.play_time);
+    head.poll = ngb_input_polls();
+    head.size = TRACE_OBJECT;
+    head.defeats = peek32(g_va.kills);
+    head.ki = peek32(g_va.ki);
+    head.buttons = pad->buttons;
+    memcpy(head.analog, pad->analog, sizeof head.analog);
+    head.thumb_lx = pad->thumb_lx;
+    head.thumb_ly = pad->thumb_ly;
+    fwrite(&head, sizeof head, 1, f);
     fwrite((const void *)(uintptr_t)p, TRACE_OBJECT, 1, f);
-    if (++frames % 600 == 0 || frames == TRACE_FRAMES)
+    if (++frames % 120 == 0)
         fflush(f);
 }
 
 /* --ach-trace: what the phase 2 detectors will need, as it changes. */
 static void trace_tick(void) {
+    static char last_pad[64] = "-";
     uint32_t p = readable(g_va.player, 4) ? peek32(g_va.player) : 0, kills, health, ki;
-    int move = p && readable(p, 0xBC0) ? peek8(p + 4) : -1, i, ninpo_changed = 0;
-    trace_object(move >= 0 ? p : 0);
-    if (g_trace.lines > 20000)
-        return;
+    int move = p && readable(p, 0xBC0) ? peek8(p + 4) : -1;
+    xbox_gamepad_t pad;
+    char pad_now[64];
+    ngb_input_last(&pad);
+    trace_object(move >= 0 ? p : 0, &pad);
+    pad_text(&pad, pad_now, sizeof pad_now);
+    if (strcmp(pad_now, last_pad)) {
+        trace_event("pad %s", pad_now);
+        snprintf(last_pad, sizeof last_pad, "%s", pad_now);
+    }
     kills = peek32(g_va.kills);
     health = peek32(g_va.health);
     ki = peek32(g_va.ki);
-    for (i = 0; i < 8; i++)
-        if (peek16(g_va.ninpo + i * 2) != g_trace.ninpo[i]) {
-            g_trace.ninpo[i] = peek16(g_va.ninpo + i * 2);
-            ninpo_changed = 1;
-        }
     if (move != g_trace.move) {
         int first = move >= 0 && !g_trace.seen[move];
-        ngb_log("ach-trace: move 0x%02X (weapon 0x%04X, play time %u)%s", move, peek16(g_va.weapon),
-                peek32(g_va.play_time), first ? ", first time: captured" : "");
-        if (first) { /* one picture per move id, to name them */
+        trace_event("state 0x%02X%s", move, first ? " (first time: captured)" : "");
+        if (first) { /* one picture per state id, to name them */
             g_trace.seen[move] = 1;
             gfx_request_shot();
         }
     }
     if (kills != g_trace.kills)
-        ngb_log("ach-trace: kills %u, move 0x%02X, weapon 0x%04X, combo %u", kills, move, peek16(g_va.weapon),
-                p ? peek16(p + 0x60E) : 0);
-    if (health != g_trace.health)
-        ngb_log("ach-trace: health %u / %u", health >> 16, health & 0xFFFF);
+        trace_event("defeats %u (state 0x%02X, weapon 0x%04X, combo %u)", kills, move, peek16(g_va.weapon),
+                    p ? peek16(p + 0x60E) : 0);
+    if ((health >> 16) < (g_trace.health >> 16) && (health & 0xFFFF) == (g_trace.health & 0xFFFF))
+        trace_event("hit: health %u / %u", health >> 16, health & 0xFFFF);
     if (ki != g_trace.ki)
-        ngb_log("ach-trace: ki %u / %u", ki >> 16, ki & 0xFFFF);
-    if (ninpo_changed)
-        ngb_log("ach-trace: ninpo %u %u %u %u %u %u %u %u", g_trace.ninpo[0], g_trace.ninpo[1], g_trace.ninpo[2],
-                g_trace.ninpo[3], g_trace.ninpo[4], g_trace.ninpo[5], g_trace.ninpo[6], g_trace.ninpo[7]);
-    g_trace.lines += (move != g_trace.move) + (kills != g_trace.kills) + (health != g_trace.health) +
-                     (ki != g_trace.ki) + ninpo_changed;
+        trace_event("ki %u / %u", ki >> 16, ki & 0xFFFF);
     g_trace.move = move;
     g_trace.kills = kills;
     g_trace.health = health;
@@ -581,6 +654,29 @@ void ngb_ach_status(char *out, size_t n) {
              peek32(g_va.play_time), h >> 16, h & 0xFFFF, k >> 16, k & 0xFFFF,
              p && readable(p + 4, 1) ? peek8(p + 4) : 0xFFu, peek16(g_va.weapon), peek32(g_va.kills),
              g_ngb_opts.ach_trace, g_ngb_opts.ach_god);
+}
+
+void ngb_ach_set_trace(int on) {
+    AcquireSRWLockExclusive(&g_lock);
+    if (on && !g_ngb_opts.ach_trace)
+        g_trace_restart = 1; /* a new object file */
+    g_ngb_opts.ach_trace = on;
+    ReleaseSRWLockExclusive(&g_lock);
+}
+
+void ngb_ach_events(char *out, size_t n) {
+    size_t len;
+    int count = 0;
+    AcquireSRWLockExclusive(&g_lock);
+    len = (size_t)snprintf(out, n, "%u left:", g_event_next - g_event_read);
+    while (g_event_read != g_event_next) {
+        const char *e = g_events[g_event_read % EVENTS];
+        if (len + strlen(e) + 4 >= n)
+            break;
+        len += (size_t)snprintf(out + len, n - len, "%s %s", count++ ? " |" : "", e);
+        g_event_read++;
+    }
+    ReleaseSRWLockExclusive(&g_lock);
 }
 
 void ngb_ach_shutdown(void) {

@@ -52,13 +52,22 @@ static void command(HANDLE pipe, char *line) {
             reply(pipe, "ok");
         }
     } else if (!strcmp(line, "trace") || !strcmp(line, "god")) {
-        int *flag = !strcmp(line, "trace") ? &g_ngb_opts.ach_trace : &g_ngb_opts.ach_god;
-        if (on_off(arg, flag)) {
+        int on = 0;
+        if (on_off(arg, &on)) {
             reply(pipe, "error expected on or off");
         } else {
+            if (!strcmp(line, "trace"))
+                ngb_ach_set_trace(on);
+            else
+                g_ngb_opts.ach_god = on;
             ngb_log("remote: %s %s", line, arg);
             reply(pipe, "ok");
         }
+    } else if (!strcmp(line, "events")) {
+        char ev[LINE_MAX_ - 8];
+        ngb_ach_events(ev, sizeof ev);
+        snprintf(out, sizeof out, "ok %s", ev);
+        reply(pipe, out);
     } else if (!strcmp(line, "shot")) {
         gfx_request_shot();
         reply(pipe, "ok the next frame goes to %NGB_DATA%\\runs\\shots");
@@ -68,7 +77,7 @@ static void command(HANDLE pipe, char *line) {
         snprintf(out, sizeof out, "ok polls %u %s", ngb_input_polls(), st);
         reply(pipe, out);
     } else if (!strcmp(line, "help") || !*line) {
-        reply(pipe, "ok commands: input <script, times from now>, trace on|off, god on|off, shot, status");
+        reply(pipe, "ok commands: input <script, times from now>, trace on|off, events, god on|off, shot, status");
     } else {
         snprintf(out, sizeof out, "error unknown command '%.60s' (help)", line);
         reply(pipe, out);

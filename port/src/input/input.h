@@ -152,3 +152,5 @@ uint32_t ngb_input_polls(void);
 /* Presses for the running game, times counted from now (the remote session, remote.c). 0, or -1
  * and the reason in `err`. Works with or without --input-script and host input. */
 int ngb_input_inject(const char *script, char *err, size_t errlen);
+/* The last gamepad state the game read (pad, keyboard and scripts merged). */
+void ngb_input_last(xbox_gamepad_t *out);
