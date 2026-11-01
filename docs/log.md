@@ -1129,3 +1129,17 @@ Details in [[gpu-nv2a]].
   Art of the Inferno (0x009C). 9 kills with the sword and 4 Inferno casts gave "Disciple of the Dragon" 9 and "Rain of
   Fire" (now 100 fire ninpo casts, the owner's call) 4.
 - The Izuna Drop and Flying Swallow counters stay out until their moves are found in the game's move tables.
+
+## [2026-10-31] ingest | Story challenges: first look, left for later
+- The owner explained the story "challenges": a karma HUD (Karma, Combo, Kill, Time) shows up in set places, and
+  enemies come in waves until a total (the stadium, from chapter 12 to 15: 120 Vigoorian Berserkers on Master
+  Ninja). Clearing one gives a reward. "The Arena" (#12) and "Untouchable" (#13) are this challenge, not a mission.
+- Image dumps through the remote session (`dump`), taken before the challenge, at Kill 0, 1 and 2 (modified build,
+  chapter 12, Hard):
+  - only the chapter kill count (`0x005893F0`) and a byte in a pool of dynamic objects (`0x00810C69`) followed
+    0, 0, 1, 2;
+  - no code refers to that pool's addresses directly;
+  - entering the area changes too much memory to single out an "active" flag or the target.
+- Finding the challenge state needs a clear (the completion and reward) or the code that draws the karma HUD. The
+  owner chose only deterministic detectors for now, so #12 and #13 stay out with #15, #18 and #22. The dumps were
+  deleted.
