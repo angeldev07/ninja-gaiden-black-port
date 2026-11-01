@@ -38,12 +38,18 @@ SAVE_META: Final = "SaveMeta.xbx"
 _PARTITION: Final = ("runs", "hdd", "partition1")
 _NAME_RE: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
-# Title screen to the load menu (START five times), then A until the only save is loaded and the
-# "continue" prompts are past. Gamepad polls (`p`), the units of the loader's --input-script.
+# Title screen to the load menu (START five times), A through the menu to the only save and its
+# confirmation, then X: the story text shown while the chapter loads waits for "Proceed" (X) once it
+# is done. The load takes 9,000 to 13,000 polls (the game reads the pad less often while loading),
+# so X keeps coming until poll 16000; in gameplay it is only a light attack. No A once the save is
+# loaded: Ryu stands at the save statue, where A opens its menu. Gamepad polls (`p`), the units of
+# the loader's --input-script; scripted moves should start at GAMEPLAY_POLL.
 LOAD_SCRIPT: Final = ",".join(
     [f"t={t}p:START" for t in (200, 350, 500, 650, 800)]
-    + [f"t={t}p:A" for t in range(1000, 5001, 250)]
+    + [f"t={t}p:A" for t in range(1000, 3001, 250)]
+    + [f"t={t}p:X" for t in range(3500, 16001, 250)]
 )
+GAMEPLAY_POLL: Final = 16500
 
 
 class CheckpointError(Exception):

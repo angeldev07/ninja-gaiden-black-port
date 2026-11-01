@@ -183,8 +183,14 @@ python -I -m ngb_tools.checkpoint run ch05 --input "t=6000p:Y" -- --window --ach
   and a fresh copy of the save. It starts again from the checkpoint every time, so a run never changes it, and the
   achievements file there is reset too.
 - With one save, the load menu opens on it. `run` passes the loader `--input-script` with the route from the title
-  screen to the loaded save (START at 200 to 800 polls, A every 250 polls to 5000), then `--input`, and everything
-  after `--`. Gameplay starts around poll 5500. `VERIFIED` with the owner's PAL saves (2026-10-31).
+  screen to the loaded save, then `--input`, and everything after `--`. The route: START at 200 to 800 polls, A every
+  250 polls to 3000 (menu, save, confirmation), then X every 250 polls to 16000: the story text shown while the
+  chapter loads waits for "Proceed" (X). Scripted moves start at poll 16500 (`GAMEPLAY_POLL`). `VERIFIED` with the
+  owner's PAL saves (2026-10-31).
+- Gotchas found on the way: every save is made at a save statue, so an A after the load opens the statue's menu (and
+  can even save); the load takes 9,000 to 13,000 polls because the game reads the pad less often while loading, so
+  poll times are not a steady clock there. `LS_UP`, `LS_DOWN`, `LS_LEFT` and `LS_RIGHT` in `--input-script` push the
+  left stick, to walk away from the statue.
 - Saves are the player's data, not the game's; they stay in `NGB_DATA`, never in the repo.
 
 ### Headless analysis of `default.xbe` (H5, `tools/ghidra/`)
