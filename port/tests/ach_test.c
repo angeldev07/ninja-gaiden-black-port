@@ -23,8 +23,10 @@ static int g_fail;
 
 static void test_catalog(void) {
     int i, j, l;
-    CHECK(ach_catalog_count == 27);
-    CHECK(ach_total_points() == 1680);
+    CHECK(ach_catalog_count == 20 && ach_parked_count == 7);
+    CHECK(ach_total_points() == 1250); /* the parked ones do not count */
+    for (i = 0; i < ach_parked_count; i++)
+        CHECK(ach_find(ach_parked[i].id) == NULL);
     for (i = 0; i < ach_catalog_count; i++) {
         const ach_def *a = &ach_catalog[i];
         CHECK(strlen(a->id) < 32);

@@ -891,7 +891,7 @@ static void present_and_pace(void) {
             user = gfx_take_shot_request(path, sizeof path); /* F12 */
         if (!pgl_flip(&g_r, shot || user ? path : NULL)) {
             ngb_log("    · gfx: capture of frame %u -> %s (%.1f fps, GL)", g_flips, path, gfx_fps());
-            if (user)
+            if (user == 1) /* the player's F12, not a capture the port asked for */
                 ngb_ach_screenshot();
         } else if (user)
             ngb_log("    · gfx: could not save the screenshot %s", path);

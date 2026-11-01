@@ -33,30 +33,15 @@ const ach_def ach_catalog[] = {
      S("Clear the Eternal Legend mission.", "Supera la misión Eternal Legend.")},
     {"mission-eternal-legend-mn", ACH_CAT_MISSION, 150, 0, 0, S("Legend Without End", "Leyenda sin final"),
      S("Clear Eternal Legend on Master Ninja.", "Supera Eternal Legend en Master Ninja.")},
-    {"mission-stadium-mn", ACH_CAT_MISSION, 100, 0, 0, S("The Arena", "La arena"),
-     S("Clear the stadium challenge on Master Ninja.", "Supera el desafío del estadio en Master Ninja.")},
-    {"mission-stadium-untouched", ACH_CAT_CHALLENGE, 150, 0, 0, S("Untouchable", "Intocable"),
-     S("Clear the stadium on Master Ninja without healing or taking a hit.",
-       "Supera el estadio en Master Ninja sin curarte ni recibir un golpe.")},
     {"missions-all-mn", ACH_CAT_MISSION, 150, 0, 46, S("Every Trial", "Todas las pruebas"),
      S("Clear all 46 missions on Master Ninja.", "Supera las 46 misiones en Master Ninja.")},
-    {"izuna-1000", ACH_CAT_COUNTER, 50, 0, 1000, S("A Thousand Falls", "Mil caídas"),
-     S("Finish 1,000 enemies with the Izuna Drop.", "Remata 1.000 enemigos con el Izuna Drop.")},
     {"dragon-sword-500", ACH_CAT_COUNTER, 25, 0, 500, S("Disciple of the Dragon", "Discípulo del dragón"),
      S("Defeat 500 enemies with the Dragon Sword.", "Derrota a 500 enemigos con la Espada del Dragón.")},
     {"fire-ninpo-100", ACH_CAT_COUNTER, 25, 0, 100, S("Rain of Fire", "Lluvia de fuego"),
      S("Cast fire ninpo 100 times: The Art of the Fire Wheels or of the Inferno.",
        "Lanza 100 ninpo de fuego: The Art of the Fire Wheels o The Art of the Inferno.")},
-    {"flying-swallow-500", ACH_CAT_COUNTER, 20, 0, 500, S("Flight of the Swallow", "Vuelo de la golondrina"),
-     S("Use the Flying Swallow 500 times.", "Usa el Flying Swallow 500 veces.")},
     {"golden-scarabs", ACH_CAT_COLLECTION, 50, 0, 50, S("Golden Scarabs", "Escarabajos dorados"),
      S("Hand all 50 Golden Scarabs to Muramasa.", "Entrega los 50 Escarabajos Dorados a Muramasa.")},
-    {"all-weapons", ACH_CAT_COLLECTION, 30, 0, 0, S("Full Arsenal", "Arsenal completo"),
-     S("Obtain every weapon.", "Consigue todas las armas.")},
-    {"weapons-max", ACH_CAT_COLLECTION, 50, 0, 0, S("Master Forge", "Forja maestra"),
-     S("Raise every weapon to its top level.", "Lleva todas las armas a su nivel máximo.")},
-    {"boss-no-damage", ACH_CAT_CHALLENGE, 30, 0, 0, S("Not a Scratch", "Sin un rasguño"),
-     S("Defeat a boss without taking damage.", "Derrota a un jefe sin recibir daño.")},
     {"dragon-sword-only", ACH_CAT_CHALLENGE, 100, 1, 0, S("Only the Sword", "Solo la espada"),
      S("Complete the story using only the Dragon Sword.", "Completa la historia usando solo la Espada del Dragón.")},
     {"deaths-100", ACH_CAT_CHALLENGE, 5, 0, 100, S("Always Back Up", "Siempre en pie"),
@@ -70,6 +55,28 @@ const ach_def ach_catalog[] = {
 };
 
 const int ach_catalog_count = (int)(sizeof ach_catalog / sizeof ach_catalog[0]);
+
+/* Designed and agreed, but not shown nor detected yet: what they need is in
+ * docs/target/achievements-design.md. Moving one back into ach_catalog makes it live. */
+const ach_def ach_parked[] = {
+    {"mission-stadium-mn", ACH_CAT_MISSION, 100, 0, 0, S("The Arena", "La arena"),
+     S("Clear the stadium challenge on Master Ninja.", "Supera el desafío del estadio en Master Ninja.")},
+    {"mission-stadium-untouched", ACH_CAT_CHALLENGE, 150, 0, 0, S("Untouchable", "Intocable"),
+     S("Clear the stadium on Master Ninja without healing or taking a hit.",
+       "Supera el estadio en Master Ninja sin curarte ni recibir un golpe.")},
+    {"izuna-1000", ACH_CAT_COUNTER, 50, 0, 1000, S("A Thousand Falls", "Mil caídas"),
+     S("Finish 1,000 enemies with the Izuna Drop.", "Remata 1.000 enemigos con el Izuna Drop.")},
+    {"flying-swallow-500", ACH_CAT_COUNTER, 20, 0, 500, S("Flight of the Swallow", "Vuelo de la golondrina"),
+     S("Use the Flying Swallow 500 times.", "Usa el Flying Swallow 500 veces.")},
+    {"all-weapons", ACH_CAT_COLLECTION, 30, 0, 0, S("Full Arsenal", "Arsenal completo"),
+     S("Obtain every weapon.", "Consigue todas las armas.")},
+    {"weapons-max", ACH_CAT_COLLECTION, 50, 0, 0, S("Master Forge", "Forja maestra"),
+     S("Raise every weapon to its top level.", "Lleva todas las armas a su nivel máximo.")},
+    {"boss-no-damage", ACH_CAT_CHALLENGE, 30, 0, 0, S("Not a Scratch", "Sin un rasguño"),
+     S("Defeat a boss without taking damage.", "Derrota a un jefe sin recibir daño.")},
+};
+
+const int ach_parked_count = (int)(sizeof ach_parked / sizeof ach_parked[0]);
 
 const ach_def *ach_find(const char *id) {
     int i;

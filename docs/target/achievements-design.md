@@ -18,7 +18,11 @@ port's presenter, recorded in the data folder and listed on a new launcher page.
 
 ## The list
 
-Points are "honor" (誉), 1,680 in all. "Source" is what detects it: **RAM** (variables already found), **RAM-R**
+**Shown today: 20 of the 27, 1,250 honor.** The owner's call (2026-10-31): only achievements the port detects
+reliably are listed. #12, #13, #15, #18, #20, #21 and #22 are parked in `ach_parked` (`port/src/ach/catalog.c`): not
+listed, not counted, not detected. Moving one back into `ach_catalog` makes it live once its detector exists.
+
+Points are "honor" (誉), 1,680 for the full 27. "Source" is what detects it: **RAM** (variables already found), **RAM-R**
 (RAM, but the variable still has to be found), **Hook** (phase 2: a guest function hook or a per-frame state machine
 over many variables).
 
@@ -170,14 +174,14 @@ points add up and both languages are filled.
 From the mockup "Launcher · página Logros", in the launcher's own system ([[launcher-laca-design]]):
 
 - A tab **ACHIEVEMENTS / LOGROS** between Controls and Advanced (page number 05).
-- Left column: ghost number, title with 誉, one sentence, totals (unlocked n / 27, honor n / 1,680) with a 2 px
+- Left column: ghost number, title with 誉, one sentence, totals (unlocked n / listed, honor n / listed total) with a 2 px
   vermilion progress rule, and filters: All, Story and rank, Missions, Counters and collection, Challenges and port.
 - Right column: hairline rows (44 px tile with the achievement's kanji, name, description, progress rule or state,
   points), newest unlocks first, then in progress, then locked; the mouse wheel scrolls. Secret ones show as "Secret
   achievement" until unlocked, or in full with the "Show secrets" switch.
 - Tile glyphs (Shippori subset): story 龍, rank 極, missions 試, counters 数, collection 蒐, challenges 挑, port 灯.
 - A switch "Achievement notices in the game" on the same page (`[achievements] toast=1` in `ngb.ini`).
-- The Play page's spec column shows "Achievements n / 27".
+- The Play page's spec column shows "Achievements n / listed".
 
 ## Out of scope
 

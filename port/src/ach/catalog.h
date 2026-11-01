@@ -34,8 +34,13 @@ typedef struct ach_def {
     const wchar_t *name[ACH_LANGS], *desc[ACH_LANGS];
 } ach_def;
 
+/* The achievements the port detects, the only ones listed and counted. */
 extern const ach_def ach_catalog[];
 extern const int ach_catalog_count;
+/* Designed but not detected yet (their variables or moves are still to be found); ach_find
+ * does not see them. */
+extern const ach_def ach_parked[];
+extern const int ach_parked_count;
 
 /* The entry with that id, or NULL. */
 const ach_def *ach_find(const char *id);
